@@ -22,7 +22,7 @@
 What's New in ATS v10.x
 =======================
 
-This version of ATS includes over <x> commits, from <y> pull requests. A total of <z> contributors
+This version of |ATS| includes over <x> commits, from <y> pull requests. A total of <z> contributors
 have participated in this development cycle.
 
 .. toctree::
@@ -30,6 +30,11 @@ have participated in this development cycle.
 
 New Features
 ------------
+
+``verify_global_plugin`` and ``verify_remap_plugin`` Maintenance Commands
+    ``verify_global_plugin`` and ``verify_remap_plugin` are new maintenance
+    commands added to |TS|. These load a plugin's shared object file and
+    verify it meets minimal global or remap plugin API requirements.
 
 New or modifed Configurations
 -----------------------------

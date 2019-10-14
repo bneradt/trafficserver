@@ -69,8 +69,28 @@ PluginRegInfo::~PluginRegInfo()
   }
 }
 
+bool
+plugin_dso_load(const char *path, void *&handle, void *&init, std::string &error)
+{
+  handle = dlopen(path, RTLD_NOW);
+  if (!handle) {
+    error.assign("unable to load '").append(path).append("': ").append(dlerror());
+    Error(error.c_str());
+    return false;
+  }
+
+  init = dlsym(handle, "TSPluginInit");
+  if (!init) {
+    error.assign("unable to find TSPluginInit function in '").append(path).append("': ").append(dlerror());
+    Error(error.c_str());
+    return false;
+  }
+
+  return true;
+}
+
 static bool
-plugin_load(int argc, char *argv[], bool validateOnly)
+single_plugin_init(int argc, char *argv[], bool validateOnly)
 {
   char path[PATH_NAME_MAX];
   init_func_t init;
@@ -97,12 +117,16 @@ plugin_load(int argc, char *argv[], bool validateOnly)
     REC_ReadConfigInteger(elevate_access, "proxy.config.plugin.load_elevated");
     ElevateAccess access(elevate_access ? ElevateAccess::FILE_PRIVILEGE : 0);
 
-    void *handle = dlopen(path, RTLD_NOW);
-    if (!handle) {
+    void *handle, *initptr;
+    std::string error;
+    bool loaded = plugin_dso_load(path, handle, initptr, error);
+    init        = reinterpret_cast<init_func_t>(initptr);
+
+    if (!loaded && validateOnly) {
       if (validateOnly) {
         return false;
       }
-      Fatal("unable to load '%s': %s", path, dlerror());
+      Fatal("%s", error.c_str());
     }
 
     // Allocate a new registration structure for the
@@ -111,16 +135,6 @@ plugin_load(int argc, char *argv[], bool validateOnly)
     plugin_reg_current              = new PluginRegInfo;
     plugin_reg_current->plugin_path = ats_strdup(path);
     plugin_reg_current->dlh         = handle;
-
-    init = reinterpret_cast<init_func_t>(dlsym(plugin_reg_current->dlh, "TSPluginInit"));
-    if (!init) {
-      delete plugin_reg_current;
-      if (validateOnly) {
-        return false;
-      }
-      Fatal("unable to find TSPluginInit function in '%s': %s", path, dlerror());
-      return false; // this line won't get called since Fatal brings down ATS
-    }
 
 #if (!defined(kfreebsd) && defined(freebsd)) || defined(darwin)
     optreset = 1;
@@ -302,7 +316,7 @@ plugin_init(bool validateOnly)
     } else {
       argv[MAX_PLUGIN_ARGS - 1] = nullptr;
     }
-    retVal = plugin_load(argc, argv, validateOnly);
+    retVal = single_plugin_init(argc, argv, validateOnly);
 
     for (i = 0; i < argc; i++) {
       ats_free(vars[i]);

@@ -36,6 +36,7 @@ noinst_LIBRARIES = libhttp_remap.a
 libhttp_remap_a_SOURCES = \
 	AclFiltering.cc \
 	AclFiltering.h \
+	GlobalPluginInfo.cc \
 	RemapConfig.cc \
 	RemapConfig.h \
 	RemapPluginInfo.cc \

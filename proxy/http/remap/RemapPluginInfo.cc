@@ -36,39 +36,6 @@
 #include "tscore/Diags.h"
 #endif
 
-/**
- * @brief helper function that returns the function address from the plugin DSO
- *
- * There can be valid defined DSO symbols that are NULL
- * but when it comes to functions we can assume that
- * if not defined we can return nullptr and a valid address if the are defined.
- * @param symbol function symbol name
- * @param error error messages in case of symbol is not found
- * @return function address or nullptr if not found.
- */
-template <class T>
-T *
-RemapPluginInfo::getFunctionSymbol(const char *symbol)
-{
-  std::string error; /* ignore the error, return nullptr if symbol not defined */
-  void *address = nullptr;
-  if (getSymbol(symbol, address, error)) {
-    Debug(_tag, "plugin '%s' found symbol '%s'", _configPath.c_str(), symbol);
-  }
-  return reinterpret_cast<T *>(address);
-}
-
-std::string
-RemapPluginInfo::missingRequiredSymbolError(const std::string &pluginName, const char *required, const char *requiring)
-{
-  std::string error;
-  error.assign("plugin ").append(pluginName).append(" missing required function ").append(required);
-  if (requiring) {
-    error.append(" if ").append(requiring).append(" is defined");
-  }
-  return error;
-}
-
 RemapPluginInfo::RemapPluginInfo(const fs::path &configPath, const fs::path &effectivePath, const fs::path &runtimePath)
   : PluginDso(configPath, effectivePath, runtimePath)
 {
@@ -243,7 +210,7 @@ RemapPluginInfo::osResponse(void *ih, TSHttpTxn rh, int os_response_type)
   resetPluginContext();
 }
 
-RemapPluginInfo::~RemapPluginInfo() {}
+RemapPluginInfo::~RemapPluginInfo() = default;
 
 void
 RemapPluginInfo::indicatePreReload()
