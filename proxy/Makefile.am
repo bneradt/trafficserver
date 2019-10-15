@@ -173,3 +173,33 @@ install-data-hook:
 
 clang-tidy-local: $(DIST_SOURCES)
 	$(CXX_Clang_Tidy)
+
+TESTS = $(check_PROGRAMS)
+check_PROGRAMS =  test_Plugin
+
+test_Plugin_CPPFLAGS = $(AM_CPPFLAGS) -I$(abs_top_srcdir)/tests/include
+EXTRA_test_Plugin_DEPENDENCIES = \
+	unit-tests/has_required_plugin_api.la \
+	unit-tests/missing_ts_plugin_init.la
+test_Plugin_LDFLAGS = $(AM_LDFLAGS) -L$(top_builddir)/src/tscore/.libs -ltscore
+test_Plugin_SOURCES = \
+	unit-tests/test_Plugin.cc \
+	unit-tests/plugin_testing_common.cc \
+	Plugin.cc
+
+DSO_LDFLAGS = \
+	-module \
+	-shared \
+	-avoid-version \
+	-export-symbols-regex '^(TSPluginInit)$$'
+
+# Build plugins for unit testing the plugin (re)load.
+pkglib_LTLIBRARIES = \
+	unit-tests/has_required_plugin_api.la \
+	unit-tests/missing_ts_plugin_init.la
+unit_tests_has_required_plugin_api_la_SOURCES = unit-tests/has_required_plugin_api.cc
+unit_tests_has_required_plugin_api_la_LDFLAGS = $(DSO_LDFLAGS)
+unit_tests_has_required_plugin_api_la_CPPFLAGS = $(AM_CPPFLAGS)
+unit_tests_missing_ts_plugin_init_la_SOURCES = unit-tests/missing_ts_plugin_init.cc
+unit_tests_missing_ts_plugin_init_la_LDFLAGS = $(DSO_LDFLAGS)
+unit_tests_missing_ts_plugin_init_la_CPPFLAGS = $(AM_CPPFLAGS)
