@@ -181,7 +181,7 @@ test_Plugin_CPPFLAGS = $(AM_CPPFLAGS) -I$(abs_top_srcdir)/tests/include
 EXTRA_test_Plugin_DEPENDENCIES = \
 	unit-tests/has_required_plugin_api.la \
 	unit-tests/missing_ts_plugin_init.la
-test_Plugin_LDFLAGS = $(AM_LDFLAGS) -L$(top_builddir)/src/tscore/.libs -ltscore
+test_Plugin_LDFLAGS = $(AM_LDFLAGS) -L$(top_builddir)/src/tscore/.libs -ltscore $(top_builddir)/iocore/eventsystem/libinkevent.a $(top_builddir)/iocore/net/libinknet.a
 test_Plugin_SOURCES = \
 	unit-tests/test_Plugin.cc \
 	unit-tests/plugin_testing_common.cc \

@@ -102,6 +102,9 @@ public:
   void indicatePostReload(TSReturnCode reloadStatus) override;
 
 protected:
+  /* Utility to be used only with unit testing */
+  std::string missingRequiredSymbolError(const std::string &pluginName, const char *required, const char *requiring = nullptr);
+  template <class T> T *getFunctionSymbol(const char *symbol);
   void setPluginContext();
   void resetPluginContext();
 

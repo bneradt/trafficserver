@@ -93,7 +93,6 @@ extern "C" int plock(int);
 #include "DiagsConfig.h"
 #include "CoreUtils.h"
 #include "RemapConfig.h"
-#include "GlobalPluginInfo.h"
 #include "RemapPluginInfo.h"
 #include "RemapProcessor.h"
 #include "I_Tasks.h"

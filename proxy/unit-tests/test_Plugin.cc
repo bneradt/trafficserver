@@ -33,12 +33,11 @@
 #include <string>
 
 #include "plugin_testing_common.h"
-#include "../RemapPluginInfo.h"
+#include "../Plugin.h"
 
-thread_local PluginThreadContext *pluginThreadContext;
-
-static void *INSTANCE_HANDLER = (void *)789;
 std::error_code ec;
+
+namespace fs = ts::file;
 
 /* The following are paths that are used commonly in the unit-tests */
 static fs::path sandboxDir     = getTemporaryDir();
@@ -60,14 +59,6 @@ setupSandBox(const fs::path pluginFilename)
   return pluginBuildDir / pluginFilename;
 }
 
-bool
-loadPlugin(RemapPluginUnitTest *plugin, std::string &error, PluginDebugObject *&debugObject)
-{
-  bool result = plugin->load(error);
-  debugObject = plugin->getDebugObject();
-  return result;
-}
-
 SCENARIO("loading remap plugins", "[plugin][core]")
 {
   REQUIRE_FALSE(sandboxDir.empty());
@@ -76,17 +67,20 @@ SCENARIO("loading remap plugins", "[plugin][core]")
 
   GIVEN("a plugin which has only minimum required call back functions")
   {
-    const auto pluginFilename = fs::path("plugin_required_cb.so");
+    const auto pluginFilename = fs::path("has_required_plugin_api.so");
     const auto pluginPath     = setupSandBox(pluginFilename);
 
     WHEN("loading")
     {
-      bool result = loadPlugin(plugin, error, debugObject);
+      void *handle, *initptr;
+      bool loaded = plugin_dso_load(pluginPath.c_str(), handle, initptr, error);
 
       THEN("expect it to successfully load")
       {
-        CHECK(true == result);
+        CHECK(loaded);
         CHECK(error.empty());
+        CHECK(nullptr != handle);
+        CHECK(nullptr != initptr);
       }
       cleanupSandBox();
     }
@@ -94,294 +88,20 @@ SCENARIO("loading remap plugins", "[plugin][core]")
 
   GIVEN("a plugin which is missing the plugin TSREMAP_FUNCNAME_INIT function")
   {
-    fs::path pluginFilename     = fs::path("plugin_missing_init.so");
-    RemapPluginUnitTest *plugin = setupSandBox(pluginFilename);
+    const auto pluginFilename = fs::path("missing_ts_plugin_init.so");
+    const auto pluginPath     = setupSandBox(pluginFilename);
 
     WHEN("loading")
     {
-      bool result = loadPlugin(plugin, error, debugObject);
+      void *handle, *initptr;
+      bool loaded = plugin_dso_load(pluginPath.c_str(), handle, initptr, error);
 
-      THEN("expect it to successfully load")
+      THEN("expect it to fail load")
       {
-        CHECK_FALSE(result);
-        CHECK(error == plugin->getError(TSREMAP_FUNCNAME_INIT));
-      }
-      cleanupSandBox();
-    }
-  }
-
-  GIVEN("a plugin which is missing the TSREMAP_FUNCNAME_DO_REMAP function")
-  {
-    fs::path pluginFilename     = fs::path("plugin_missing_doremap.so");
-    RemapPluginUnitTest *plugin = setupSandBox(pluginFilename);
-
-    WHEN("loading")
-    {
-      bool result = loadPlugin(plugin, error, debugObject);
-
-      THEN("expect it to fail")
-      {
-        CHECK_FALSE(result);
-        CHECK(error == plugin->getError(TSREMAP_FUNCNAME_DO_REMAP));
-      }
-      cleanupSandBox();
-    }
-  }
-
-  GIVEN("a plugin which has TSREMAP_FUNCNAME_NEW_INSTANCE but is missing the TSREMAP_FUNCNAME_DELETE_INSTANCE function")
-  {
-    fs::path pluginFilename     = fs::path("plugin_missing_deleteinstance.so");
-    RemapPluginUnitTest *plugin = setupSandBox(pluginFilename);
-
-    WHEN("loading")
-    {
-      bool result = loadPlugin(plugin, error, debugObject);
-
-      THEN("expect it to fail")
-      {
-        CHECK_FALSE(result);
-        CHECK(error == plugin->getError(TSREMAP_FUNCNAME_DELETE_INSTANCE, TSREMAP_FUNCNAME_NEW_INSTANCE));
-      }
-      cleanupSandBox();
-    }
-  }
-
-  GIVEN("a plugin which has TSREMAP_FUNCNAME_DELETE_INSTANCE but is missing the TSREMAP_FUNCNAME_NEW_INSTANCE function")
-  {
-    fs::path pluginFilename     = fs::path("plugin_missing_newinstance.so");
-    RemapPluginUnitTest *plugin = setupSandBox(pluginFilename);
-
-    WHEN("loading")
-    {
-      bool result = loadPlugin(plugin, error, debugObject);
-
-      THEN("expect it to fail")
-      {
-        CHECK_FALSE(result);
-        CHECK(error == plugin->getError(TSREMAP_FUNCNAME_NEW_INSTANCE, TSREMAP_FUNCNAME_DELETE_INSTANCE));
-      }
-      cleanupSandBox();
-    }
-  }
-}
-
-void
-prepCallTest(bool toFail, PluginDebugObject *debugObject)
-{
-  debugObject->clear();
-  debugObject->fail = toFail; // Tell the mock init to succeed or succeed.
-}
-
-void
-checkCallTest(bool shouldHaveFailed, bool result, const std::string &error, std::string &expectedError, int &called)
-{
-  CHECK(1 == called); // Init was called.
-  if (shouldHaveFailed) {
-    CHECK(false == result);
-    CHECK(error == expectedError); // Appropriate error was returned.
-  } else {
-    CHECK(true == result); // Init succesfull - returned TS_SUCCESS.
-    CHECK(error.empty());  // No error was returned.
-  }
-}
-
-SCENARIO("invoking plugin init", "[plugin][core]")
-{
-  REQUIRE_FALSE(sandboxDir.empty());
-
-  std::string error;
-  PluginDebugObject *debugObject = nullptr;
-
-  GIVEN("plugin init function")
-  {
-    fs::path pluginFilename     = fs::path("plugin_testing_calls.so");
-    RemapPluginUnitTest *plugin = setupSandBox(pluginFilename);
-
-    bool result = loadPlugin(plugin, error, debugObject);
-    CHECK(true == result);
-
-    WHEN("init succeeds")
-    {
-      prepCallTest(/* toFail */ false, debugObject);
-
-      result = plugin->init(error);
-
-      THEN("expect init to be called, success code and no error to be returned")
-      {
-        std::string expectedError;
-
-        checkCallTest(/* shouldHaveFailed */ false, result, error, expectedError, debugObject->initCalled);
-      }
-      cleanupSandBox();
-    }
-
-    WHEN("init fails")
-    {
-      prepCallTest(/* toFail */ true, debugObject);
-
-      result = plugin->init(error);
-
-      THEN("expect init to be called, failure code and an error to be returned")
-      {
-        std::string expectedError;
-        expectedError.assign("failed to initialize plugin ").append(pluginFilename.string()).append(": Init failed");
-
-        checkCallTest(/* shouldHaveFailed */ true, result, error, expectedError, debugObject->initCalled);
-      }
-      cleanupSandBox();
-    }
-  }
-}
-
-SCENARIO("invoking plugin instance init", "[plugin][core]")
-{
-  REQUIRE_FALSE(sandboxDir.empty());
-
-  std::string error;
-  PluginDebugObject *debugObject = nullptr;
-  void *ih                       = nullptr; // Instance handler pointer.
-
-  /* a sample test set of parameters */
-  static const char *args[] = {"arg1", "arg2", "arg3"};
-  static char **ARGV        = const_cast<char **>(args);
-  static char ARGC          = sizeof ARGV;
-
-  GIVEN("an instance init function")
-  {
-    fs::path pluginFilename     = fs::path("plugin_testing_calls.so");
-    RemapPluginUnitTest *plugin = setupSandBox(pluginFilename);
-
-    bool result = loadPlugin(plugin, error, debugObject);
-    CHECK(true == result);
-
-    WHEN("instance init succeeds")
-    {
-      prepCallTest(/* toFail */ false, debugObject);
-      debugObject->input_ih = INSTANCE_HANDLER; /* this is what the plugin instance init will return */
-
-      result = plugin->initInstance(ARGC, ARGV, &ih, error);
-
-      THEN("expect init to be called successfully with no error and expected instance handler")
-      {
-        std::string expectedError;
-
-        checkCallTest(/* shouldHaveFailed */ false, result, error, expectedError, debugObject->initInstanceCalled);
-
-        /* Verify expected handler */
-        CHECK(INSTANCE_HANDLER == ih);
-        /* Plugin received the parameters that we passed */
-        CHECK(ARGC == debugObject->argc);
-        CHECK(ARGV == debugObject->argv);
-        for (int i = 0; i < 3; i++) {
-          CHECK(0 == strcmp(ARGV[i], debugObject->argv[i]));
-        }
-      }
-      cleanupSandBox();
-    }
-
-    WHEN("instance init fails")
-    {
-      prepCallTest(/* toFail */ true, debugObject);
-
-      result = plugin->initInstance(ARGC, ARGV, &ih, error);
-
-      THEN("expect init to be called but failed with expected error and no instance handler")
-      {
-        std::string expectedError;
-        expectedError.assign("failed to create instance for plugin ").append(pluginFilename.string()).append(": Init failed");
-
-        checkCallTest(/* shouldHaveFailed */ true, result, error, expectedError, debugObject->initInstanceCalled);
-
-        /* Ideally instance handler should not be touched in case of failure */
-        CHECK(nullptr == ih);
-        /* Plugin received the parameters that we passed */
-        CHECK(ARGC == debugObject->argc);
-        CHECK(ARGV == debugObject->argv);
-        for (int i = 0; i < 3; i++) {
-          CHECK(0 == strcmp(ARGV[i], debugObject->argv[i]));
-        }
-      }
-      cleanupSandBox();
-    }
-  }
-}
-
-SCENARIO("unloading the plugin", "[plugin][core]")
-{
-  REQUIRE_FALSE(sandboxDir.empty());
-
-  std::string error;
-  PluginDebugObject *debugObject = nullptr;
-
-  GIVEN("a 'done' function")
-  {
-    fs::path pluginFilename     = fs::path("plugin_testing_calls.so");
-    RemapPluginUnitTest *plugin = setupSandBox(pluginFilename);
-
-    bool result = loadPlugin(plugin, error, debugObject);
-    CHECK(true == result);
-
-    WHEN("'done' is called")
-    {
-      debugObject->clear();
-
-      plugin->done();
-
-      THEN("expect it to run") { CHECK(1 == debugObject->doneCalled); }
-      cleanupSandBox();
-    }
-  }
-
-  GIVEN("a 'delete_instance' function")
-  {
-    fs::path pluginFilename     = fs::path("plugin_testing_calls.so");
-    RemapPluginUnitTest *plugin = setupSandBox(pluginFilename);
-
-    bool result = loadPlugin(plugin, error, debugObject);
-    CHECK(true == result);
-
-    WHEN("'delete_instance' is called")
-    {
-      debugObject->clear();
-
-      plugin->doneInstance(INSTANCE_HANDLER);
-
-      THEN("expect it to run and receive the right instance handler")
-      {
-        CHECK(1 == debugObject->deleteInstanceCalled);
-        CHECK(INSTANCE_HANDLER == debugObject->ih);
-      }
-      cleanupSandBox();
-    }
-  }
-}
-
-SCENARIO("config reload", "[plugin][core]")
-{
-  REQUIRE_FALSE(sandboxDir.empty());
-
-  std::string error;
-  PluginDebugObject *debugObject = nullptr;
-
-  GIVEN("a 'config reload' callback function")
-  {
-    fs::path pluginFilename     = fs::path("plugin_testing_calls.so");
-    RemapPluginUnitTest *plugin = setupSandBox(pluginFilename);
-
-    bool result = loadPlugin(plugin, error, debugObject);
-    CHECK(true == result);
-
-    WHEN("'config reload' is called")
-    {
-      debugObject->clear();
-
-      plugin->indicatePreReload();
-      plugin->indicatePostReload(TS_SUCCESS);
-
-      THEN("expect it to run")
-      {
-        CHECK(1 == debugObject->preReloadConfigCalled);
-        CHECK(1 == debugObject->postReloadConfigCalled);
+        CHECK_FALSE(loaded);
+        CHECK_FALSE(error.empty());
+        CHECK(nullptr == handle);
+        CHECK(nullptr == initptr);
       }
       cleanupSandBox();
     }

@@ -39,11 +39,6 @@ namespace fs = ts::file;
 
 #include "tscore/Ptr.h"
 #include "tscpp/util/IntrusiveDList.h"
-#ifdef PLUGIN_DSO_TESTS
-#include "unit-tests/plugin_testing_common.h"
-#else
-#include "tscore/Diags.h"
-#endif
 
 class PluginThreadContext : public RefCountObj
 {
@@ -93,30 +88,6 @@ public:
   int instanceCount();
 
 protected:
-  std::string missingRequiredSymbolError(const std::string &pluginName, const char *required, const char *requiring = nullptr);
-
-  /**
-   * @brief helper function that returns the function address from the plugin DSO
-   *
-   * There can be valid defined DSO symbols that are NULL
-   * but when it comes to functions we can assume that
-   * if not defined we can return nullptr and a valid address if the are defined.
-   * @param symbol function symbol name
-   * @param error error messages in case of symbol is not found
-   * @return function address or nullptr if not found.
-   */
-  template <class T>
-  T *
-  getFunctionSymbol(const char *symbol)
-  {
-    std::string error; /* ignore the error, return nullptr if symbol not defined */
-    void *address = nullptr;
-    if (getSymbol(symbol, address, error)) {
-      Debug(_tag, "plugin '%s' found symbol '%s'", _configPath.c_str(), symbol);
-    }
-    return reinterpret_cast<T *>(address);
-  }
-
   void clean(std::string &error);
 
   fs::path _configPath;    /** @brief the name specified in the config file */

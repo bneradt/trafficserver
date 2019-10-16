@@ -29,69 +29,19 @@
 
 #pragma once
 
-#include <map>
 #include <string>
 #include <iostream>
 
 #include <stdio.h>
 #include <stdarg.h>
-
-#include "../PluginFactory.h"
-
-extern thread_local PluginThreadContext *pluginThreadContext;
+#include "tscore/ts_file.h"
 
 /* A temp sandbox to play with our toys used for all fun with this test-bench */
-fs::path getTemporaryDir();
-
-class PluginDebugObject
-{
-public:
-  PluginDebugObject() { clear(); }
-
-  void
-  clear()
-  {
-    contextInit             = nullptr;
-    contextInitInstance     = nullptr;
-    doRemapCalled           = 0;
-    initCalled              = 0;
-    doneCalled              = 0;
-    initInstanceCalled      = 0;
-    deleteInstanceCalled    = 0;
-    preReloadConfigCalled   = 0;
-    postReloadConfigCalled  = 0;
-    postReloadConfigSuccess = 0;
-    ih                      = nullptr;
-    argc                    = 0;
-    argv                    = nullptr;
-  }
-
-  /* Input fields used to set the test behavior of the plugin call-backs */
-  bool fail = false; /* tell the plugin call-back to fail for testing purposuses */
-  void *input_ih;    /* the value to be returned by the plugin instance init function */
-
-  /* Output fields showing what happend during the test */
-  const PluginThreadContext *contextInit         = nullptr; /* plugin initialization context */
-  const PluginThreadContext *contextInitInstance = nullptr; /* plugin instance initialization context */
-  int doRemapCalled                              = 0;       /* mark if remap was called */
-  int initCalled                                 = 0;       /* mark if plugin init was called */
-  int doneCalled                                 = 0;       /* mark if done was called */
-  int initInstanceCalled                         = 0;       /* mark if instance init was called */
-  int deleteInstanceCalled                       = 0;       /* mark if delete instance was called */
-  int preReloadConfigCalled                      = 0;       /* mark if pre-reload config was called */
-  int postReloadConfigCalled                     = 0;       /* mark if post-reload config was called */
-  bool postReloadConfigSuccess                   = 0;       /* mark if plugin reload status is passed correctly */
-  void *ih                                       = nullptr; /* instance handler */
-  int argc                                       = 0;       /* number of plugin instance parameters received by the plugin */
-  char **argv                                    = nullptr; /* plugin instance parameters received by the plugin */
-};
+ts::file::path getTemporaryDir();
 
 #ifdef __cplusplus
 extern "C" {
 #endif /* __cplusplus */
-
-typedef void *GetPluginDebugObjectFunction(void);
-GetPluginDebugObjectFunction getPluginDebugObjectTest;
 
 #undef Debug
 #define Debug(category, fmt, ...) PrintToStdErr("(%s) %s:%d:%s() " fmt "\n", category, __FILE__, __LINE__, __func__, ##__VA_ARGS__)

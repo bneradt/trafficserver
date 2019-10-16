@@ -24,7 +24,6 @@
 #pragma once
 
 #include <string>
-
 #include "tscore/List.h"
 
 struct PluginRegInfo {

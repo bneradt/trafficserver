@@ -29,6 +29,8 @@
 
 #include "plugin_testing_common.h"
 
+namespace fs = ts::file;
+
 void
 PrintToStdErr(const char *fmt, ...)
 {

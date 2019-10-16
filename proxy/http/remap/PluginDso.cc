@@ -28,17 +28,11 @@
  */
 
 #include "PluginDso.h"
-
-std::string
-PluginDso::missingRequiredSymbolError(const std::string &pluginName, const char *required, const char *requiring)
-{
-  std::string error;
-  error.assign("plugin ").append(pluginName).append(" missing required function ").append(required);
-  if (requiring) {
-    error.append(" if ").append(requiring).append(" is defined");
-  }
-  return error;
-}
+#ifdef PLUGIN_DSO_TESTS
+#include "unit-tests/plugin_testing_common.h"
+#else
+#include "tscore/Diags.h"
+#endif
 
 PluginDso::PluginDso(const fs::path &configPath, const fs::path &effectivePath, const fs::path &runtimePath)
   : _configPath(configPath), _effectivePath(effectivePath), _runtimePath(runtimePath)
