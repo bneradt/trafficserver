@@ -31,7 +31,7 @@ server = Test.MakeOriginServer("server")
 #**testname is required**
 testName = ""
 request_header = {"headers": "GET / HTTP/1.1\r\nHost: www.example.com\r\n\r\n", "timestamp": "1469733493.993", "body": ""}
-response_header = {"headers": "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n", "timestamp": "1469733493.993", "body": ""}
+response_header = {"headers": "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 0\r\n\r\n", "timestamp": "1469733493.993", "body": ""}
 server.addResponse("sessionlog.json", request_header, response_header)
 
 ts.Disk.remap_config.AddLine(
@@ -75,7 +75,7 @@ tr.Processes.Default.ReturnCode = 0
 tr.Processes.Default.Streams.stdout = "syntax.200.gold"
 tr.StillRunningAfter = ts
 
-# Test 4 - 200 Response - Three different Content-Length headers with a Transfer ecoding header
+# Test 4 - 200 Response - Three different Content-Length headers with a Transfer encoding header
 tr = Test.AddTestRun()
 tr.Processes.Default.Command = 'curl -s -D - -v --ipv4 --http1.1 -d "hello world" -H "Transfer-Encoding: chunked" -H "Content-Length: 11" -H "Content-Length: 10" -H "Content-Length: 9" -H "Host: www.example.com" http://localhost:{0}/'.format(ts.Variables.port)
 tr.Processes.Default.ReturnCode = 0

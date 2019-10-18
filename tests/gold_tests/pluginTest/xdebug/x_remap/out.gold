@@ -27,36 +27,30 @@ name and try again.
 </BODY>
 ======
 HTTP/1.1 200 OK
+Content-Length: 0
 Date: ``
 Age: ``
-Transfer-Encoding: chunked
 Connection: keep-alive
 Server: ATS/``
 X-Remap: from=http://one/, to=http://127.0.0.1:SERVER_PORT/
 
-0
-
 ======
 HTTP/1.1 200 OK
+Content-Length: 0
 Date: ``
 Age: ``
-Transfer-Encoding: chunked
 Connection: keep-alive
 Server: ATS/``
 X-Remap: from=http://two/, to=http://127.0.0.1:SERVER_PORT/
 
-0
-
 ======
 HTTP/1.1 200 OK
+Content-Length: 0
 Date: ``
 Age: ``
-Transfer-Encoding: chunked
 Connection: keep-alive
 Server: ATS/``
 X-Remap: from=http://three[0-9]+/, to=http://127.0.0.1:SERVER_PORT/
-
-0
 
 ======
 HTTP/1.1 404 Not Found
@@ -71,57 +65,47 @@ X-Remap: from=http://two/, to=http://127.0.0.1:SERVER_PORT/
 
 ======
 HTTP/1.1 200 OK
+Content-Length: 0
 Date: ``
 Age: ``
-Transfer-Encoding: chunked
 Connection: keep-alive
 Server: ATS/``
 X-Remap: from=http://two/, to=http://127.0.0.1:SERVER_PORT/
-
-0
 
 ======
 HTTP/1.1 200 OK
+Content-Length: 0
 Date: ``
 Age: ``
-Transfer-Encoding: chunked
 Connection: keep-alive
 Server: ATS/``
 X-Remap: from=http://two/, to=http://127.0.0.1:SERVER_PORT/
-
-0
 
 ======
 HTTP/1.1 200 OK
+Content-Length: 0
 Date: ``
 Age: ``
-Transfer-Encoding: chunked
 Connection: keep-alive
 Server: ATS/``
 X-Remap: from=http://two/, to=http://127.0.0.1:SERVER_PORT/
-
-0
 
 ======
 HTTP/1.1 200 OK
+Content-Length: 0
 Date: ``
 Age: ``
-Transfer-Encoding: chunked
 Connection: keep-alive
 Server: ATS/``
 X-Remap: from=http://two/, to=http://127.0.0.1:SERVER_PORT/
-
-0
 
 ======
 HTTP/1.1 200 OK
+Content-Length: 0
 Date: ``
 Age: ``
-Transfer-Encoding: chunked
 Connection: keep-alive
 Server: ATS/``
 X-Remap: from=http://two/, to=http://127.0.0.1:SERVER_PORT/
-
-0
 
 ======

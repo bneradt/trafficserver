@@ -1,0 +1,5 @@
+Starting new HTTP connection (1): 127.0.0.1:``
+http://127.0.0.1:`` "GET /one HTTP/1.1" 200 0
+Starting new HTTP connection (1): 127.0.0.1:``
+http://127.0.0.1:`` "GET /two HTTP/1.1" 200 0
+http://127.0.0.1:`` "GET /three HTTP/1.1" 200 0
