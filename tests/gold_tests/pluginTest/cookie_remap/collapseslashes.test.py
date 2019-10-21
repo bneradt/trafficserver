@@ -33,7 +33,7 @@ server = Test.MakeOriginServer("server", ip='127.0.0.10')
 
 request_header = {"headers": "GET /i/like/cheetos?.done=http://finance.yahoo.com HTTP/1.1\r\nHost: www.example.com\r\n\r\n", "timestamp": "1469733493.993", "body": ""}
 # expected response from the origin server
-response_header = {"headers": "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n", "timestamp": "1469733493.993", "body": ""}
+response_header = {"headers": "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 0\r\n\r\n", "timestamp": "1469733493.993", "body": ""}
 
 # add response to the server dictionary
 server.addResponse("sessionfile.log", request_header, response_header)

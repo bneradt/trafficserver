@@ -50,6 +50,7 @@ request_header_chk = {"headers":
 response_header_chk = {"headers":
   "HTTP/1.1 200 OK\r\n" +
   "Connection: close\r\n" +
+  "Content-Length: 0\r\n" +
   "\r\n",
   "timestamp": "1469733493.993",
   "body": "",
