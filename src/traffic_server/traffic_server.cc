@@ -1852,12 +1852,19 @@ main(int /* argc ATS_UNUSED */, const char **argv)
   }
   REC_RegisterConfigUpdateFunc("proxy.config.diags.debug.client_ip", update_debug_client_ip, nullptr);
 
-  // log initialization moved down
-
   if (command_flag) {
     int cmd_ret = cmd_mode();
 
     if (cmd_ret != CMD_IN_PROGRESS) {
+      // Wait for all the threads to come up. Without this, the abrupt exit
+      // below causes a frequent crash as the initialization and shutdown
+      // routines race with each other.
+      while (eventProcessor.thread_group[ET_NET]._started != num_of_net_threads) {
+        usleep(1000);
+      }
+      while (eventProcessor.thread_group[ET_DNS]._started == 0) {
+        usleep(1000);
+      }
       if (cmd_ret >= 0) {
         ::exit(0); // everything is OK
       } else {
