@@ -94,6 +94,7 @@ test_proxy_http_SOURCES = \
 	unit_tests/test_ForwardedConfig.cc \
 	ForwardedConfig.cc \
 	unit_tests/test_error_page_selection.cc \
+	unit_tests/test_http_hook_event_consistency.cc \
 	HttpBodyFactory.cc \
 	HttpBodyFactory.h
 
