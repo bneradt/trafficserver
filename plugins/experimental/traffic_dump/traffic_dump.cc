@@ -36,9 +36,11 @@
 #include <iomanip>
 #include <chrono>
 #include <atomic>
+#include <optional>
 #include <string>
 #include <string_view>
 
+#include "address.h"
 #include "tscore/ts_file.h"
 #include "ts/ts.h"
 
@@ -47,11 +49,16 @@ namespace
 const char *PLUGIN_NAME   = "traffic_dump";
 const std::string closing = "]}]}";
 
-ts::file::path log_path{"dump"};               // default log directory
-int s_arg_idx = 0;                             // Session Arg Index to pass on session data
-std::atomic<int64_t> sample_pool_size(1000);   // Sampling ratio
-std::atomic<int64_t> max_disk_usage(10000000); //< Max disk space for logs (approximate)
-std::atomic<int64_t> disk_usage(0);            //< Actual disk usage
+ts::file::path log_path{"dump"}; // default log directory
+
+// Only trace sessions originating from this user configured client IP.
+std::optional<Address> client_ip_filter = std::nullopt;
+bool dump_body                          = false; // Whether to dump body bytes.
+int s_arg_idx                           = 0;     // Session Arg Index to pass on session data
+int t_arg_idx                           = 0;     // Transaction Arg Index to pass on transaction data
+std::atomic<int64_t> sample_pool_size(1000);     // Sampling ratio
+std::atomic<int64_t> max_disk_usage(10000000);   //< Max disk space for logs (approximate)
+std::atomic<int64_t> disk_usage(0);              //< Actual disk usage
 // handler declaration
 int session_aio_handler(TSCont contp, TSEvent event, void *edata);
 int session_txn_handler(TSCont contp, TSEvent event, void *edata);
@@ -111,6 +118,11 @@ struct SsnData {
     TSMutexUnlock(disk_io_mutex);
     return TS_ERROR;
   }
+};
+
+/// Custom structure for per transaction data
+struct TxnData {
+  std::string request_body;
 };
 
 /// Local helper functions about json formatting
@@ -212,7 +224,7 @@ json_entry_array(const char *name, int name_len, const char *value, int value_le
 
 /// Helper functions to collect txn information from TSMBuffer
 std::string
-collect_headers(TSMBuffer &buffer, TSMLoc &hdr_loc, int64_t body_bytes)
+collect_headers(TSMBuffer &buffer, TSMLoc &hdr_loc, std::string_view body, int64_t body_length)
 {
   std::string result = "{";
   int len            = 0;
@@ -228,7 +240,7 @@ collect_headers(TSMBuffer &buffer, TSMLoc &hdr_loc, int64_t body_bytes)
     // 2. "scheme":
     TSAssert(TS_SUCCESS == TSHttpHdrUrlGet(buffer, hdr_loc, &url_loc));
     cp = TSUrlSchemeGet(buffer, url_loc, &len);
-    TSDebug(PLUGIN_NAME, "collect_headers(): found scheme %d ", len);
+    TSDebug(PLUGIN_NAME, "%s: found scheme %d ", __func__, len);
     result += "," + json_entry("scheme", cp, len);
 
     // 3. "method":(string)
@@ -237,7 +249,7 @@ collect_headers(TSMBuffer &buffer, TSMLoc &hdr_loc, int64_t body_bytes)
 
     // 4. "url"
     cp = TSUrlStringGet(buffer, url_loc, &len);
-    TSDebug(PLUGIN_NAME, "collect_headers(): found url %.*s", len, cp);
+    TSDebug(PLUGIN_NAME, "%s: found url %.*s", __func__, len, cp);
     result += "," + json_entry("url", cp, len);
     TSHandleMLocRelease(buffer, hdr_loc, url_loc);
   } else {
@@ -252,7 +264,12 @@ collect_headers(TSMBuffer &buffer, TSMLoc &hdr_loc, int64_t body_bytes)
   // "content"
   //    "encoding"
   //    "size"
-  result += R"(,"content":{"encoding":"plain","size":)" + std::to_string(body_bytes) + '}';
+  //    "body"
+  result += R"(,"content":{"encoding":"esc_json","size":)" + std::to_string(body_length);
+  if (!body.empty()) {
+    result += R"(,"data":")" + escape_json(std::string(body)) + R"(")";
+  }
+  result += '}';
 
   // "headers": [[name(string), value(string)]]
   result += R"(,"headers":{"encoding":"esc_json", "fields": [)";
@@ -287,7 +304,7 @@ session_aio_handler(TSCont contp, TSEvent event, void *edata)
     TSAIOCallback cb = static_cast<TSAIOCallback>(edata);
     SsnData *ssnData = static_cast<SsnData *>(TSContDataGet(contp));
     if (!ssnData) {
-      TSDebug(PLUGIN_NAME, "session_aio_handler(): No valid ssnData. Abort.");
+      TSDebug(PLUGIN_NAME, "%s: No valid ssnData. Abort.", __func__);
       return TS_ERROR;
     }
     char *buf = TSAIOBufGet(cb);
@@ -305,7 +322,7 @@ session_aio_handler(TSCont contp, TSEvent event, void *edata)
         ts::file::file_status st = ts::file::status(ssnData->log_name, ec);
         if (!ec) {
           disk_usage += ts::file::file_size(st);
-          TSDebug(PLUGIN_NAME, "Finish a session with log file of %" PRIuMAX "bytes", ts::file::file_size(st));
+          TSDebug(PLUGIN_NAME, "Finish a session with log file of %" PRIuMAX " bytes", ts::file::file_size(st));
         }
         delete ssnData;
         return TS_SUCCESS;
@@ -315,10 +332,173 @@ session_aio_handler(TSCont contp, TSEvent event, void *edata)
     return TS_SUCCESS;
   }
   default:
-    TSDebug(PLUGIN_NAME, "session_aio_handler(): unhandled events %d", event);
+    TSDebug(PLUGIN_NAME, "%s: unhandled events %d", __func__, event);
     return TS_ERROR;
   }
   return TS_SUCCESS;
+}
+
+std::string
+request_body_get(TSHttpTxn txnp)
+{
+  TSDebug(PLUGIN_NAME, "getting the body");
+  TSIOBufferReader post_buffer_reader = TSHttpTxnPostBufferReaderGet(txnp);
+  int64_t read_avail                  = TSIOBufferReaderAvail(post_buffer_reader);
+  if (read_avail == 0) {
+    TSIOBufferReaderFree(post_buffer_reader);
+    return "";
+  }
+
+  // std::string has no reserving allocator. So create an explicitly empty
+  // string then reserve the bytes for later population.
+  std::string body_string;
+  body_string.reserve(read_avail + 1); // '+ 1' for null termination.
+
+  int64_t consumed      = 0;
+  int64_t data_len      = 0;
+  const char *char_data = NULL;
+  TSIOBufferBlock block = TSIOBufferReaderStart(post_buffer_reader);
+  while (block != NULL) {
+    char_data = TSIOBufferBlockReadStart(block, post_buffer_reader, &data_len);
+    body_string.replace(consumed, data_len, char_data, data_len);
+    consumed += data_len;
+    block = TSIOBufferBlockNext(block);
+  }
+  body_string[consumed] = '\0';
+  TSIOBufferReaderFree(post_buffer_reader);
+
+  TSDebug(PLUGIN_NAME, "returning %ld body bytes", body_string.size());
+  return body_string;
+}
+
+/** Print the json data for a transaction
+ *
+ * @param[in] txnp The reference to the transaction.
+ * @param[in] ssnData The plugin's data for the session.
+ * @param[in] txnData The plugin's data for the transaction.
+ */
+void
+print_transaction_content(TSHttpTxn txnp, SsnData *ssnData, TxnData *txnData)
+{
+  // Get UUID
+  char uuid[TS_CRUUID_STRING_LEN + 1];
+  TSAssert(TS_SUCCESS == TSClientRequestUuidGet(txnp, uuid));
+
+  // Generate per transaction json records
+  std::string txn_info;
+  if (!ssnData->first) {
+    txn_info += ",";
+  }
+  ssnData->first = false;
+
+  // "uuid":(string)
+  txn_info += "{" + json_entry("uuid", uuid, strlen(uuid));
+
+  // "connect-time":(number)
+  TSHRTime start_time;
+  TSHttpTxnMilestoneGet(txnp, TS_MILESTONE_UA_BEGIN, &start_time);
+  txn_info += ",\"start-time\":" + std::to_string(start_time);
+
+  // client/proxy-request/response headers
+  TSMBuffer buffer;
+  TSMLoc hdr_loc;
+  if (TS_SUCCESS == TSHttpTxnClientReqGet(txnp, &buffer, &hdr_loc)) {
+    TSDebug(PLUGIN_NAME, "Found client request");
+    if (txnData) {
+      txn_info += R"(,"client-request":)" + collect_headers(buffer, hdr_loc, txnData->request_body, txnData->request_body.size());
+    } else {
+      txn_info += R"(,"client-request":)" + collect_headers(buffer, hdr_loc, "", TSHttpTxnClientReqBodyBytesGet(txnp));
+    }
+    TSHandleMLocRelease(buffer, TS_NULL_MLOC, hdr_loc);
+    buffer = nullptr;
+  };
+  if (TS_SUCCESS == TSHttpTxnServerReqGet(txnp, &buffer, &hdr_loc)) {
+    TSDebug(PLUGIN_NAME, "Found proxy request");
+    TSDebug(PLUGIN_NAME, "proxy-request body bytes: %ld", TSHttpTxnServerReqBodyBytesGet(txnp));
+    txn_info += R"(,"proxy-request":)" + collect_headers(buffer, hdr_loc, "", TSHttpTxnServerReqBodyBytesGet(txnp));
+    TSHandleMLocRelease(buffer, TS_NULL_MLOC, hdr_loc);
+    buffer = nullptr;
+  }
+  if (TS_SUCCESS == TSHttpTxnServerRespGet(txnp, &buffer, &hdr_loc)) {
+    TSDebug(PLUGIN_NAME, "Found server response");
+    txn_info += R"(,"server-response":)" + collect_headers(buffer, hdr_loc, "", TSHttpTxnServerRespBodyBytesGet(txnp));
+    TSHandleMLocRelease(buffer, TS_NULL_MLOC, hdr_loc);
+    buffer = nullptr;
+  }
+  if (TS_SUCCESS == TSHttpTxnClientRespGet(txnp, &buffer, &hdr_loc)) {
+    TSDebug(PLUGIN_NAME, "Found proxy response");
+    txn_info += R"(,"proxy-response":)" + collect_headers(buffer, hdr_loc, "", TSHttpTxnClientRespBodyBytesGet(txnp));
+    TSHandleMLocRelease(buffer, TS_NULL_MLOC, hdr_loc);
+    buffer = nullptr;
+  }
+
+  txn_info += "}";
+  ssnData->write_to_disk(txn_info);
+}
+
+/** The callback for gathering request body data.
+ *
+ * @note This is only called if the user enabled dump_body.
+ */
+int
+request_buffer_handler(TSCont contp, TSEvent event, void *edata)
+{
+  TSHttpTxn txnp = (TSHttpTxn)(edata);
+
+  if (event == TS_EVENT_HTTP_REQUEST_BUFFER_READ_COMPLETE) {
+    std::string body = request_body_get(txnp);
+    TSDebug(PLUGIN_NAME, "%s got the request body of size %zu bytes", __func__, body.size());
+
+    auto txn              = static_cast<TSHttpTxn>(edata);
+    auto *txnData         = static_cast<TxnData *>(TSHttpTxnArgGet(txn, t_arg_idx));
+    txnData->request_body = body;
+    TSContDestroy(contp);
+  } else {
+    TSDebug(PLUGIN_NAME, "%s received an unrecognized event: %d", __func__, event);
+  }
+  TSHttpTxnReenable(txnp, TS_EVENT_HTTP_CONTINUE);
+  return 0;
+}
+
+/** Determine whether the user configured IP filter indicates this transaction
+ * should not be dumped.
+ *
+ * @note This also does some validity verification on the IP, making sure it is
+ * v4 or v6, and returns true (i.e., it should be filtered out) if it does not
+ * match these checks. These checks are required in order to perform the IP
+ * filtering logic. This function will only return true if the client has
+ * enabled client filtering.
+ *
+ * @param[in] session_client_ip The session's client address.
+ *
+ * @return True if the provided address should not be dumped per the user's
+ * configuration, false otherwise.
+ */
+bool
+is_filtered_out(const sockaddr *session_client_ip)
+{
+  if (!client_ip_filter) {
+    // The user did not configure an IP by which to filter.
+    return false;
+  }
+  if (session_client_ip == nullptr) {
+    TSDebug(PLUGIN_NAME, "%s: Found no client IP address for session. Abort.", __func__);
+    return true;
+  }
+  if (session_client_ip->sa_family != AF_INET && session_client_ip->sa_family != AF_INET6) {
+    TSDebug(PLUGIN_NAME, "%s: IP family is not v4 nor v6. Abort.", __func__);
+    return true;
+  }
+
+  try {
+    Address session_address(*session_client_ip);
+    return session_address != *client_ip_filter;
+  } catch (const std::exception &e) {
+    TSDebug(PLUGIN_NAME, "%s: Could not construct an Address from the session client IP. Abort.", __func__);
+    return true;
+  }
+  // not reached
+  return true;
 }
 
 // Transaction handler: writes headers to the log file using AIO
@@ -333,66 +513,34 @@ session_txn_handler(TSCont contp, TSEvent event, void *edata)
 
   // If no valid ssnData, continue transaction as if nothing happened
   if (!ssnData) {
-    TSDebug(PLUGIN_NAME, "session_txn_handler(): No ssnData found. Abort.");
+    TSDebug(PLUGIN_NAME, "%s: No ssnData found. Abort.", __func__);
     TSHttpTxnReenable(txnp, TS_EVENT_HTTP_CONTINUE);
     return TS_SUCCESS;
   }
 
   switch (event) {
+  case TS_EVENT_HTTP_TXN_START: {
+    // This event is only handled if dump_body is configured, so no need to
+    // check that here.
+    TxnData *txnData = new TxnData();
+    TSHttpTxnArgSet(txnp, t_arg_idx, txnData);
+    break;
+  }
+  case TS_EVENT_HTTP_READ_REQUEST_HDR: {
+    // This event is only handled if dump_body is configured, so no need to
+    // check that here.
+    TSHttpTxnConfigIntSet(txnp, TS_CONFIG_HTTP_REQUEST_BUFFER_ENABLED, 1);
+    TSHttpTxnHookAdd(txnp, TS_HTTP_REQUEST_BUFFER_READ_COMPLETE_HOOK, TSContCreate(request_buffer_handler, TSMutexCreate()));
+    break;
+  }
   case TS_EVENT_HTTP_TXN_CLOSE: {
-    // Get UUID
-    char uuid[TS_CRUUID_STRING_LEN + 1];
-    TSAssert(TS_SUCCESS == TSClientRequestUuidGet(txnp, uuid));
-
-    // Generate per transaction json records
-    std::string txn_info;
-    if (!ssnData->first) {
-      txn_info += ",";
-    }
-    ssnData->first = false;
-
-    // "uuid":(string)
-    txn_info += "{" + json_entry("uuid", uuid, strlen(uuid));
-
-    // "connect-time":(number)
-    TSHRTime start_time;
-    TSHttpTxnMilestoneGet(txnp, TS_MILESTONE_UA_BEGIN, &start_time);
-    txn_info += ",\"start-time\":" + std::to_string(start_time);
-
-    // client/proxy-request/response headers
-    TSMBuffer buffer;
-    TSMLoc hdr_loc;
-    if (TS_SUCCESS == TSHttpTxnClientReqGet(txnp, &buffer, &hdr_loc)) {
-      TSDebug(PLUGIN_NAME, "Found client request");
-      txn_info += R"(,"client-request":)" + collect_headers(buffer, hdr_loc, TSHttpTxnClientReqBodyBytesGet(txnp));
-      TSHandleMLocRelease(buffer, TS_NULL_MLOC, hdr_loc);
-      buffer = nullptr;
-    }
-    if (TS_SUCCESS == TSHttpTxnServerReqGet(txnp, &buffer, &hdr_loc)) {
-      TSDebug(PLUGIN_NAME, "Found proxy request");
-      txn_info += R"(,"proxy-request":)" + collect_headers(buffer, hdr_loc, TSHttpTxnServerReqBodyBytesGet(txnp));
-      TSHandleMLocRelease(buffer, TS_NULL_MLOC, hdr_loc);
-      buffer = nullptr;
-    }
-    if (TS_SUCCESS == TSHttpTxnServerRespGet(txnp, &buffer, &hdr_loc)) {
-      TSDebug(PLUGIN_NAME, "Found server response");
-      txn_info += R"(,"server-response":)" + collect_headers(buffer, hdr_loc, TSHttpTxnServerRespBodyBytesGet(txnp));
-      TSHandleMLocRelease(buffer, TS_NULL_MLOC, hdr_loc);
-      buffer = nullptr;
-    }
-    if (TS_SUCCESS == TSHttpTxnClientRespGet(txnp, &buffer, &hdr_loc)) {
-      TSDebug(PLUGIN_NAME, "Found proxy response");
-      txn_info += R"(,"proxy-response":)" + collect_headers(buffer, hdr_loc, TSHttpTxnClientRespBodyBytesGet(txnp));
-      TSHandleMLocRelease(buffer, TS_NULL_MLOC, hdr_loc);
-      buffer = nullptr;
-    }
-
-    txn_info += "}";
-    ssnData->write_to_disk(txn_info);
+    auto *txnData = static_cast<TxnData *>(TSHttpTxnArgGet(txnp, t_arg_idx));
+    print_transaction_content(txnp, ssnData, txnData);
+    delete txnData;
     break;
   }
   default:
-    TSDebug(PLUGIN_NAME, "session_txn_handler(): Unhandled events %d", event);
+    TSDebug(PLUGIN_NAME, "%s: Unhandled event: %d", __func__, event);
     TSHttpTxnReenable(txnp, TS_EVENT_HTTP_ERROR);
     return TS_ERROR;
   }
@@ -402,7 +550,7 @@ session_txn_handler(TSCont contp, TSEvent event, void *edata)
 }
 
 // Session handler for global hooks; Assign per-session data structure and log files
-static int
+int
 global_ssn_handler(TSCont contp, TSEvent event, void *edata)
 {
   TSHttpSsn ssnp = static_cast<TSHttpSsn>(edata);
@@ -420,14 +568,14 @@ global_ssn_handler(TSCont contp, TSEvent event, void *edata)
       tag.remove_prefix(PLUGIN_PREFIX.size());
       if (tag == "sample") {
         sample_pool_size = static_cast<int64_t>(strtol(static_cast<const char *>(msg->data), nullptr, 0));
-        TSDebug(PLUGIN_NAME, "TS_EVENT_LIFECYCLE_MSG: Received Msg to change sample size to %" PRId64 "bytes",
+        TSDebug(PLUGIN_NAME, "TS_EVENT_LIFECYCLE_MSG: Received Msg to change sample size to %" PRId64 " bytes",
                 sample_pool_size.load());
       } else if (tag == "reset") {
         disk_usage = 0;
         TSDebug(PLUGIN_NAME, "TS_EVENT_LIFECYCLE_MSG: Received Msg to reset disk usage counter");
       } else if (tag == "limit") {
         max_disk_usage = static_cast<int64_t>(strtol(static_cast<const char *>(msg->data), nullptr, 0));
-        TSDebug(PLUGIN_NAME, "TS_EVENT_LIFECYCLE_MSG: Received Msg to change max disk usage to %" PRId64 "bytes",
+        TSDebug(PLUGIN_NAME, "TS_EVENT_LIFECYCLE_MSG: Received Msg to change max disk usage to %" PRId64 " bytes",
                 max_disk_usage.load());
       }
     }
@@ -435,13 +583,16 @@ global_ssn_handler(TSCont contp, TSEvent event, void *edata)
   }
   case TS_EVENT_HTTP_SSN_START: {
     // Grab session id to do sampling
-    int64_t id = TSHttpSsnIdGet(ssnp);
+    int64_t id                = TSHttpSsnIdGet(ssnp);
+    const sockaddr *client_ip = TSHttpSsnClientAddrGet(ssnp);
     if (id % sample_pool_size != 0) {
-      TSDebug(PLUGIN_NAME, "global_ssn_handler(): Ignore session %" PRId64 "...", id);
+      TSDebug(PLUGIN_NAME, "%s: Ignore session %" PRId64 " per the random sampling mechanism", __func__, id);
       break;
     } else if (disk_usage >= max_disk_usage) {
-      TSDebug(PLUGIN_NAME, "global_ssn_handler(): Ignore session %" PRId64 "due to disk usage %" PRId64 "bytes", id,
-              disk_usage.load());
+      TSDebug(PLUGIN_NAME, "%s: Ignore session %" PRId64 " due to disk usage %" PRId64 " bytes", __func__, id, disk_usage.load());
+      break;
+    } else if (is_filtered_out(client_ip)) {
+      TSDebug(PLUGIN_NAME, "%s: Ignore session %" PRId64 " per the client's IP filter", __func__, id);
       break;
     }
     // Beginning of a new session
@@ -449,7 +600,7 @@ global_ssn_handler(TSCont contp, TSEvent event, void *edata)
     auto start = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch());
 
     // Create new per session data
-    SsnData *ssnData = new SsnData;
+    SsnData *ssnData = new SsnData();
     TSHttpSsnArgSet(ssnp, s_arg_idx, ssnData);
 
     TSContDataSet(ssnData->aio_cont, ssnData);
@@ -476,13 +627,12 @@ global_ssn_handler(TSCont contp, TSEvent event, void *edata)
 
     // Use client ip as sub directory name
     char client_str[INET6_ADDRSTRLEN];
-    const sockaddr *client_ip = TSHttpSsnClientAddrGet(ssnp);
     if (AF_INET == client_ip->sa_family) {
       inet_ntop(AF_INET, &(reinterpret_cast<const sockaddr_in *>(client_ip)->sin_addr), client_str, INET_ADDRSTRLEN);
     } else if (AF_INET6 == client_ip->sa_family) {
       inet_ntop(AF_INET6, &(reinterpret_cast<const sockaddr_in6 *>(client_ip)->sin6_addr), client_str, INET6_ADDRSTRLEN);
     } else {
-      TSDebug(PLUGIN_NAME, "global_ssn_handler(): Unknown address family.");
+      TSDebug(PLUGIN_NAME, "%s: Unknown address family.", __func__);
       snprintf(client_str, INET6_ADDRSTRLEN, "unknown");
     }
 
@@ -496,7 +646,7 @@ global_ssn_handler(TSCont contp, TSEvent event, void *edata)
       std::error_code ec;
       ts::file::status(log_p, ec);
       if (ec && mkdir(log_p.c_str(), 0755) == -1) {
-        TSDebug(PLUGIN_NAME, "global_ssn_handler(): Failed to create dir %s", log_p.c_str());
+        TSDebug(PLUGIN_NAME, "%s: Failed to create dir %s", __func__, log_p.c_str());
         TSError("[%s] Failed to create dir %s", PLUGIN_NAME, log_p.c_str());
       }
 
@@ -504,7 +654,7 @@ global_ssn_handler(TSCont contp, TSEvent event, void *edata)
       ssnData->log_fd = open(log_f.c_str(), O_RDWR | O_CREAT, S_IRWXU);
       if (ssnData->log_fd < 0) {
         TSMutexUnlock(ssnData->disk_io_mutex);
-        TSDebug(PLUGIN_NAME, "global_ssn_handler(): Failed to open log files %s. Abort.", log_f.c_str());
+        TSDebug(PLUGIN_NAME, "%s: Failed to open log files %s. Abort.", __func__, log_f.c_str());
         TSHttpSsnReenable(ssnp, TS_EVENT_HTTP_CONTINUE);
         return TS_EVENT_HTTP_CONTINUE;
       }
@@ -514,18 +664,22 @@ global_ssn_handler(TSCont contp, TSEvent event, void *edata)
     }
     TSMutexUnlock(ssnData->disk_io_mutex);
 
+    if (dump_body) {
+      TSHttpSsnHookAdd(ssnp, TS_HTTP_TXN_START_HOOK, ssnData->txn_cont);
+      TSHttpSsnHookAdd(ssnp, TS_HTTP_READ_REQUEST_HDR_HOOK, ssnData->txn_cont);
+    }
     TSHttpSsnHookAdd(ssnp, TS_HTTP_TXN_CLOSE_HOOK, ssnData->txn_cont);
     break;
   }
   case TS_EVENT_HTTP_SSN_CLOSE: {
     // Write session and log file closing
     int64_t id = TSHttpSsnIdGet(ssnp);
-    TSDebug(PLUGIN_NAME, "global_ssn_handler(): Closing session %" PRId64 "...", id);
+    TSDebug(PLUGIN_NAME, "%s: Closing session %" PRId64 "...", __func__, id);
     // Retrieve SsnData
     SsnData *ssnData = static_cast<SsnData *>(TSHttpSsnArgGet(ssnp, s_arg_idx));
     // If no valid ssnData, continue transaction as if nothing happened
     if (!ssnData) {
-      TSDebug(PLUGIN_NAME, "global_ssn_handler(): [TS_EVENT_HTTP_SSN_CLOSE] No ssnData found. Abort.");
+      TSDebug(PLUGIN_NAME, "%s: [TS_EVENT_HTTP_SSN_CLOSE] No ssnData found. Maybe it was filtered out. Abort.", __func__);
       TSHttpSsnReenable(ssnp, TS_EVENT_HTTP_CONTINUE);
       return TS_SUCCESS;
     }
@@ -556,14 +710,21 @@ TSPluginInit(int argc, const char *argv[])
   info.support_email = "dev@trafficserver.apache.org";
 
   /// Commandline options
-  static const struct option longopts[] = {{"logdir", required_argument, nullptr, 'l'},
+  static const struct option longopts[] = {{"dump_body", optional_argument, nullptr, 'b'},
+                                           {"logdir", required_argument, nullptr, 'l'},
                                            {"sample", required_argument, nullptr, 's'},
                                            {"limit", required_argument, nullptr, 'm'},
+                                           {"client_ipv4", optional_argument, nullptr, '4'},
+                                           {"client_ipv6", optional_argument, nullptr, '6'},
                                            {nullptr, no_argument, nullptr, 0}};
   int opt                               = 0;
   while (opt >= 0) {
-    opt = getopt_long(argc, const_cast<char *const *>(argv), "l:", longopts, nullptr);
+    opt = getopt_long(argc, const_cast<char *const *>(argv), "l:s:m:4:6:b", longopts, nullptr);
     switch (opt) {
+    case 'b': {
+      dump_body = true;
+      break;
+    }
     case 'l': {
       log_path = ts::file::path{optarg};
       break;
@@ -574,6 +735,27 @@ TSPluginInit(int argc, const char *argv[])
     }
     case 'm': {
       max_disk_usage = static_cast<int64_t>(std::strtol(optarg, nullptr, 0));
+      break;
+    }
+    case '4': {
+      try {
+        client_ip_filter.emplace(AF_INET, optarg);
+      } catch (const std::exception &e) {
+        TSDebug(PLUGIN_NAME, "Problems parsing IPv4 filter address: %s", optarg);
+        TSError("[%s] Problems parsing IPv4 filter address: %s", PLUGIN_NAME, optarg);
+        client_ip_filter = std::nullopt;
+      }
+      break;
+    }
+    case '6': {
+      try {
+        client_ip_filter.emplace(AF_INET6, optarg);
+      } catch (const std::exception &e) {
+        TSDebug(PLUGIN_NAME, "Problems parsing IPv6 filter address: %s", optarg);
+        TSError("[%s] Problems parsing IPv6 filter address: %s", PLUGIN_NAME, optarg);
+        client_ip_filter = std::nullopt;
+      }
+      break;
     }
     case -1:
     case '?':
@@ -594,7 +776,9 @@ TSPluginInit(int argc, const char *argv[])
 
   if (TS_SUCCESS != TSPluginRegister(&info)) {
     TSError("[%s] Unable to initialize plugin (disabled). Failed to register plugin.", PLUGIN_NAME);
-  } else if (TS_SUCCESS != TSHttpSsnArgIndexReserve(PLUGIN_NAME, "Track log related data", &s_arg_idx)) {
+  } else if (TS_SUCCESS != TSHttpSsnArgIndexReserve(PLUGIN_NAME, "Track session related data", &s_arg_idx)) {
+    TSError("[%s] Unable to initialize plugin (disabled). Failed to reserve ssn arg.", PLUGIN_NAME);
+  } else if (TS_SUCCESS != TSHttpTxnArgIndexReserve(PLUGIN_NAME, "Track transaction related data", &t_arg_idx)) {
     TSError("[%s] Unable to initialize plugin (disabled). Failed to reserve ssn arg.", PLUGIN_NAME);
   } else {
     /// Add global hooks
@@ -602,8 +786,9 @@ TSPluginInit(int argc, const char *argv[])
     TSHttpHookAdd(TS_HTTP_SSN_START_HOOK, ssncont);
     TSHttpHookAdd(TS_HTTP_SSN_CLOSE_HOOK, ssncont);
     TSLifecycleHookAdd(TS_LIFECYCLE_MSG_HOOK, ssncont);
-    TSDebug(PLUGIN_NAME, "Initialized with sample pool size %" PRId64 " bytes and disk limit %" PRId64 " bytes",
-            sample_pool_size.load(), max_disk_usage.load());
+    TSDebug(PLUGIN_NAME,
+            "Initialized with sample pool size %" PRId64 " bytes and disk limit %" PRId64 " bytes, dumping body bytes: %s",
+            sample_pool_size.load(), max_disk_usage.load(), dump_body ? "true" : "false");
   }
 
   return;

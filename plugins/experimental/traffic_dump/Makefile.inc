@@ -16,4 +16,26 @@
 
 pkglib_LTLIBRARIES += experimental/traffic_dump/traffic_dump.la
 
-experimental_traffic_dump_traffic_dump_la_SOURCES = experimental/traffic_dump/traffic_dump.cc
+experimental_traffic_dump_traffic_dump_la_SOURCES = \
+	experimental/traffic_dump/address.cc \
+	experimental/traffic_dump/traffic_dump.cc
+
+check_PROGRAMS += experimental/traffic_dump/test_address
+
+experimental_traffic_dump_test_address_CPPFLAGS = \
+	$(AM_CPPFLAGS) \
+        -I$(abs_top_srcdir)/tests/include \
+        -I$(abs_top_srcdir)/plugins/experimental/traffic_dump \
+        -DURI_SIGNING_UNIT_TEST
+
+experimental_traffic_dump_test_address_LDADD = \
+	@LIBJANSSON@ \
+        @LIBCJOSE@ \
+        @LIBPCRE@ \
+        -lm \
+        -lcrypto
+
+experimental_traffic_dump_test_address_SOURCES = \
+	experimental/traffic_dump/unit_tests/test_address.cc \
+	experimental/traffic_dump/unit_tests/unit_test_main.cc \
+	experimental/traffic_dump/address.cc
