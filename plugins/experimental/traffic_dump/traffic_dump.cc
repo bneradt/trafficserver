@@ -222,9 +222,8 @@ json_entry_array(const char *name, int name_len, const char *value, int value_le
   return "[\"" + escape_json(name, name_len) + "\", \"" + escape_json(value, value_len) + "\"]";
 }
 
-/// Helper functions to collect txn information from TSMBuffer
 std::string
-collect_headers(TSMBuffer &buffer, TSMLoc &hdr_loc, std::string_view body, int64_t body_length)
+collect_headers_helper(TSMBuffer &buffer, TSMLoc &hdr_loc, std::string_view content_field)
 {
   std::string result = "{";
   int len            = 0;
@@ -264,12 +263,8 @@ collect_headers(TSMBuffer &buffer, TSMLoc &hdr_loc, std::string_view body, int64
   // "content"
   //    "encoding"
   //    "size"
-  //    "body"
-  result += R"(,"content":{"encoding":"esc_json","size":)" + std::to_string(body_length);
-  if (!body.empty()) {
-    result += R"(,"data":")" + escape_json(std::string(body)) + R"(")";
-  }
-  result += '}';
+  //    "data" (optional)
+  result += content_field;
 
   // "headers": [[name(string), value(string)]]
   result += R"(,"headers":{"encoding":"esc_json", "fields": [)";
@@ -293,6 +288,27 @@ collect_headers(TSMBuffer &buffer, TSMLoc &hdr_loc, std::string_view body, int64
   }
 
   return result + "]}}";
+}
+
+/// Helper functions to collect txn information from TSMBuffer
+std::string
+collect_headers(TSMBuffer &buffer, TSMLoc &hdr_loc, std::string_view body)
+{
+  std::string content_field;
+  content_field += R"(,"content":{"encoding":"esc_json","size":)" + std::to_string(body.length());
+  if (!body.empty()) {
+    content_field += R"(,"data":")" + escape_json(std::string(body)) + R"(")";
+  }
+  content_field += '}';
+  return collect_headers_helper(buffer, hdr_loc, content_field);
+}
+
+std::string
+collect_headers(TSMBuffer &buffer, TSMLoc &hdr_loc, int64_t body_length)
+{
+  std::string content_field;
+  content_field += R"(,"content":{"encoding":"esc_json","size":)" + std::to_string(body_length) + '}';
+  return collect_headers_helper(buffer, hdr_loc, content_field);
 }
 
 // Per session AIO handler: update AIO counts and clean up
@@ -346,7 +362,7 @@ request_body_get(TSHttpTxn txnp)
   int64_t read_avail                  = TSIOBufferReaderAvail(post_buffer_reader);
   if (read_avail == 0) {
     TSIOBufferReaderFree(post_buffer_reader);
-    return "";
+    return {};
   }
 
   // std::string has no reserving allocator. So create an explicitly empty
@@ -386,6 +402,9 @@ print_transaction_content(TSHttpTxn txnp, SsnData *ssnData, TxnData *txnData)
 
   // Generate per transaction json records
   std::string txn_info;
+  // Cut down on allocations as the string is constructed piecemeal over the
+  // life of this function.
+  txn_info.reserve(4 * 1024);
   if (!ssnData->first) {
     txn_info += ",";
   }
@@ -405,9 +424,9 @@ print_transaction_content(TSHttpTxn txnp, SsnData *ssnData, TxnData *txnData)
   if (TS_SUCCESS == TSHttpTxnClientReqGet(txnp, &buffer, &hdr_loc)) {
     TSDebug(PLUGIN_NAME, "Found client request");
     if (txnData) {
-      txn_info += R"(,"client-request":)" + collect_headers(buffer, hdr_loc, txnData->request_body, txnData->request_body.size());
+      txn_info += R"(,"client-request":)" + collect_headers(buffer, hdr_loc, txnData->request_body);
     } else {
-      txn_info += R"(,"client-request":)" + collect_headers(buffer, hdr_loc, "", TSHttpTxnClientReqBodyBytesGet(txnp));
+      txn_info += R"(,"client-request":)" + collect_headers(buffer, hdr_loc, TSHttpTxnClientReqBodyBytesGet(txnp));
     }
     TSHandleMLocRelease(buffer, TS_NULL_MLOC, hdr_loc);
     buffer = nullptr;
@@ -415,19 +434,19 @@ print_transaction_content(TSHttpTxn txnp, SsnData *ssnData, TxnData *txnData)
   if (TS_SUCCESS == TSHttpTxnServerReqGet(txnp, &buffer, &hdr_loc)) {
     TSDebug(PLUGIN_NAME, "Found proxy request");
     TSDebug(PLUGIN_NAME, "proxy-request body bytes: %ld", TSHttpTxnServerReqBodyBytesGet(txnp));
-    txn_info += R"(,"proxy-request":)" + collect_headers(buffer, hdr_loc, "", TSHttpTxnServerReqBodyBytesGet(txnp));
+    txn_info += R"(,"proxy-request":)" + collect_headers(buffer, hdr_loc, TSHttpTxnServerReqBodyBytesGet(txnp));
     TSHandleMLocRelease(buffer, TS_NULL_MLOC, hdr_loc);
     buffer = nullptr;
   }
   if (TS_SUCCESS == TSHttpTxnServerRespGet(txnp, &buffer, &hdr_loc)) {
     TSDebug(PLUGIN_NAME, "Found server response");
-    txn_info += R"(,"server-response":)" + collect_headers(buffer, hdr_loc, "", TSHttpTxnServerRespBodyBytesGet(txnp));
+    txn_info += R"(,"server-response":)" + collect_headers(buffer, hdr_loc, TSHttpTxnServerRespBodyBytesGet(txnp));
     TSHandleMLocRelease(buffer, TS_NULL_MLOC, hdr_loc);
     buffer = nullptr;
   }
   if (TS_SUCCESS == TSHttpTxnClientRespGet(txnp, &buffer, &hdr_loc)) {
     TSDebug(PLUGIN_NAME, "Found proxy response");
-    txn_info += R"(,"proxy-response":)" + collect_headers(buffer, hdr_loc, "", TSHttpTxnClientRespBodyBytesGet(txnp));
+    txn_info += R"(,"proxy-response":)" + collect_headers(buffer, hdr_loc, TSHttpTxnClientRespBodyBytesGet(txnp));
     TSHandleMLocRelease(buffer, TS_NULL_MLOC, hdr_loc);
     buffer = nullptr;
   }
@@ -522,7 +541,7 @@ session_txn_handler(TSCont contp, TSEvent event, void *edata)
   case TS_EVENT_HTTP_TXN_START: {
     // This event is only handled if dump_body is configured, so no need to
     // check that here.
-    TxnData *txnData = new TxnData();
+    TxnData *txnData = new TxnData;
     TSHttpTxnArgSet(txnp, t_arg_idx, txnData);
     break;
   }
@@ -600,7 +619,7 @@ global_ssn_handler(TSCont contp, TSEvent event, void *edata)
     auto start = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch());
 
     // Create new per session data
-    SsnData *ssnData = new SsnData();
+    SsnData *ssnData = new SsnData;
     TSHttpSsnArgSet(ssnp, s_arg_idx, ssnData);
 
     TSContDataSet(ssnData->aio_cont, ssnData);
@@ -710,12 +729,12 @@ TSPluginInit(int argc, const char *argv[])
   info.support_email = "dev@trafficserver.apache.org";
 
   /// Commandline options
-  static const struct option longopts[] = {{"dump_body", optional_argument, nullptr, 'b'},
+  static const struct option longopts[] = {{"dump_body", no_argument, nullptr, 'b'},
                                            {"logdir", required_argument, nullptr, 'l'},
                                            {"sample", required_argument, nullptr, 's'},
                                            {"limit", required_argument, nullptr, 'm'},
-                                           {"client_ipv4", optional_argument, nullptr, '4'},
-                                           {"client_ipv6", optional_argument, nullptr, '6'},
+                                           {"client_ipv4", required_argument, nullptr, '4'},
+                                           {"client_ipv6", required_argument, nullptr, '6'},
                                            {nullptr, no_argument, nullptr, 0}};
   int opt                               = 0;
   while (opt >= 0) {
