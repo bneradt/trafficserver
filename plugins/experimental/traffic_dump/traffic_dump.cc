@@ -383,12 +383,17 @@ session_txn_handler(TSCont contp, TSEvent event, void *edata)
     ssnData->first = false;
 
     // "uuid":(string)
-    txn_info += "{" + json_entry("uuid", uuid, strlen(uuid));
-
-    // "connect-time":(number)
+    txn_info += "{";
+    // "connection-time":(number)
     TSHRTime start_time;
     TSHttpTxnMilestoneGet(txnp, TS_MILESTONE_UA_BEGIN, &start_time);
-    txn_info += ",\"start-time\":" + std::to_string(start_time);
+    txn_info += "\"connection-time\":" + std::to_string(start_time);
+
+    // The uuid is a header field for each message in the transaction. Use the
+    // "all" node to apply to each message.
+    std::string_view name = "uuid";
+    txn_info += ",\"all\":{\"headers\":{\"fields\":[" + json_entry_array(name.data(), name.size(), uuid, strlen(uuid));
+    txn_info += "]}}";
     ssnData->write_to_disk(txn_info);
     break;
   }
