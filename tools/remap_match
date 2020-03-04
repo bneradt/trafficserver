@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+
+# Copyright 2020, Verizon Media
+# SPDX-License-Identifier: Apache-2.0
+
+
+import argparse
+import re
+import sys
+
+description = \
+        '''Given a remap.config and a request target, return the line number
+        in the remap.config which matches that target.'''
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description=description)
+
+    parser.add_argument(
+            'remap_config',
+            type=argparse.FileType('r'),
+            help='The remap.config with which to find a matching rule.')
+    parser.add_argument(
+            'request_target',
+            help='The request target with which to find a matching rule.')
+
+    return parser.parse_args()
+
+
+def rule_type_is_valid(rule_type):
+    """
+    Check to see whether the given rule_type is valid or not.
+
+    Args:
+        rule_type (str): The rule type to check the validity of.
+
+    Returns:
+        True if the rule_type is valid, false otherwise.
+
+    >>> rule_type_is_valid('regex_map')
+    True
+    >>> rule_type_is_valid('juen')
+    False
+    """
+    valid_rules = {'map', 'map_with_recv_port', 'map_with_referer', 'reverse_map', 'redirect', 'redirect_temporary',
+                   'regex_map', 'regex_map_with_recv_port', 'regex_map_with_referer', 'regex_reverse_map',
+                   'regex_redirect', 'regex_redirect_temporary'}
+    return rule_type in valid_rules
+
+
+def parse_remap_line(remap_line):
+    """
+    Given the line in the remap file, return the (type, target) tuple.
+
+    >>> parse_remap_line('map https://proddata.xobni.yahoo.com/   https://pachinko-k8s.xobni.yahoo.com')
+    ('map', 'https://proddata.xobni.yahoo.com/')
+    >>> parse_remap_line('regex_map https://[cp][1-8]?.staticflickr.com/ http://real.farm1.static.flickr.com    @plugin=header_rewrite')
+    ('regex_map', 'https://[cp][1-8]?.staticflickr.com/')
+    """
+    return re.match('(\S+)\s+(\S+).*', remap_line).group(1, 2)
+
+
+def find_matching_rule(request_target, rules, request_types):
+    """
+    Given the request target and the rules, look within request_types to find the matching rule.
+
+    Args:
+        request_target (str): The target being searched for.
+        rules: The parsed rules that may match request_target.
+        request_types: The set of request_types to limit the search to.
+
+    Return:
+        line_number of the matching line, or 0 if not found.
+    """
+    matching_line = 0
+    for request_type in request_types:
+        if request_type not in rules:
+            continue
+        for (line_number, config_target) in rules[request_type]:
+            found = False
+            if 'regex_' in request_type:
+                found = re.match(config_target, request_target) is not None
+            else:
+                found = request_target.startswith(config_target)
+            if not found:
+                continue
+            if matching_line == 0:
+                matching_line = line_number
+            else:
+                matching_line = min(matching_line, line_number)
+    return matching_line
+
+
+def find_rule(remap_config, request_target):
+    """
+    Find the rule in remap_config that matches the request_target.
+
+    Args:
+        remap_config (file object): The remap.config file to parse.
+        request_target (str): The target for which to find a matching rule.
+
+    Return:
+        The line number of the matching rule.
+    """
+    line_count = 0
+    lines = []
+    rules = {}
+    for line in remap_config:
+        line_count += 1
+        lines.append(line)
+        if line[0] == '#':
+            continue
+        if not line.strip():
+            continue
+
+        rule_type, target = parse_remap_line(line)
+        if not rule_type_is_valid(rule_type):
+            print('Invalid rule type found at line {}: {}.'.format(line_count, rule_type))
+            print('Entire line: {}'.format(line))
+            return 1
+
+        if rule_type not in rules:
+            rules[rule_type] = [(line_count, target)]
+        else:
+            rules[rule_type].append((line_count, target))
+
+    groupings = [
+            ['map_with_recv_port', 'regex_map_with_recv_port'],
+            ['map', 'regex_map', 'reverse_map'],
+            ['redirect', 'redirect_temporary'],
+            ['regex_redirect', 'regex_redirect_temporary']]
+    for grouping in groupings:
+        matching_line_number = find_matching_rule(request_target, rules, grouping)
+        if matching_line_number:
+            print("Matching rule is at line: {}".format(matching_line_number))
+            print("Line content:\n{}".format(lines[matching_line_number-1]))
+            return 0
+
+    print("No matches found.")
+    return 1
+
+
+def main():
+    args = parse_args()
+    find_rule(args.remap_config, args.request_target)
+    return 0
+
+
+if __name__ == '__main__':
+    import doctest
+    doctest.testmod()
+    sys.exit(main())
