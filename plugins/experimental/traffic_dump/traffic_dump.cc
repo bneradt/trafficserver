@@ -58,6 +58,7 @@ int session_txn_handler(TSCont contp, TSEvent event, void *edata);
 
 /// Custom structure for per session data
 struct SsnData {
+  bool is_dumping      = false; //< Whether we are dumping this session or not.
   int log_fd           = -1;    //< Log file descriptor
   int aio_count        = 0;     //< Active AIO counts
   int64_t write_offset = 0;     //< AIO write offset
@@ -415,6 +416,10 @@ session_txn_handler(TSCont contp, TSEvent event, void *edata)
   }
 
   case TS_EVENT_HTTP_READ_REQUEST_HDR: {
+    if (!ssnData->is_dumping) {
+      // This transaction is not one of the sessions we are dumping. Ignore it.
+      break;
+    }
     // We must grab the client request information before remap happens because
     // the remap process modifies the request buffer.
     TSMBuffer buffer;
@@ -504,6 +509,10 @@ global_ssn_handler(TSCont contp, TSEvent event, void *edata)
     return TS_SUCCESS;
   }
   case TS_EVENT_HTTP_SSN_START: {
+    // Create new per session data
+    SsnData *ssnData = new SsnData;
+    TSHttpSsnArgSet(ssnp, s_arg_idx, ssnData);
+
     // Grab session id to do sampling
     int64_t id = TSHttpSsnIdGet(ssnp);
     if (id % sample_pool_size != 0) {
@@ -514,13 +523,10 @@ global_ssn_handler(TSCont contp, TSEvent event, void *edata)
               disk_usage.load());
       break;
     }
+    ssnData->is_dumping = true;
     // Beginning of a new session
     /// Get epoch time
     auto start = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch());
-
-    // Create new per session data
-    SsnData *ssnData = new SsnData;
-    TSHttpSsnArgSet(ssnp, s_arg_idx, ssnData);
 
     TSContDataSet(ssnData->aio_cont, ssnData);
 
@@ -585,7 +591,6 @@ global_ssn_handler(TSCont contp, TSEvent event, void *edata)
     TSMutexUnlock(ssnData->disk_io_mutex);
 
     TSHttpSsnHookAdd(ssnp, TS_HTTP_TXN_START_HOOK, ssnData->txn_cont);
-    TSHttpSsnHookAdd(ssnp, TS_HTTP_READ_REQUEST_HDR_HOOK, ssnData->txn_cont);
     TSHttpSsnHookAdd(ssnp, TS_HTTP_TXN_CLOSE_HOOK, ssnData->txn_cont);
     break;
   }
@@ -673,6 +678,12 @@ TSPluginInit(int argc, const char *argv[])
     TSCont ssncont = TSContCreate(global_ssn_handler, nullptr);
     TSHttpHookAdd(TS_HTTP_SSN_START_HOOK, ssncont);
     TSHttpHookAdd(TS_HTTP_SSN_CLOSE_HOOK, ssncont);
+
+    // Register the collecting of client-request headers at the global level so
+    // we can process requests before other plugins.
+    TSCont txn_cont = TSContCreate(session_txn_handler, nullptr);
+    TSHttpHookAdd(TS_HTTP_READ_REQUEST_HDR_HOOK, txn_cont);
+
     TSLifecycleHookAdd(TS_LIFECYCLE_MSG_HOOK, ssncont);
     TSDebug(PLUGIN_NAME, "Initialized with sample pool size %" PRId64 " bytes and disk limit %" PRId64 " bytes",
             sample_pool_size.load(), max_disk_usage.load());
