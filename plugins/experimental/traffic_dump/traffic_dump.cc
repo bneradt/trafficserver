@@ -578,6 +578,12 @@ global_ssn_handler(TSCont contp, TSEvent event, void *edata)
       }
 
       // Try to open log files for AIO
+      if (ts::file::exists(log_f)) {
+        // This really shouldn't exist since the connection ID per session
+        // should be unique. If there are duplicates, then our mutex mechanism
+        // won't protect the file from concurrent writers.
+        TSError("[%s] %s exists already.", PLUGIN_NAME, log_p.c_str());
+      }
       ssnData->log_fd = open(log_f.c_str(), O_RDWR | O_CREAT, S_IRWXU);
       if (ssnData->log_fd < 0) {
         TSMutexUnlock(ssnData->disk_io_mutex);
