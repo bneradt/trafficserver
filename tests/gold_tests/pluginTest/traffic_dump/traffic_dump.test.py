@@ -88,11 +88,13 @@ request_header = {"headers": "GET /client_ims HTTP/1.1\r\n"
                   "Host: www.example.com\r\n"
                   "UID: FILL\r\n\r\n",
                   "timestamp": "1469733493.993", "body": ""}
+large_body = 'x' * 1000
 response_header = {"headers": "HTTP/1.1 200 OK\r\n"
                    "Connection: close\r\n"
+                   "Content-Length: {}\r\n\r\n"
                    "Last-Modified: Tue, 08 May 2018 15:49:41 GMT\r\n"
-                   "Cache-Control: max-age=1\r\n\r\n",
-                   "timestamp": "1469733493.993", "body": "xxx"}
+                   "Cache-Control: max-age=1\r\n\r\n".format(len(large_body)),
+                   "timestamp": "1469733493.993", "body": large_body}
 server.addResponse("sessionlog.json", request_header, response_header)
 # Client IMS revalidation request. The response has to be the same
 request_IMS_header = {"headers": "GET /client_ims HTTP/1.1\r\n"
@@ -163,6 +165,10 @@ replay_file_session_6 = os.path.join(replay_dir, "127", "0000000000000005")
 ts.Disk.File(replay_file_session_6, exists=True)
 replay_file_session_7 = os.path.join(replay_dir, "127", "0000000000000006")
 ts.Disk.File(replay_file_session_7, exists=True)
+replay_file_session_8 = os.path.join(replay_dir, "127", "0000000000000007")
+ts.Disk.File(replay_file_session_8, exists=True)
+replay_file_session_9 = os.path.join(replay_dir, "127", "0000000000000008")
+ts.Disk.File(replay_file_session_9, exists=True)
 
 #
 # Test 1: Verify the correct behavior of two transactions across two sessions.
@@ -368,3 +374,17 @@ tr.Processes.Default.ReturnCode = 0
 tr.Processes.Default.Streams.stdout = "gold/cache_not_modified.gold"
 tr.StillRunningAfter = ts
 tr.StillRunningAfter = server
+
+tr = Test.AddTestRun("Verify the server-response size node has the expected value.")
+tr.Setup.CopyAs(verify_replay, Test.RunDirectory)
+
+tr.Processes.Default.Command = \
+        "python3 {0} {1} {2} {3} --server-response-size {4}".format(
+            verify_replay,
+            os.path.join(Test.Variables.AtsTestToolsDir, 'lib', 'replay_schema.json'),
+            replay_file_session_9,
+            sensitive_fields_arg,
+            len(large_body))
+tr.Processes.Default.ReturnCode = 0
+tr.StillRunningAfter = server
+tr.StillRunningAfter = ts

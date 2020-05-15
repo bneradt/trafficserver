@@ -95,21 +95,35 @@ def verify_request_target(replay_json, request_target):
     return True
 
 
-def verify_client_request_size(replay_json, client_request_size):
+def verify_content_size(replay_json, message_type, expected_content_size):
     """
     Verify that the 'url' element of the first transaction contains the request target.
     """
     try:
-        size = int(replay_json['sessions'][0]['transactions'][0]['client-request']['content']['size'])
+        size = int(replay_json['sessions'][0]['transactions'][0][message_type]['content']['size'])
     except KeyError:
         print("The replay file did not have content size element in the first client-request.")
         return False
 
-    if size != client_request_size:
-        print("Mismatched client-request request size. Expected: {}, received: {}".format(
-            client_request_size, size))
+    if size != expected_content_size:
+        print("Mismatched {} content:size. Expected: {}, received: {}".format(
+            message_type, expected_content_size, size))
         return False
     return True
+
+
+def verify_client_request_size(replay_json, client_request_size):
+    """
+    Verify that the content:size of the first client-request matches the expected value.
+    """
+    return verify_content_size(replay_json, 'client-request', client_request_size)
+
+
+def verify_server_response_size(replay_json, client_request_size):
+    """
+    Verify that the content:size of the first server-response matches the expected value.
+    """
+    return verify_content_size(replay_json, 'server-response', client_request_size)
 
 
 def verify_sensitive_fields_not_dumped(replay_json, sensitive_fields):
@@ -186,6 +200,9 @@ def parse_args():
     parser.add_argument("--client-request-size",
                         type=int,
                         help="The expected size value in the client-request node.")
+    parser.add_argument("--server-response-size",
+                        type=int,
+                        help="The expected size value in the server-response node.")
     parser.add_argument("--sensitive-fields",
                         action="append",
                         help="The fields that are considered sensitive and replaced with insensitive values.")
@@ -221,6 +238,9 @@ def main():
         return 1
 
     if args.client_request_size and not verify_client_request_size(replay_json, args.client_request_size):
+        return 1
+
+    if args.server_response_size and not verify_server_response_size(replay_json, args.server_response_size):
         return 1
 
     if args.sensitive_fields and not verify_sensitive_fields_not_dumped(replay_json, args.sensitive_fields):
