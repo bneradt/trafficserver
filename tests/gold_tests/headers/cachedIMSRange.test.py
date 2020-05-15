@@ -56,6 +56,16 @@ request_etagfill_header = {"headers": "GET /etag HTTP/1.1\r\nHost: www.example.c
 response_etagfill_header = {"headers": "HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\nCache-Control: max-age=3\r\n\r\n", "timestamp": "1469733493.993", "body": ""}
 server.addResponse("sessionlog.json", request_etagfill_header, response_etagfill_header)
 
+# Populate the cache for a future client IMS request
+request_header = {"headers": "GET /client_ims HTTP/1.1\r\nHost: www.example.com\r\nUID: FILL\r\n\r\n", "timestamp": "1469733493.993", "body": ""}
+response_header = {"headers": "HTTP/1.1 200 OK\r\nConnection: close\r\nLast-Modified: Tue, 08 May 2018 15:49:41 GMT\r\nCache-Control: max-age=1\r\n\r\n", "timestamp": "1469733493.993", "body": "xxx"}
+server.addResponse("sessionlog.json", request_header, response_header)
+# Client IMS revalidation request
+request_IMS_header = {"headers": "GET /client_ims HTTP/1.1\r\nUID: ClientIMS\r\nIf-Modified-Since: Tue, 08 May 2018 15:49:41 GMT\r\nHost: www.example.com\r\n\r\n", "timestamp": "1469733493.993", "body": ""}
+# The response has to be the same as the cached one so ATS replies with a 304.
+response_IMS_header = response_header
+server.addResponse("sessionlog.json", request_IMS_header, response_IMS_header)
+
 # ATS Configuration
 ts = Test.MakeATSProcess("ts")
 ts.Disk.plugin_config.AddLine('xdebug.so')
@@ -83,7 +93,7 @@ tr.StillRunningAfter = server
 
 # Test 1 - Once it goes stale, fetch it again. We expect Origin to get IMS request, and serve a 304. We expect ATS to refresh the object, and give a 200 to user
 tr = Test.AddTestRun()
-tr.DelayStart=2
+tr.DelayStart = 2
 tr.Processes.Default.Command = 'curl -s -D - -v --ipv4 --http1.1 -H"UID: IMS" -H "x-debug: x-cache,x-cache-key,via" -H "Host: www.example.com" http://localhost:{0}/'.format(ts.Variables.port)
 tr.Processes.Default.ReturnCode = 0
 tr.Processes.Default.Streams.stdout = "cache_and_req_body-hit-stale.gold"
@@ -92,7 +102,7 @@ tr.StillRunningAfter = server
 
 # Test 2 - Once it goes stale, fetch it via a range request. We expect Origin to get IMS request, and serve a 304. We expect ATS to refresh the object, and give a 206 to user
 tr = Test.AddTestRun()
-tr.DelayStart=2
+tr.DelayStart = 2
 tr.Processes.Default.Command = 'curl --range 0-1 -s -D - -v --ipv4 --http1.1 -H"UID: IMS" -H "x-debug: x-cache,x-cache-key,via" -H "Host: www.example.com" http://localhost:{0}/'.format(ts.Variables.port)
 tr.Processes.Default.ReturnCode = 0
 tr.Processes.Default.Streams.stdout = "cache_and_req_body-hit-stale-206.gold"
@@ -108,7 +118,7 @@ tr.StillRunningAfter = server
 
 # Test 4 - Once the etag object goes stale, fetch it again. We expect Origin to get INM request, and serve a 304. We expect ATS to refresh the object, and give a 200 to user
 tr = Test.AddTestRun()
-tr.DelayStart=2
+tr.DelayStart = 2
 tr.Processes.Default.Command = 'curl -s -D - -v --ipv4 --http1.1 -H"UID: INM" -H "x-debug: x-cache,x-cache-key,via" -H "Host: www.example.com" http://localhost:{0}/etag'.format(ts.Variables.port)
 tr.Processes.Default.ReturnCode = 0
 tr.Processes.Default.Streams.stdout = "cache_and_req_body-hit-stale-INM.gold"
@@ -117,7 +127,7 @@ tr.StillRunningAfter = server
 
 # Test 5 - Once the etag object goes stale, fetch it via a range request. We expect Origin to get INM request, and serve a 304. We expect ATS to refresh the object, and give a 206 to user
 tr = Test.AddTestRun()
-tr.DelayStart=2
+tr.DelayStart = 2
 tr.Processes.Default.Command = 'curl --range 0-1 -s -D - -v --ipv4 --http1.1 -H"UID: INM" -H "x-debug: x-cache,x-cache-key,via" -H "Host: www.example.com" http://localhost:{0}/etag'.format(ts.Variables.port)
 tr.Processes.Default.ReturnCode = 0
 tr.Processes.Default.Streams.stdout = "cache_and_req_body-hit-stale-206-etag.gold"
@@ -126,7 +136,7 @@ tr.StillRunningAfter = server
 
 # Test 6 - The origin changes the initial LMT object to 0 byte. We expect ATS to fetch and serve the new 0 byte object.
 tr = Test.AddTestRun()
-tr.DelayStart=3
+tr.DelayStart = 3
 tr.Processes.Default.Command = 'curl -s -D - -v --ipv4 --http1.1 -H"UID: noBody" -H "x-debug: x-cache,x-cache-key,via" -H "Host: www.example.com" http://localhost:{0}/'.format(ts.Variables.port)
 tr.Processes.Default.ReturnCode = 0
 tr.Processes.Default.Streams.stdout = "cache_and_req_nobody-hit-stale.gold"
@@ -135,7 +145,7 @@ tr.StillRunningAfter = server
 
 # Test 7 - Fetch the new 0 byte object again when fresh in cache to ensure its still a 0 byte object.
 tr = Test.AddTestRun()
-tr.DelayStart=3
+tr.DelayStart = 3
 tr.Processes.Default.Command = 'curl -s -D - -v --ipv4 --http1.1 -H"UID: noBody" -H "x-debug: x-cache,x-cache-key,via" -H "Host: www.example.com" http://localhost:{0}/'.format(ts.Variables.port)
 tr.Processes.Default.ReturnCode = 0
 tr.Processes.Default.Streams.stdout = "cache_and_req_nobody-hit-stale.gold"
@@ -144,7 +154,7 @@ tr.StillRunningAfter = server
 
 # Test 8 - The origin changes the etag object to 0 byte 404. We expect ATS to fetch and serve the 404 0 byte object.
 tr = Test.AddTestRun()
-tr.DelayStart=2
+tr.DelayStart = 2
 tr.Processes.Default.Command = 'curl -s -D - -v --ipv4 --http1.1 -H"UID: EtagError" -H "x-debug: x-cache,x-cache-key,via" -H "Host: www.example.com" http://localhost:{0}/etag'.format(ts.Variables.port)
 tr.Processes.Default.ReturnCode = 0
 tr.Processes.Default.Streams.stdout = "cache_and_error_nobody.gold"
@@ -153,9 +163,28 @@ tr.StillRunningAfter = server
 
 # Test 9 - Fetch the 0 byte etag object again when fresh in cache to ensure its still a 0 byte object
 tr = Test.AddTestRun()
-tr.DelayStart=2
+tr.DelayStart = 2
 tr.Processes.Default.Command = 'curl -s -D - -v --ipv4 --http1.1 -H"UID: EtagError" -H "x-debug: x-cache,x-cache-key,via" -H "Host: www.example.com" http://localhost:{0}/etag'.format(ts.Variables.port)
 tr.Processes.Default.ReturnCode = 0
 tr.Processes.Default.Streams.stdout = "cache_and_error_nobody.gold"
+tr.StillRunningAfter = ts
+tr.StillRunningAfter = server
+
+# Test 10 - Fill a 3 byte object with Last-Modified time into cache.
+tr = Test.AddTestRun()
+tr.Processes.Default.Command = 'curl -s -D - -v --ipv4 --http1.1 -H"UID: Fill" -H "x-debug: x-cache,x-cache-key,via" -H "Host: www.example.com" http://localhost:{0}/client_ims'.format(ts.Variables.port)
+tr.Processes.Default.ReturnCode = 0
+tr.Processes.Default.Streams.stdout = "cache_and_req_body-miss.gold"
+tr.StillRunningAfter = ts
+tr.StillRunningAfter = server
+
+# Test 11 - Once it goes stale, have the client perform an IMS request. The
+# request should get forwarded onto the server, who will reply with a 200, the
+# response will be the same, so ATS will reply with a 304.
+tr = Test.AddTestRun()
+tr.DelayStart = 2
+tr.Processes.Default.Command = 'curl -s -D - -v --ipv4 --http1.1 -H"UID: ClientIMS" -H "If-Modified-Since: Tue, 08 May 2018 15:49:41 GMT" -H "x-debug: x-cache,x-cache-key,via" -H "Host: www.example.com" http://localhost:{0}/client_ims'.format(ts.Variables.port)
+tr.Processes.Default.ReturnCode = 0
+tr.Processes.Default.Streams.stdout = "cache_not_modified.gold"
 tr.StillRunningAfter = ts
 tr.StillRunningAfter = server

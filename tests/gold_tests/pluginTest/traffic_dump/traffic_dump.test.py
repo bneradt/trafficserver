@@ -83,6 +83,27 @@ response_header = {"headers": "HTTP/1.1 200 OK"
                    "timestamp": "1469733493.993", "body": ""}
 server.addResponse("sessionfile.log", request_header, response_header)
 
+# Populate the cache for a future client IMS request
+request_header = {"headers": "GET /client_ims HTTP/1.1\r\n"
+                  "Host: www.example.com\r\n"
+                  "UID: FILL\r\n\r\n",
+                  "timestamp": "1469733493.993", "body": ""}
+response_header = {"headers": "HTTP/1.1 200 OK\r\n"
+                   "Connection: close\r\n"
+                   "Last-Modified: Tue, 08 May 2018 15:49:41 GMT\r\n"
+                   "Cache-Control: max-age=1\r\n\r\n",
+                   "timestamp": "1469733493.993", "body": "xxx"}
+server.addResponse("sessionlog.json", request_header, response_header)
+# Client IMS revalidation request. The response has to be the same
+request_IMS_header = {"headers": "GET /client_ims HTTP/1.1\r\n"
+                      "UID: ClientIMS\r\n"
+                      "If-Modified-Since: Tue, 08 May 2018 15:49:41 GMT\r\n"
+                      "Host: www.example.com\r\n\r\n",
+                      "timestamp": "1469733493.993", "body": ""}
+# The response has to be the same as the cached one so ATS replies with a 304.
+response_IMS_header = response_header
+server.addResponse("sessionlog.json", request_IMS_header, response_IMS_header)
+
 # Define ATS and configure it.
 ts = Test.MakeATSProcess("ts")
 replay_dir = os.path.join(ts.RunDirectory, "ts", "log")
@@ -321,3 +342,29 @@ tr.Processes.Default.Command = 'python3 {0} {1} {2} --client-protocols "{3}"'.fo
 tr.Processes.Default.ReturnCode = 0
 tr.StillRunningAfter = server
 tr.StillRunningAfter = ts
+
+#
+# Test 6: Verify correct handling of a 304 response.
+#
+tr = Test.AddTestRun()
+tr.Processes.Default.Command = ('curl -s -D - -v --ipv4 --http1.1 -H"UID: Fill" '
+                                '-H "x-debug: x-cache,x-cache-key,via" -H "Host: www.example.com" '
+                                'http://localhost:{0}/client_ims'.format(ts.Variables.port))
+tr.Processes.Default.ReturnCode = 0
+tr.Processes.Default.Streams.stdout = "gold/cache_and_req_body_miss.gold"
+tr.StillRunningAfter = ts
+tr.StillRunningAfter = server
+
+# Once it goes stale, have the client perform an IMS request. The request
+# should get forwarded onto the server, who will reply with a 200, the response
+# will be the same, so ATS will reply with a 304.
+tr = Test.AddTestRun()
+tr.DelayStart = 2
+tr.Processes.Default.Command = ('curl -s -D - -v --ipv4 --http1.1 -H"UID: ClientIMS" '
+                                '-H "If-Modified-Since: Tue, 08 May 2018 15:49:41 GMT" '
+                                '-H "x-debug: x-cache,x-cache-key,via" -H "Host: www.example.com" '
+                                'http://localhost:{0}/client_ims'.format(ts.Variables.port))
+tr.Processes.Default.ReturnCode = 0
+tr.Processes.Default.Streams.stdout = "gold/cache_not_modified.gold"
+tr.StillRunningAfter = ts
+tr.StillRunningAfter = server
