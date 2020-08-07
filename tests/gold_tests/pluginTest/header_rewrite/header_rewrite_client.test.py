@@ -47,7 +47,7 @@ ts.Disk.remap_config.AddLine(
     'map http://www.example.com:8080/from_path/ https://127.0.0.1:{0}/to_path/ @plugin=header_rewrite.so @pparam={1}/rule_client.conf'.format(
         server.Variables.Port, Test.RunDirectory))
 ts.Disk.remap_config.AddLine(
-    'regex_map http://www.no_path.com https://127.0.0.1:{0}?name=brian @plugin=header_rewrite.so @pparam={1}/set_redirect.conf'.format(
+        'regex_map http://^(?:www\.)?no_path\.com$ https://127.0.0.1:{0}?ncid=mbr_rusacqad00000080/ @plugin=header_rewrite.so @pparam={1}/set_redirect.conf'.format(
         server.Variables.Port, Test.RunDirectory))
 
 # call localhost straight
@@ -64,7 +64,7 @@ ts.Streams.All = "gold/header_rewrite-tag.gold"
 
 # Verify header_rewrite can handle URLs without a path.
 tr = Test.AddTestRun()
-tr.Processes.Default.Command = 'curl --head --proxy 127.0.0.1:{0} "http://www.no_path.com" -H "Proxy-Connection: keep-alive" --verbose'.format(
+tr.Processes.Default.Command = 'curl --head 127.0.0.1:{0} -H "Host: no_path.com" --verbose'.format(
     ts.Variables.port)
 tr.Processes.Default.ReturnCode = 0
 # time delay as proxy.config.http.wait_for_cache could be broken
