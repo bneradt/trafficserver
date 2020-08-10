@@ -1,8 +1,8 @@
 ``
 > HEAD / HTTP/1.1
-> Host: computercheckup.com
+> Host: no_path.com
 ``
 < HTTP/1.1 301 Redirect
 ``
-< Location: https://computercheckup.aol.com/?ncid=mbr_rusacqad00000080/
+< Location: http://no_path.com/?ncid=mbr_rusacqad00000080/
 ``

@@ -24,21 +24,17 @@ Test.ContinueOnFail = True
 # Define default ATS
 ts = Test.MakeATSProcess("ts")
 server = Test.MakeOriginServer("server")
-dns = Test.MakeDNServer("dns")
 
 Test.testName = ""
 request_header = {"headers": "GET / HTTP/1.1\r\nHost: www.example.com\r\n\r\n", "timestamp": "1469733493.993", "body": ""}
 response_header = {"headers": "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n", "timestamp": "1469733493.993", "body": ""}
 server.addResponse("sessionfile.log", request_header, response_header)
-request_header = {"headers": "GET / HTTP/1.1\r\nHost: computercheckup.com\r\n\r\n", "timestamp": "1469733493.993", "body": ""}
+request_header = {"headers": "GET / HTTP/1.1\r\nHost: no_path.com\r\n\r\n", "timestamp": "1469733493.993", "body": ""}
 server.addResponse("sessionfile.log", request_header, response_header)
 
 ts.Disk.records_config.update({
     'proxy.config.diags.debug.enabled': 1,
     'proxy.config.diags.debug.tags': 'header.*',
-
-    'proxy.config.dns.nameservers': '127.0.0.1:{0}'.format(dns.Variables.Port),
-    'proxy.config.dns.resolv_conf': 'NULL',
 })
 # The following rule changes the status code returned from origin server to 303
 ts.Setup.CopyAs('rules/rule_client.conf', Test.RunDirectory)
@@ -51,10 +47,9 @@ ts.Disk.remap_config.AddLine(
     'map http://www.example.com:8080/from_path/ https://127.0.0.1:{0}/to_path/ @plugin=header_rewrite.so @pparam={1}/rule_client.conf'.format(
         server.Variables.Port, Test.RunDirectory))
 ts.Disk.remap_config.AddLine(
-    'regex_map http://^(?:www\.)?computercheckup\.com$ https://computercheckup.aol.com?ncid=mbr_rusacqad00000080/ @plugin=header_rewrite.so @pparam={1}/set_redirect.conf'.format(
+    'map http://no_path.com http://no_path.com?ncid=mbr_rusacqad00000080/ @plugin=header_rewrite.so @pparam={1}/set_redirect.conf'.format(
         server.Variables.Port,
         Test.RunDirectory))
-dns.addRecords(records={"computercheckup.com": ["127.0.0.1"]})
 
 # call localhost straight
 tr = Test.AddTestRun()
@@ -72,7 +67,7 @@ ts.Streams.All = "gold/header_rewrite-tag.gold"
 tr = Test.AddTestRun()
 
 # Verify header_rewrite can handle URLs without a path.
-tr.Processes.Default.Command = 'curl --head 127.0.0.1:{0} -H "Host: computercheckup.com" --verbose'.format(
+tr.Processes.Default.Command = 'curl --head 127.0.0.1:{0} -H "Host: no_path.com" --verbose'.format(
     ts.Variables.port)
 tr.Processes.Default.ReturnCode = 0
 # time delay as proxy.config.http.wait_for_cache could be broken
