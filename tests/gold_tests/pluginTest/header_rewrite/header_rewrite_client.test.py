@@ -51,28 +51,25 @@ ts.Disk.remap_config.AddLine(
     'map http://www.example.com:8080/from_path/ https://127.0.0.1:{0}/to_path/ @plugin=header_rewrite.so @pparam={1}/rule_client.conf'.format(
         server.Variables.Port, Test.RunDirectory))
 ts.Disk.remap_config.AddLine(
-        'regex_map http://^(?:www\.)?computercheckup\.com$ https://computercheckup.aol.com?ncid=mbr_rusacqad00000080/ @plugin=header_rewrite.so @pparam={1}/set_redirect.conf'.format(
-        server.Variables.Port, Test.RunDirectory))
+    'regex_map http://^(?:www\.)?computercheckup\.com$ https://computercheckup.aol.com?ncid=mbr_rusacqad00000080/ @plugin=header_rewrite.so @pparam={1}/set_redirect.conf'.format(
+        server.Variables.Port,
+        Test.RunDirectory))
 dns.addRecords(records={"computercheckup.com": ["127.0.0.1"]})
 
 # call localhost straight
-# tr = Test.AddTestRun()
-# tr.Processes.Default.Command = 'curl --proxy 127.0.0.1:{0} "http://www.example.com/from_path/hello?=foo=bar" -H "Proxy-Connection: keep-alive" --verbose'.format(
-#     ts.Variables.port)
-# tr.Processes.Default.ReturnCode = 0
-# # time delay as proxy.config.http.wait_for_cache could be broken
-# tr.Processes.Default.StartBefore(server, ready=When.PortOpen(server.Variables.Port))
-# tr.Processes.Default.StartBefore(Test.Processes.ts)
-# tr.Processes.Default.Streams.stderr = "gold/header_rewrite-client.gold"
-# tr.StillRunningAfter = server
-# ts.Streams.All = "gold/header_rewrite-tag.gold"
+tr = Test.AddTestRun()
+tr.Processes.Default.Command = 'curl --proxy 127.0.0.1:{0} "http://www.example.com/from_path/hello?=foo=bar" -H "Proxy-Connection: keep-alive" --verbose'.format(
+    ts.Variables.port)
+tr.Processes.Default.ReturnCode = 0
+# time delay as proxy.config.http.wait_for_cache could be broken
+tr.Processes.Default.StartBefore(server, ready=When.PortOpen(server.Variables.Port))
+tr.Processes.Default.StartBefore(Test.Processes.ts)
+tr.Processes.Default.Streams.stderr = "gold/header_rewrite-client.gold"
+tr.StillRunningAfter = server
+ts.Streams.All = "gold/header_rewrite-tag.gold"
 
 # Verify header_rewrite can handle URLs without a path.
 tr = Test.AddTestRun()
-
-# Remove when above is uncommented...
-tr.Processes.Default.StartBefore(server, ready=When.PortOpen(server.Variables.Port))
-tr.Processes.Default.StartBefore(Test.Processes.ts)
 
 # Verify header_rewrite can handle URLs without a path.
 tr.Processes.Default.Command = 'curl --head 127.0.0.1:{0} -H "Host: computercheckup.com" --verbose'.format(
