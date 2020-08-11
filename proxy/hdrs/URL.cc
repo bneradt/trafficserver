@@ -827,19 +827,22 @@ url_length_get(URLImpl *url)
   }
 
   if (url->m_ptr_path) {
-    length += url->m_len_path + 1; // +1 for /
+    // The way we parse path, it will include the first '/' if it exists
+    // because, unlike the '?' for query and the '#' for fragment, any first
+    // '/' is a part of the path.
+    length += url->m_len_path;
   }
 
   if (url->m_ptr_params && url->m_len_params > 0) {
     length += url->m_len_params + 1; // +1 for ";"
   }
 
-  if (url->m_ptr_query && url->m_len_query > 0) {
-    length += url->m_len_query;
+  if (url->m_ptr_query) {
+    length += url->m_len_query + 1; // +1 for "?"
   }
 
-  if (url->m_ptr_fragment && url->m_len_fragment > 0) {
-    length += url->m_len_fragment;
+  if (url->m_ptr_fragment) {
+    length += url->m_len_fragment + 1; // +1 for "#"
   }
 
   return length;
@@ -1415,7 +1418,7 @@ parse_params2:
   goto parse_params2;
 
 parse_query1:
-  query_start = cur;
+  query_start = cur + 1;
   GETNEXT(done);
 parse_query2:
   if (*cur == '#') {
@@ -1426,7 +1429,7 @@ parse_query2:
   goto parse_query2;
 
 parse_fragment1:
-  fragment_start = cur;
+  fragment_start = cur + 1;
   GETNEXT(done);
   fragment_end = end;
 
@@ -1582,12 +1585,19 @@ url_print(URLImpl *url, char *buf_start, int buf_length, int *buf_index_inout, i
     TRY(mime_mem_print(url->m_ptr_params, url->m_len_params, buf_start, buf_length, buf_index_inout, buf_chars_to_skip_inout));
   }
 
-  if (url->m_ptr_query && url->m_len_query > 0) {
-    TRY(mime_mem_print(url->m_ptr_query, url->m_len_query, buf_start, buf_length, buf_index_inout, buf_chars_to_skip_inout));
+  if (url->m_ptr_query) {
+    TRY(mime_mem_print("?", 1, buf_start, buf_length, buf_index_inout, buf_chars_to_skip_inout));
+    if (url->m_len_query > 0) {
+      TRY(mime_mem_print(url->m_ptr_query, url->m_len_query, buf_start, buf_length, buf_index_inout, buf_chars_to_skip_inout));
+    }
   }
 
-  if (url->m_ptr_fragment && url->m_len_fragment > 0) {
-    TRY(mime_mem_print(url->m_ptr_fragment, url->m_len_fragment, buf_start, buf_length, buf_index_inout, buf_chars_to_skip_inout));
+  if (url->m_ptr_fragment) {
+    TRY(mime_mem_print("#", 1, buf_start, buf_length, buf_index_inout, buf_chars_to_skip_inout));
+    if (url->m_len_fragment > 0) {
+      TRY(
+        mime_mem_print(url->m_ptr_fragment, url->m_len_fragment, buf_start, buf_length, buf_index_inout, buf_chars_to_skip_inout));
+    }
   }
 
   return 1;
