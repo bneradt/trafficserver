@@ -1101,7 +1101,7 @@ remap_parse_config_bti(const char *path, BUILD_TABLE_INFO *bti)
     tmp          = map_to;
 
     new_mapping->toURL.create(nullptr);
-    rparse                   = new_mapping->toURL.parse_no_path_component_breakdown(tmp, length);
+    rparse                   = new_mapping->toURL.parse(tmp, length);
     map_to_start[origLength] = '\0'; // Unwhack
 
     if (rparse != PARSE_RESULT_DONE) {
