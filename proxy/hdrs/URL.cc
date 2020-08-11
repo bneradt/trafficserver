@@ -1343,9 +1343,6 @@ url_parse_internet(HdrHeap *heap, URLImpl *url, const char **start, char const *
     }
     url_port_set(heap, url, port._ptr, port._size, copy_strings_p);
   }
-  if ('/' == *cur) {
-    ++cur; // must do this after filling in host/port.
-  }
   *start = cur;
   return PARSE_RESULT_DONE;
 }
@@ -1418,7 +1415,7 @@ parse_params2:
   goto parse_params2;
 
 parse_query1:
-  query_start = cur + 1;
+  query_start = cur;
   GETNEXT(done);
 parse_query2:
   if (*cur == '#') {
@@ -1429,7 +1426,7 @@ parse_query2:
   goto parse_query2;
 
 parse_fragment1:
-  fragment_start = cur + 1;
+  fragment_start = cur;
   GETNEXT(done);
   fragment_end = end;
 
@@ -1577,7 +1574,6 @@ url_print(URLImpl *url, char *buf_start, int buf_length, int *buf_index_inout, i
   }
 
   if (url->m_ptr_path) {
-    TRY(mime_mem_print("/", 1, buf_start, buf_length, buf_index_inout, buf_chars_to_skip_inout));
     TRY(mime_mem_print(url->m_ptr_path, url->m_len_path, buf_start, buf_length, buf_index_inout, buf_chars_to_skip_inout));
   }
 
@@ -1587,12 +1583,10 @@ url_print(URLImpl *url, char *buf_start, int buf_length, int *buf_index_inout, i
   }
 
   if (url->m_ptr_query && url->m_len_query > 0) {
-    TRY(mime_mem_print("?", 1, buf_start, buf_length, buf_index_inout, buf_chars_to_skip_inout));
     TRY(mime_mem_print(url->m_ptr_query, url->m_len_query, buf_start, buf_length, buf_index_inout, buf_chars_to_skip_inout));
   }
 
   if (url->m_ptr_fragment && url->m_len_fragment > 0) {
-    TRY(mime_mem_print("#", 1, buf_start, buf_length, buf_index_inout, buf_chars_to_skip_inout));
     TRY(mime_mem_print(url->m_ptr_fragment, url->m_len_fragment, buf_start, buf_length, buf_index_inout, buf_chars_to_skip_inout));
   }
 
