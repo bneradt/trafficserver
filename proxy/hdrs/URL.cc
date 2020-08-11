@@ -828,8 +828,6 @@ url_length_get(URLImpl *url)
 
   if (url->m_ptr_path) {
     length += url->m_len_path + 1; // +1 for /
-  } else {
-    length += 1; // +1 for /
   }
 
   if (url->m_ptr_params && url->m_len_params > 0) {
@@ -1297,6 +1295,7 @@ url_parse_internet(HdrHeap *heap, URLImpl *url, const char **start, char const *
       ++cur;
       break;
     case '/':    // we're done with this phase.
+    case '?':    // we're done with this phase.
       end = cur; // cause loop exit
       break;
     default:
@@ -1572,9 +1571,8 @@ url_print(URLImpl *url, char *buf_start, int buf_length, int *buf_index_inout, i
     }
   }
 
-  TRY(mime_mem_print("/", 1, buf_start, buf_length, buf_index_inout, buf_chars_to_skip_inout));
-
   if (url->m_ptr_path) {
+    TRY(mime_mem_print("/", 1, buf_start, buf_length, buf_index_inout, buf_chars_to_skip_inout));
     TRY(mime_mem_print(url->m_ptr_path, url->m_len_path, buf_start, buf_length, buf_index_inout, buf_chars_to_skip_inout));
   }
 

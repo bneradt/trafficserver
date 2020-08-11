@@ -64,8 +64,6 @@ ts.Streams.All = "gold/header_rewrite-tag.gold"
 
 # Verify header_rewrite can handle URLs without a path.
 tr = Test.AddTestRun()
-
-# Verify header_rewrite can handle URLs without a path.
 tr.Processes.Default.Command = 'curl --head 127.0.0.1:{0} -H "Host: no_path.com" --verbose'.format(
     ts.Variables.port)
 tr.Processes.Default.ReturnCode = 0
