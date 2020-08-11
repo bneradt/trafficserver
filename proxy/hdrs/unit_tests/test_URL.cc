@@ -93,3 +93,73 @@ TEST_CASE("ParseRulesStrictURI", "[proxy][parseuri]")
     }
   }
 }
+
+TEST_CASE("UrlParse", "[proxy][parseurl]")
+{
+  constexpr bool IS_VALID = true;
+  struct url_parse_test_case {
+    const std::string uri;
+    bool is_valid;
+  };
+  std::vector<url_parse_test_case> url_parse_test_cases = {
+    {"http://", IS_VALID},
+    {"https:///", IS_VALID},
+    // RFC 3986 section-3: When authority is not present, the path cannot begin
+    // with two slash characters ("//").
+    {"https:////", !IS_VALID},
+
+    {"mailto:Brian.Neradt@example.com", IS_VALID},
+    {"mailto:Brian.Neradt@example.com:25", IS_VALID},
+
+    {"https://www.example.com", IS_VALID},
+    {"https://www.example.com/", IS_VALID},
+    {"https://127.0.0.1", IS_VALID},
+    {"https://[::1]", IS_VALID},
+    {"https://127.0.0.1/", IS_VALID},
+    {"https://www.example.com:8888", IS_VALID},
+    {"https://www.example.com:8888/", IS_VALID},
+
+    {"https://www.example.com/a/path", IS_VALID},
+    {"https://www.example.com/a/path?", IS_VALID},
+    {"https://www.example.com/a/path?name=value", IS_VALID},
+    {"https://www.example.com/a/path?name=/a/path/value", IS_VALID},
+    {"https://www.example.com/a/path?name=/a/path/value;some=other_value", IS_VALID},
+    {"https://www.example.com/a/path?name=/a/path/value;some=other_value/", IS_VALID},
+
+    {"https://www.example.com?", IS_VALID},
+    {"https://www.example.com?name=value", IS_VALID},
+    {"https://www.example.com?name=value/", IS_VALID},
+
+    {"https://www.example.com#", IS_VALID},
+    {"https://www.example.com#some=value", IS_VALID},
+    {"https://www.example.com/a/path#", IS_VALID},
+    {"https://www.example.com/a/path#some=value", IS_VALID},
+    {"https://www.example.com/a/path#some=value?", IS_VALID},
+    {"https://www.example.com/a/path#some=value?with_question", IS_VALID},
+    {"https://www.example.com/a/path?name=value?_with_question#some=value?with_question/", IS_VALID},
+  };
+
+  for (auto const &test_case : url_parse_test_cases) {
+    URL url;
+    HdrHeap *heap = new_HdrHeap();
+    url.create(heap);
+    auto const result = url.parse(test_case.uri);
+    if (test_case.is_valid && result != PARSE_RESULT_DONE) {
+      std::printf("Parse URI: \"%s\", expected it to be valid but it was parsed invalid (%d)\n", test_case.uri.c_str(), result);
+      CHECK(false);
+    } else if (!test_case.is_valid && result != PARSE_RESULT_ERROR) {
+      std::printf("Parse URI: \"%s\", expected it to be invalid but it was parsed valid (%d)\n", test_case.uri.c_str(), result);
+      CHECK(false);
+    }
+    if (result == PARSE_RESULT_DONE) {
+      char buf[1024];
+      int index  = 0;
+      int offset = 0;
+      url.print(buf, sizeof(buf), &index, &offset);
+      std::string printed_url{buf, static_cast<size_t>(index)};
+      CHECK(test_case.uri == printed_url);
+    }
+
+    heap->destroy();
+  }
+}

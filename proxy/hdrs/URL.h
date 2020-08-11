@@ -279,6 +279,7 @@ public:
   const char *fragment_get(int *length);
   void fragment_set(const char *value, int length);
 
+  ParseResult parse(std::string_view url);
   ParseResult parse(const char **start, const char *end);
   ParseResult parse(const char *str, int length);
   ParseResult parse_no_path_component_breakdown(const char *str, int length);
@@ -682,6 +683,17 @@ URL::fragment_set(const char *value, int length)
 {
   ink_assert(valid());
   url_fragment_set(m_heap, m_url_impl, value, length, true);
+}
+
+/**
+  Parser doesn't clear URL first, so if you parse over a non-clear URL,
+  the resulting URL may contain some of the previous data.
+
+ */
+inline ParseResult
+URL::parse(std::string_view url)
+{
+  return this->parse(url.data(), static_cast<int>(url.size()));
 }
 
 /**

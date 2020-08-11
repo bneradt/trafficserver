@@ -1294,8 +1294,13 @@ url_parse_internet(HdrHeap *heap, URLImpl *url, const char **start, char const *
       bracket = cur; // location and flag.
       ++cur;
       break;
+    // RFC 3986, section 3.2:
+    // The authority component is ...  terminated by the next slash ("/"),
+    // question mark ("?"), or number sign ("#") character, or by the end of
+    // the URI.
     case '/':    // we're done with this phase.
     case '?':    // we're done with this phase.
+    case '#':    // we're done with this phase.
       end = cur; // cause loop exit
       break;
     default:
