@@ -835,11 +835,11 @@ url_length_get(URLImpl *url)
   }
 
   if (url->m_ptr_query && url->m_len_query > 0) {
-    length += url->m_len_query + 1; // +1 for "?"
+    length += url->m_len_query;
   }
 
   if (url->m_ptr_fragment && url->m_len_fragment > 0) {
-    length += url->m_len_fragment + 1; // +1 for "#"
+    length += url->m_len_fragment;
   }
 
   return length;
