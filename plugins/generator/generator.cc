@@ -367,9 +367,9 @@ GeneratorParseRequest(GeneratorRequest *grq)
       switch (count) {
       case 0:
         // First path component is "cache" or "nocache".
-        if (memcmp(path, "cache", 5) == 0) {
+        if (memcmp(path, "/cache", 6) == 0) {
           grq->flags |= GeneratorRequest::CACHEABLE;
-        } else if (memcmp(path, "nocache", 7) == 0) {
+        } else if (memcmp(path, "/nocache", 8) == 0) {
           grq->flags &= ~GeneratorRequest::CACHEABLE;
         } else {
           VDEBUG("first component is %.*s, expecting 'cache' or 'nocache'", (int)nbytes, path);
@@ -602,7 +602,7 @@ CheckCacheable(TSHttpTxn txnp, TSMLoc url, TSMBuffer bufp)
   int pathsz       = 0;
   const char *path = TSUrlPathGet(bufp, url, &pathsz);
 
-  if (path && (pathsz >= 8) && (0 == memcmp(path, "nocache/", 8))) {
+  if (path && (pathsz >= 9) && (0 == memcmp(path, "/nocache/", 9))) {
     // It's not cacheable, so, turn off the cache. This avoids major serialization and performance issues.
     VDEBUG("turning off the cache, uncacehable");
     TSHttpTxnConfigIntSet(txnp, TS_CONFIG_HTTP_CACHE_HTTP, 0);

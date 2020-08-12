@@ -1488,7 +1488,6 @@ url_parse_http_no_path_component_breakdown(HdrHeap *heap, URLImpl *url, const ch
   cur              = static_cast<const char *>(memchr(cur, '/', end - cur));
   if (cur) {
     host_end = cur;
-    ++cur;
   } else {
     host_end = cur = end;
   }

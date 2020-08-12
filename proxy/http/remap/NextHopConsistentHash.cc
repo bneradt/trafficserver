@@ -150,7 +150,6 @@ NextHopConsistentHash::getHashKey(uint64_t sm_id, HttpRequestData *hrdata, ATSHa
   // path + query string
   case NH_PATH_QUERY_HASH_KEY:
     url_string_ref = url->path_get(&len);
-    h->update("/", 1);
     if (url_string_ref && len > 0) {
       h->update(url_string_ref, len);
     }
@@ -163,7 +162,6 @@ NextHopConsistentHash::getHashKey(uint64_t sm_id, HttpRequestData *hrdata, ATSHa
   // path + fragment hash
   case NH_PATH_FRAGMENT_HASH_KEY:
     url_string_ref = url->path_get(&len);
-    h->update("/", 1);
     if (url_string_ref && len > 0) {
       h->update(url_string_ref, len);
     }
@@ -184,7 +182,6 @@ NextHopConsistentHash::getHashKey(uint64_t sm_id, HttpRequestData *hrdata, ATSHa
       }
     } else {
       url_string_ref = url->path_get(&len);
-      h->update("/", 1);
       if (url_string_ref && len > 0) {
         NH_Debug(NH_DEBUG_TAG, "[%" PRIu64 "] the parent selection over-ride url is not set, using default path: %s.", sm_id,
                  url_string_ref);
@@ -196,7 +193,6 @@ NextHopConsistentHash::getHashKey(uint64_t sm_id, HttpRequestData *hrdata, ATSHa
   case NH_PATH_HASH_KEY:
   default:
     url_string_ref = url->path_get(&len);
-    h->update("/", 1);
     if (url_string_ref && len > 0) {
       h->update(url_string_ref, len);
     }
