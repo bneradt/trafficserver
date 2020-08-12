@@ -1376,7 +1376,7 @@ url_parse_http(HdrHeap *heap, URLImpl *url, const char **start, const char *end,
   }
 
   cur = *start;
-  if ('/' == *cur && '/' == *(cur + 1)) {
+  if (url->m_ptr_host == nullptr && '/' == *cur && '/' == *(cur + 1)) {
     // RFC 3986 section-3.3:
     // If a URI does not contain an authority component, then the path cannot
     // begin with two slash characters ("//").

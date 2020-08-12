@@ -116,6 +116,7 @@ TEST_CASE("UrlParse", "[proxy][parseurl]")
 
     {"https://www.example.com", IS_VALID},
     {"https://www.example.com/", IS_VALID},
+    {"https://www.example.com//", IS_VALID},
     {"https://127.0.0.1", IS_VALID},
     {"https://[::1]", IS_VALID},
     {"https://127.0.0.1/", IS_VALID},
@@ -123,6 +124,7 @@ TEST_CASE("UrlParse", "[proxy][parseurl]")
     {"https://www.example.com:8888/", IS_VALID},
 
     {"https://www.example.com/a/path", IS_VALID},
+    {"https://www.example.com//a/path", IS_VALID},
     {"https://www.example.com/a/path?", IS_VALID},
     {"https://www.example.com/a/path?name=value", IS_VALID},
     {"https://www.example.com/a/path?name=/a/path/value", IS_VALID},
