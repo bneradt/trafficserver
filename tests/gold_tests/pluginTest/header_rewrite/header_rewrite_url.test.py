@@ -49,7 +49,6 @@ ts.Disk.remap_config.AddLine(
 ts.Disk.remap_config.AddLine(
     'map http://www.example.com:8080/from_path/ https://127.0.0.1:{0}/to_path/ @plugin=header_rewrite.so @pparam={1}/rule_client.conf'.format(
         server.Variables.Port, Test.RunDirectory))
-
 # This configuration makes use of TO-URL in a set-redirect operator.
 ts.Disk.remap_config.AddLine(
     'map http://no_path.com http://no_path.com?name=brian/ @plugin=header_rewrite.so @pparam={0}/set_redirect.conf'.format(

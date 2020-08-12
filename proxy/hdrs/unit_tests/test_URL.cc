@@ -111,8 +111,8 @@ TEST_CASE("UrlParse", "[proxy][parseurl]")
     // with two slash characters ("//").
     {"https:////", !IS_VALID},
 
-    {"mailto:Brian.Neradt@example.com", IS_VALID},
-    {"mailto:Brian.Neradt@example.com:25", IS_VALID},
+    {"mailto:Test.User@example.com", IS_VALID},
+    {"mailto:Test.User@example.com:25", IS_VALID},
 
     {"https://www.example.com", IS_VALID},
     {"https://www.example.com/", IS_VALID},

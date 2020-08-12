@@ -827,9 +827,10 @@ url_length_get(URLImpl *url)
   }
 
   if (url->m_ptr_path) {
-    // The way we parse path, it will include the first '/' if it exists
-    // because, unlike the '?' for query and the '#' for fragment, any first
-    // '/' is a part of the path.
+    // Notice that we do not add 1 for the initial '/' in path like we do for
+    // the analogous '?' and '#' in query and fragment, respectively. This is
+    // because, unlike query and fragment, any initial '/' is a part of the
+    // path and is included in the m_ptr_path string and m_ptr_len value.
     length += url->m_len_path;
   }
 
