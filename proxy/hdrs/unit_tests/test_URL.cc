@@ -102,7 +102,10 @@ TEST_CASE("UrlParse", "[proxy][parseurl]")
     bool is_valid;
   };
   std::vector<url_parse_test_case> url_parse_test_cases = {
-    {"http://", IS_VALID},
+    // The following scheme-only URI is technically valid per the spec, but we
+    // have historically returned this as invalid and I'm not comfortable
+    // changing it in case something depends upon this behavior.
+    {"http://", !IS_VALID},
     {"https:///", IS_VALID},
     // RFC 3986 section-3: When authority is not present, the path cannot begin
     // with two slash characters ("//").
