@@ -456,12 +456,6 @@ http2_convert_header_from_2_to_1_1(HTTPHdr *headers)
       int path_len;
       const char *path = field->value_get(&path_len);
 
-      // cut first '/' if there, because `url_print()` add '/' before printing path
-      if (path_len >= 1 && path[0] == '/') {
-        ++path;
-        --path_len;
-      }
-
       url_path_set(headers->m_heap, headers->m_http->u.req.m_url_impl, path, path_len, true);
 
       headers->field_delete(field);
@@ -606,12 +600,11 @@ http2_convert_header_from_1_1_to_2(HTTPHdr *headers)
       int value_len;
       const char *value = headers->path_get(&value_len);
 
-      ts::LocalBuffer<char> buf(value_len + 1);
+      ts::LocalBuffer<char> buf(value_len);
       char *path = buf.data();
-      path[0]    = '/';
-      memcpy(path + 1, value, value_len);
+      memcpy(path, value, value_len);
 
-      field->value_set(headers->m_heap, headers->m_mime, path, value_len + 1);
+      field->value_set(headers->m_heap, headers->m_mime, path, value_len);
     } else {
       ink_abort("initialize HTTP/2 pseudo-headers");
       return PARSE_RESULT_ERROR;
