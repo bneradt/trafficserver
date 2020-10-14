@@ -41,15 +41,15 @@ public:
   SourceLocation()                          = default;
   SourceLocation(const SourceLocation &rhs) = default;
 
-  SourceLocation(const char *_file, const char *_func, int _line) : file(_file), func(_func), line(_line) {}
+  constexpr SourceLocation(const char *_file, const char *_func, int _line) : file(_file), func(_func), line(_line) {}
 
-  bool
+  constexpr bool
   valid() const
   {
     return file && line;
   }
 
-  SourceLocation &
+  constexpr SourceLocation &
   operator=(const SourceLocation &rhs)
   {
     this->file = rhs.file;
