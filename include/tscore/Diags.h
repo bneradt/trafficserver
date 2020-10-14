@@ -41,6 +41,7 @@
 #include "ink_inet.h"
 #include "BaseLogFile.h"
 #include "SourceLocation.h"
+#include "ThrottledMessage.h"
 
 #define DIAGS_MAGIC 0x12345678
 #define BYTES_IN_MB 1000000
@@ -285,6 +286,9 @@ private:
 
 extern inkcoreapi Diags *diags;
 
+// Note that the log functions being implemented as a macro has the advantage
+// that the pre-compiler expands this in place such that the call to
+// MakeSourceLocation happens at the call site for the function.
 #define DiagsError(level, fmt, ...)                \
   do {                                             \
     SourceLocation loc = MakeSourceLocation();     \
@@ -312,6 +316,18 @@ extern inkcoreapi Diags *diags;
 #define FatalV(fmt, ap) DiagsErrorV(DL_Fatal, fmt, ap)
 #define AlertV(fmt, ap) DiagsErrorV(DL_Alert, fmt, ap)
 #define EmergencyV(fmt, ap) DiagsErrorV(DL_Emergency, fmt, ap)
+
+#define THROTTLED_MESSAGE(throttle_func, ...)          \
+  do {                                                 \
+    const SourceLocation loc = MakeSourceLocation();   \
+    static ThrottledMessage throttled_message;         \
+    throttled_message.throttle_func(loc, __VA_ARGS__); \
+  } while (0)
+
+#define ThrottledStatus(...) THROTTLED_MESSAGE(status, __VA_ARGS__)
+#define ThrottledNote(...) THROTTLED_MESSAGE(note, __VA_ARGS__)
+#define ThrottledWarning(...) THROTTLED_MESSAGE(warning, __VA_ARGS__)
+#define ThrottledError(...) THROTTLED_MESSAGE(error, __VA_ARGS__)
 
 #if TS_USE_DIAGS
 
