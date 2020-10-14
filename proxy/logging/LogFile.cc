@@ -33,6 +33,7 @@
 
 #include "tscore/ink_platform.h"
 #include "tscore/SimpleTokenizer.h"
+#include "tscore/ThrottledMessage.h"
 #include "tscore/ink_file.h"
 
 #include <cerrno>
@@ -718,7 +719,8 @@ LogFile::writeln(char *data, int len, int fd, const char *path)
     }
 
     if ((bytes_this_write = static_cast<int>(::writev(fd, (const struct iovec *)wvec, vcnt))) < 0) {
-      Warning("An error was encountered in writing to %s: %s.", ((path) ? path : "logfile"), strerror(errno));
+      static ThrottledMessage tm;
+      tm.warning("An error was encountered in writing to %s: %s.", ((path) ? path : "logfile"), strerror(errno));
     } else {
       total_bytes = bytes_this_write;
     }

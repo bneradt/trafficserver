@@ -117,6 +117,7 @@ libtscore_la_SOURCES = \
 	signals.cc \
 	SourceLocation.cc \
 	TextBuffer.cc \
+	ThrottledMessage.cc \
 	Tokenizer.cc \
 	ts_file.cc \
 	Version.cc \
