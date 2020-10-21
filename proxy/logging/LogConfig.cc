@@ -130,6 +130,7 @@ LogConfig::read_configuration_variables()
   val = static_cast<int>(REC_ConfigReadInteger("proxy.config.log.log_buffer_size"));
   if (val > 0) {
     log_buffer_size = val;
+    LogMessage::set_max_log_buffer_size(log_buffer_size);
   }
 
   val = static_cast<int>(REC_ConfigReadInteger("proxy.config.log.max_secs_per_buffer"));

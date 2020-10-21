@@ -35,7 +35,7 @@ TEST_CASE("Throttler", "[libts][Throttler]")
   uint64_t skipped_count = 0;
 
   // The first check should be allowed.
-  CHECK(throttler(skipped_count) == true);
+  CHECK_FALSE(throttler.is_throttled(skipped_count));
 
   // The first time this is called, none were skipped.
   CHECK(skipped_count == 0);
@@ -43,13 +43,13 @@ TEST_CASE("Throttler", "[libts][Throttler]")
   // In rapid succession, do a few more that should be skipped.
   auto const expected_skip_count = 5u;
   for (auto i = 0u; i < expected_skip_count; ++i) {
-    CHECK_FALSE(throttler(skipped_count));
+    CHECK(throttler.is_throttled(skipped_count));
   }
 
   // Sleep more than enough time for the throttler to allow the following
   // check.
   std::this_thread::sleep_for(2 * periodicity);
 
-  CHECK(throttler(skipped_count));
+  CHECK_FALSE(throttler.is_throttled(skipped_count));
   CHECK(skipped_count == expected_skip_count);
 }

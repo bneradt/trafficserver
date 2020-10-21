@@ -29,9 +29,11 @@
 
 #include <atomic>
 #include <chrono>
+#include <functional>
+#include <string>
 
 /** Represents a set of log messages for which throttling is desired. */
-class LogMessage
+class LogMessage : public Throttler
 {
 public:
   /**
@@ -82,9 +84,33 @@ public:
    */
   static void set_default_debug_throttling_interval(std::chrono::milliseconds new_interval);
 
+  /** Set the new log buffer size.
+   *
+   * @param[in] new_log_buffer_size The new maximum number of bytes allowable
+   * for a log message.
+   */
+  static void set_max_log_buffer_size(int new_log_buffer_size);
+
 private:
-  /** Common message handling for each DiagsLevel. */
-  void message_helper(DiagsLevel level, SourceLocation const &loc, const char *fmt, va_list args);
+  using log_function_f = std::function<void(const char *fmt)>;
+
+  /** Encapsulate common message handling logic in a helper function.
+   *
+   * @param[in] current_configured_interval The applicable log throttling
+   * interval for this message.
+   *
+   * @param[in] log_function The function to use to emit the log message if it
+   * is not throttled.
+   *
+   * @param[in] fmt The format string for the log message.
+   *
+   * @param[in] args The parameters for the above format string.
+   */
+  void message_helper(std::chrono::microseconds current_configured_interval, log_function_f log_function, const char *fmt,
+                      va_list args);
+
+  /** Message handling for non-debug logs. */
+  void standard_message_helper(DiagsLevel level, SourceLocation const &loc, const char *fmt, va_list args);
 
   /** Same as above, but catered for the diag and debug variants.
    *
@@ -95,10 +121,17 @@ private:
   /** Same as above, but uses the tag-ignoring diags->print variant. */
   void message_print_helper(const char *tag, DiagsLevel level, SourceLocation const &loc, const char *fmt, va_list args);
 
-private:
-  /** Used to throttle the log messages to the specified throttling interval. */
-  Throttler _throttler;
+  /** Compare the incoming message with the last one.
+   *
+   * @param[in] fmt The new incoming message format string.
+   * @param[in] args The new incoming message arguments.
+   *
+   * @bool True if the incoming message is the same as the last, false
+   * otherwise.
+   */
+  bool is_same_as_last_message(const char *fmt, va_list args);
 
+private:
   /** Whether the throttling value was explicitly set by the user.
    *
    * If the user explicitly set a throttling value, then it will not change as
@@ -106,9 +139,16 @@ private:
    */
   bool const _throttling_value_is_explicitly_set;
 
+  /** The last message that was printed. */
+  std::string _last_printed_message;
+  std::string _this_message;
+
   /** The configured, system-wide default log throttling value. */
-  static std::atomic<std::chrono::milliseconds> default_log_throttling_interval;
+  static std::atomic<std::chrono::milliseconds> _default_log_throttling_interval;
 
   /** The configured, system-wide default debug log throttling value. */
-  static std::atomic<std::chrono::milliseconds> default_debug_throttling_interval;
+  static std::atomic<std::chrono::milliseconds> _default_debug_throttling_interval;
+
+  /** The maximum allowable bytes for a log message. */
+  static std::atomic<int> _log_buffer_size;
 };

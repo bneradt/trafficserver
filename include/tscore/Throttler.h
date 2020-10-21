@@ -33,18 +33,21 @@
  * To use:
  *
  * 1. Create an instance of this class specifying the interval for which
- * something should be throttled.
+ * something should be throttled. Alternatively, inherit from this class to
+ * have the throttling interface apply to the object you want throttling for.
  *
- * 2. Prepend each decision for a given throttled action with a boolean call
- * against the instance created in step one.
+ * 2. Prepend each decision for a given throttled action with a call to
+ * is_throttled.
  *
- *   2a. If the boolean operation returns true, then at least the configured
- *   number of microseconds has elapsed since the last time the operation
- *   returned true. The number of times the check has been called is provided
- *   in the skipped_count output parameter.
+ *   2a. If the is_throttled is false, then at least the configured number of
+ *   microseconds has elapsed since the previous call in which is_throttled
+ *   returned false. The number of times the check has been called between
+ *   these two times is provided in the suppressed_count output parameter.
  *
- *   2b. If the boolean operation returns false, then not enough time has
- *   elapsed since the last time the operation returned true.
+ *   2b. If is_throttled returns returns true, then not enough time has elapsed
+ *   since the last time the operation returned true per the throttling
+ *   interval. Thus the operation should be skipped or suppressed, depending
+ *   upon the context.
  *
  * For instance:
  *
@@ -52,39 +55,52 @@
  *    {
  *      using namespace std::chrono_literals;
  *      static Throttler t(300ms);
- *      uint64_t skipped_count;
- *      if (t(skipped_count)) {
+ *      uint64_t suppressed_count;
+ *      if (!t.is_throttled(suppressed_count)) {
  *        std::printf("Alan bought another monitor\n");
- *        std::printf("We ignored Alan buying a monitor %llu times\n", skipped_count);
+ *        std::printf("We ignored Alan buying a monitor %llu times\n", suppressed_count);
  *      }
  *    }
  */
 class Throttler
 {
 public:
+  virtual ~Throttler() = default;
+
   /**
    * @param[in] interval The minimum number of microseconds between
    * calls to Throttler which should return true.
    */
   Throttler(std::chrono::microseconds interval);
 
-  /** Whether enough time has passed since the last allowed action.
+  /** Whether the current event should be suppressed because the time since the
+   * last unsuppressed event is less than the throttling interval.
    *
-   * @param[out] skipped_count If the return of this call is true,
-   * this is populated with the approximate number of times the operator has
-   * been queried since before this function was called. Otherwise the value is
-   * not set.
+   * @param[out] suppressed_count If the return of this call is false (the action
+   * should not be suppressed), this is populated with the approximate number
+   * of suppressed events between the last unsuppressed event and the current
+   * one.  Otherwise the value is not set. This value is approximate because,
+   * if used in a multithreaded context, other threads may be querrying against
+   * this function as well concurrently, and their count may not be applied
+   * depending upon the timing of their query.
    *
-   * @return True if the action is emitted per the configured interval,
+   * @return True if the action is suppressed per the configured interval,
    * false otherwise.
    */
-  bool operator()(uint64_t &skipped_count);
+  virtual bool is_throttled(uint64_t &suppressed_count);
 
   /** Set the log throttling interval to a new value.
    *
    * @param[in] interval The new interval to set.
    */
-  void set_throttling_interval(std::chrono::microseconds new_interval);
+  virtual void set_throttling_interval(std::chrono::microseconds new_interval);
+
+  /** Manually reset the throttling counter to the current time.
+   *
+   * @return the number of messages skipped since the previous positive return
+   * of the functor operator.
+   */
+  virtual uint64_t reset_counter();
 
 private:
   /// Base clock.
@@ -104,5 +120,5 @@ private:
   std::atomic<std::chrono::microseconds> _interval{std::chrono::microseconds{0}};
 
   /// The number of calls to Throttler since the last
-  uint64_t _skipped_count = 0;
+  uint64_t _suppressed_count = 0;
 };
