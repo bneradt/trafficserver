@@ -61,11 +61,11 @@ extern inkcoreapi Diags *diags;
 // Note that the log functions being implemented as a macro has the advantage
 // that the pre-compiler expands this in place such that the call to
 // MakeSourceLocation happens at the call site for the function.
-#define DiagsError(level, ...)                              \
-  do {                                                      \
-    static const SourceLocation loc = MakeSourceLocation(); \
-    static LogMessage log_message;                          \
-    log_message.message(level, loc, __VA_ARGS__);           \
+#define DiagsError(level, ...)                                        \
+  do {                                                                \
+    static constexpr const SourceLocation loc = MakeSourceLocation(); \
+    static LogMessage log_message;                                    \
+    log_message.message(level, loc, __VA_ARGS__);                     \
   } while (0)
 
 #define Status(...) DiagsError(DL_Status, __VA_ARGS__)       // Log information
@@ -75,6 +75,35 @@ extern inkcoreapi Diags *diags;
 #define Fatal(...) DiagsError(DL_Fatal, __VA_ARGS__)         // Log recoverable crash, fail CI, exit & allow restart
 #define Alert(...) DiagsError(DL_Alert, __VA_ARGS__)         // Log recoverable crash, fail CI, exit & restart, Ops attention
 #define Emergency(...) DiagsError(DL_Emergency, __VA_ARGS__) // Log unrecoverable crash, fail CI, exit, Ops attention
+
+/** Apply throttling to a log site.
+ *
+ * Logs using SiteThrottled* version will be throttled at a certain interval
+ * that applies to the call site, regardless of whether the messages within
+ * that interval are unique or not. This is helpful for logs which can be noisy
+ * and frequently have differing content, such as the length of a buffer or a
+ * counter. Rather than changing the log to contain less information, this can
+ * be applied to the site so that when it is emitted, the information is
+ * present, but the set of possibly slightly different logs will still be
+ * suppressed against a configurable interval as a whole.
+ */
+#define SiteThrottledDiagsError(level, ...)                           \
+  do {                                                                \
+    static constexpr const SourceLocation loc = MakeSourceLocation(); \
+    static LogMessage log_message{IS_THROTTLED};                      \
+    log_message.message(level, loc, __VA_ARGS__);                     \
+  } while (0)
+
+#define SiteThrottledStatus(...) SiteThrottledDiagsError(DL_Status, __VA_ARGS__)   // Log information
+#define SiteThrottledNote(...) SiteThrottledDiagsError(DL_Note, __VA_ARGS__)       // Log significant information
+#define SiteThrottledWarning(...) SiteThrottledDiagsError(DL_Warning, __VA_ARGS__) // Log concerning information
+#define SiteThrottledError(...) SiteThrottledDiagsError(DL_Error, __VA_ARGS__)     // Log operational failure, fail CI
+#define SiteThrottledFatal(...) \
+  SiteThrottledDiagsError(DL_Fatal, __VA_ARGS__) // Log recoverable crash, fail CI, exit & allow restart
+#define SiteThrottledAlert(...) \
+  SiteThrottledDiagsError(DL_Alert, __VA_ARGS__) // Log recoverable crash, fail CI, exit & restart, Ops attention
+#define SiteThrottledEmergency(...) \
+  SiteThrottledDiagsError(DL_Emergency, __VA_ARGS__) // Log unrecoverable crash, fail CI, exit, Ops attention
 
 #define DiagsErrorV(level, fmt, ap)                                   \
   do {                                                                \
@@ -91,6 +120,23 @@ extern inkcoreapi Diags *diags;
 #define AlertV(fmt, ap) DiagsErrorV(DL_Alert, fmt, ap)
 #define EmergencyV(fmt, ap) DiagsErrorV(DL_Emergency, fmt, ap)
 
+/** See the comment above SiteThrottledDiagsError for an explanation of how the
+ * SiteThrottled functions behave. */
+#define SiteThrottledDiagsErrorV(level, fmt, ap)                      \
+  do {                                                                \
+    static constexpr const SourceLocation loc = MakeSourceLocation(); \
+    static LogMessage log_message{IS_THROTTLED};                      \
+    log_message.message_va(level, loc, fmt, ap);                      \
+  } while (0)
+
+#define SiteThrottledStatusV(fmt, ap) SiteThrottledDiagsErrorV(DL_Status, fmt, ap)
+#define SiteThrottledNoteV(fmt, ap) SiteThrottledDiagsErrorV(DL_Note, fmt, ap)
+#define SiteThrottledWarningV(fmt, ap) SiteThrottledDiagsErrorV(DL_Warning, fmt, ap)
+#define SiteThrottledErrorV(fmt, ap) SiteThrottledDiagsErrorV(DL_Error, fmt, ap)
+#define SiteThrottledFatalV(fmt, ap) SiteThrottledDiagsErrorV(DL_Fatal, fmt, ap)
+#define SiteThrottledAlertV(fmt, ap) SiteThrottledDiagsErrorV(DL_Alert, fmt, ap)
+#define SiteThrottledEmergencyV(fmt, ap) SiteThrottledDiagsErrorV(DL_Emergency, fmt, ap)
+
 #if TS_USE_DIAGS
 
 /// A Diag version of the above. Note that if this is used, the user presumably
@@ -106,13 +152,13 @@ extern inkcoreapi Diags *diags;
 
 /// A Debug version of the above. Note that if this is used, the user presumably
 /// does not want their debug messages throttled.
-#define Debug(tag, ...)                                       \
-  do {                                                        \
-    if (unlikely(diags->on())) {                              \
-      static const SourceLocation loc = MakeSourceLocation(); \
-      static LogMessage log_message;                          \
-      log_message.debug(tag, loc, __VA_ARGS__);               \
-    }                                                         \
+#define Debug(tag, ...)                                                 \
+  do {                                                                  \
+    if (unlikely(diags->on())) {                                        \
+      static constexpr const SourceLocation loc = MakeSourceLocation(); \
+      static LogMessage log_message;                                    \
+      log_message.debug(tag, loc, __VA_ARGS__);                         \
+    }                                                                   \
   } while (0)
 
 /** Same as Debug above, but this allows a positive override of the tag
@@ -125,7 +171,7 @@ extern inkcoreapi Diags *diags;
 #define SpecificDebug(flag, tag, ...)                                                                       \
   do {                                                                                                      \
     if (unlikely(diags->on())) {                                                                            \
-      static const SourceLocation loc = MakeSourceLocation();                                               \
+      static constexpr const SourceLocation loc = MakeSourceLocation();                                     \
       static LogMessage log_message;                                                                        \
       flag ? log_message.print(tag, DL_Debug, loc, __VA_ARGS__) : log_message.debug(tag, loc, __VA_ARGS__); \
     }                                                                                                       \

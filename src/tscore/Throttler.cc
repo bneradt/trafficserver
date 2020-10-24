@@ -26,19 +26,28 @@
 Throttler::Throttler(std::chrono::microseconds interval) : _interval{interval} {}
 
 bool
-Throttler::operator()(uint64_t &skipped_count)
+Throttler::is_throttled(uint64_t &skipped_count)
 {
   TimePoint const now = Clock::now();
   TimePoint last_allowed_time{_last_allowed_time};
   if ((last_allowed_time + _interval.load()) <= now) {
     if (_last_allowed_time.compare_exchange_strong(last_allowed_time, now)) {
-      skipped_count  = _skipped_count;
-      _skipped_count = 0;
-      return true;
+      skipped_count     = _suppressed_count;
+      _suppressed_count = 0;
+      return false;
     }
   }
-  ++_skipped_count;
-  return false;
+  ++_suppressed_count;
+  return true;
+}
+
+uint64_t
+Throttler::reset_counter()
+{
+  _last_allowed_time       = Clock::now();
+  auto const skipped_count = _suppressed_count;
+  _suppressed_count        = 0;
+  return skipped_count;
 }
 
 void

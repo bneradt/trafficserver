@@ -29,17 +29,31 @@
 
 #include <atomic>
 #include <chrono>
+#include <functional>
 
-/** Represents a set of log messages for which throttling is desired. */
-class LogMessage
+constexpr const bool IS_THROTTLED = true;
+
+/** A class implementing stateful logging behavior. */
+class LogMessage : public Throttler
 {
 public:
-  /**
-   * Log throttling will be constructed with the system wide configured values.
+  /** Create a LogMessage, optionally with throttling applied to it.
+   *
+   * If configured with throttling, the system's throttling value will be used
+   * and the throttling value will dynamically change as the user configures
+   * different values for throttling.
+   *
+   * @param[in] is_throttled Whether to apply throttling to the message. If
+   * true, the system default log throttling interval will be used.
    */
-  LogMessage();
+  LogMessage(bool is_throttled = false);
 
-  /**
+  /** Create a LogMessage with an explicit throttling interval.
+   *
+   * For this message, throttling will be configured with the designated amount
+   * and will not change as the system's configured throttling interval
+   * changes.
+   *
    * @param[in] throttling_interval The minimum number of desired
    * milliseconds between log events. 0 implies no throttling.
    */
@@ -83,8 +97,25 @@ public:
   static void set_default_debug_throttling_interval(std::chrono::milliseconds new_interval);
 
 private:
-  /** Common message handling for each DiagsLevel. */
-  void message_helper(DiagsLevel level, SourceLocation const &loc, const char *fmt, va_list args);
+  using log_function_f = std::function<void(const char *fmt, va_list args)>;
+
+  /** Encapsulate common message handling logic in a helper function.
+   *
+   * @param[in] current_configured_interval The applicable log throttling
+   * interval for this message.
+   *
+   * @param[in] log_function The function to use to emit the log message if it
+   * is not throttled.
+   *
+   * @param[in] fmt The format string for the log message.
+   *
+   * @param[in] args The parameters for the above format string.
+   */
+  void message_helper(std::chrono::microseconds current_configured_interval, log_function_f log_function, const char *fmt,
+                      va_list args);
+
+  /** Message handling for non-debug logs. */
+  void standard_message_helper(DiagsLevel level, SourceLocation const &loc, const char *fmt, va_list args);
 
   /** Same as above, but catered for the diag and debug variants.
    *
@@ -96,9 +127,6 @@ private:
   void message_print_helper(const char *tag, DiagsLevel level, SourceLocation const &loc, const char *fmt, va_list args);
 
 private:
-  /** Used to throttle the log messages to the specified throttling interval. */
-  Throttler _throttler;
-
   /** Whether the throttling value was explicitly set by the user.
    *
    * If the user explicitly set a throttling value, then it will not change as
@@ -106,9 +134,12 @@ private:
    */
   bool const _throttling_value_is_explicitly_set;
 
+  /** Whether throttling should be applied to this message. */
+  bool const _is_throttled;
+
   /** The configured, system-wide default log throttling value. */
-  static std::atomic<std::chrono::milliseconds> default_log_throttling_interval;
+  static std::atomic<std::chrono::milliseconds> _default_log_throttling_interval;
 
   /** The configured, system-wide default debug log throttling value. */
-  static std::atomic<std::chrono::milliseconds> default_debug_throttling_interval;
+  static std::atomic<std::chrono::milliseconds> _default_debug_throttling_interval;
 };
