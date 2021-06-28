@@ -553,8 +553,10 @@ HpackDynamicTable::_evict_overflowed_entries()
     this->_current_size -= ADDITIONAL_OCTETS + name_len + value_len;
 
     if (this->_mhdr_old && this->_mhdr_old->fields_count() != 0) {
+      ink_release_assert(this->_mhdr_old->contains(h));
       this->_mhdr_old->field_delete(h, false);
     } else {
+      ink_release_assert(this->_mhdr->contains(h));
       this->_mhdr->field_delete(h, false);
     }
 
