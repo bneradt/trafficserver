@@ -24,6 +24,7 @@ Test.SkipUnless(
 
 
 class SlowPostAttack:
+    """Verify that ATS doesn't delay respnses behind slow posts."""
     def __init__(cls):
         Test.Summary = 'Test how ATS handles the slow-post attack'
         cls._origin_max_connections = 3
@@ -49,7 +50,7 @@ class SlowPostAttack:
     def setupTS(self):
         self._ts = Test.MakeATSProcess("ts")
         self._ts.Disk.remap_config.AddLine(
-            'map / http://127.0.0.1:{0}'.format(self._server.Variables.Port)
+            f'map / http://127.0.0.1:{self._server.Variables.Port}'
         )
         # This plugin can enable request buffer for POST.
         Test.PrepareInstalledPlugin('request_buffer.so', self._ts)
