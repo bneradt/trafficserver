@@ -5814,18 +5814,12 @@ HttpSM::handle_server_setup_error(int event, void *data)
     ink_release_assert(0);
   }
 
-  if (event == VC_EVENT_INACTIVITY_TIMEOUT || event == VC_EVENT_ERROR) {
-    // Clean up the vc_table entry so any events in play to the timed out server vio
-    // don't get handled.  The connection isn't there.
-    if (server_entry) {
-      ink_assert(server_entry->vc_type == HTTP_SERVER_VC);
-      vc_table.cleanup_entry(server_entry);
-      server_entry = nullptr;
-    }
-  }
-
   // Closedown server connection and deallocate buffers
-  ink_assert(!server_entry || server_entry->in_tunnel == false);
+  if (server_entry) {
+    ink_assert(server_entry->vc_type == HTTP_SERVER_VC);
+    vc_table.cleanup_entry(server_entry);
+    server_entry = nullptr;
+  }
 
   // if we are waiting on a plugin callout for
   //   HTTP_API_SEND_REQUEST_HDR defer calling transact until
