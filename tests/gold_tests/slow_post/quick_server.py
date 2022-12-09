@@ -19,7 +19,9 @@
 
 import argparse
 import socket
+import ssl
 import sys
+import time
 
 
 def parse_args() -> argparse.Namespace:
@@ -33,30 +35,14 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=8080,
         help="The port to listen on")
+    parser.add_argument(
+        "cert",
+        help="The certificate to use")
+    parser.add_argument(
+        "private_key",
+        help="The key to use")
+
     return parser.parse_args()
-
-
-def get_listening_socket(address: str, port: int) -> socket.socket:
-    """Create a listening socket.
-
-    :param address: The address to listen on.
-    :param port: The port to listen on.
-    :returns: A listening socket.
-    """
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind((address, port))
-    sock.listen(1)
-    return sock
-
-
-def accept_connection(sock: socket.socket) -> [socket.socket, str]:
-    """Accept a connection.
-
-    :param sock: The socket to accept a connection on.
-    :returns: The accepted socket.
-    """
-    return sock.accept()
 
 
 def wait_for_headers_complete(sock: socket.socket) -> bytes:
@@ -75,7 +61,7 @@ def wait_for_headers_complete(sock: socket.socket) -> bytes:
     return headers
 
 
-def determine_outstanding_bytes_to_read(read_bytes: bytes) -> int:
+def calculate_num_outstanding_bytes(read_bytes: bytes) -> int:
     """Determine how many more bytes to read.
 
     This parses the Content-Length header to determine how many more bytes to
@@ -148,19 +134,24 @@ def drain_socket(
 def main() -> int:
     """Run the server."""
     args = parse_args()
-    listening_sock = get_listening_socket(args.address, args.port)
-    print(f"Listening on {args.address}:{args.port}")
-    sock, _ = accept_connection(listening_sock)
-    read_bytes = wait_for_headers_complete(sock)
-    send_response(sock)
 
-    num_bytes_to_drain = determine_outstanding_bytes_to_read(read_bytes)
-    print(f'Read {len(read_bytes)} bytes. '
-          f'Draining {num_bytes_to_drain} bytes.')
-    drain_socket(sock, read_bytes, num_bytes_to_drain)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(args.cert, args.private_key)
 
-    sock.close()
-    listening_sock.close()
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0) as sock:
+        sock.bind((args.address, args.port))
+        sock.listen(5)
+        print(f"Listening on {args.address}:{args.port}")
+        with context.wrap_socket(sock, server_side=True) as ssock:
+            conn, _ = ssock.accept()
+            read_bytes = wait_for_headers_complete(conn)
+            send_response(conn)
+
+            num_bytes_to_drain = calculate_num_outstanding_bytes(read_bytes)
+            print(f'Read {len(read_bytes)} bytes. '
+                  f'Draining {num_bytes_to_drain} bytes.')
+            #drain_socket(conn, read_bytes, num_bytes_to_drain)
+
     return 0
 
 
