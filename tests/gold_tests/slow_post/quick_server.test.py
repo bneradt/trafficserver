@@ -19,8 +19,6 @@
 from ports import get_port
 import sys
 
-Test.Summary = __doc__
-
 
 class QuickServerTest:
     """Verify that ATS doesn't delay respnses behind slow posts."""
@@ -28,8 +26,13 @@ class QuickServerTest:
     _slow_post_client = 'slow_post_client.py'
     _quick_server = 'quick_server.py'
 
-    def __init__(self):
-        pass
+    def __init__(self, drain_request: bool):
+        """Initialize the test.
+
+        :param drain_request: Whether the server should drain the request body
+        before disconnecting.
+        """
+        self._should_drain_request = drain_request
 
     def _configure_dns(self, tr: 'TestRun') -> None:
         """Configure the DNS.
@@ -49,7 +52,9 @@ class QuickServerTest:
         server = tr.Processes.Process("server")
         port = get_port(server, "http_port")
         server.Command = \
-            f'{sys.executable} {self._quick_server} 0.0.0.0 {port}'
+            f'{sys.executable} {self._quick_server} 0.0.0.0 {port} '
+        if self._should_drain_request:
+            server.Command += '--drain-request '
         server.Ready = When.PortOpenv4(port)
         self._server = server
 
@@ -91,5 +96,9 @@ class QuickServerTest:
 
 
 Test.Summary = __doc__
-slowPostAttack = QuickServerTest()
+
+slowPostAttack = QuickServerTest(drain_request=True)
+slowPostAttack.run()
+
+slowPostAttack = QuickServerTest(drain_request=False)
 slowPostAttack.run()
