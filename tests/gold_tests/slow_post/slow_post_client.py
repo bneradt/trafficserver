@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-
-"""Implement a client that sends request bodies slowly.
-
-The number of requests and the timing of sending the body is configurable.
-"""
+"""Implements a client which slowly POSTs a request."""
 
 #  Licensed to the Apache Software Foundation (ASF) under one
 #  or more contributor license agreements.  See the NOTICE file
@@ -22,66 +18,56 @@ The number of requests and the timing of sending the body is configurable.
 #  limitations under the License.
 
 from typing import Generator
-import time
-import threading
-import requests
+
 import argparse
+import requests
+import sys
+import threading
+import time
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse the command line arguments."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "port",
+        type=int,
+        help="The port to which to connect.")
+    parser.add_argument(
+        "-t", "--send_time",
+        type=int,
+        default=3,
+        help="The number of seconds to send the POST.")
+
+    return parser.parse_args()
 
 
 def gen(slow_time: int) -> Generator:
-    """Generate a string that takes slow_time seconds to generate."""
+    """Slowly generate the content for the body of a request.
+
+    :param slow_time: The number of seconds to take to generate the content.
+    """
     for _ in range(slow_time):
         yield b'a'
         time.sleep(1)
 
 
 def slow_post(port: int, slow_time: int) -> None:
-    """Slowly send a request to the specified port.
+    """Slowly POST a request.
 
-    This sends a request to the local listening port that takes slow_time
-    seconds to send the body.
-
-    :param port: The localhost port to send the request to.
-    :param slow_time: The number of seconds to take to send the body.
+    :param port: The port to which to connect.
+    :param slow_time: The number of seconds to take to generate the content.
     """
-    requests.post(f'http://127.0.0.1:{port}/', data=gen(slow_time))
-
-
-def makerequest(port: int, connection_limit: int) -> None:
-    """Concurrently send requests on the specified port.
-
-    :param port: The localhost port to send the request to.
-    :param connection_limit: The number of concurrent requests to send.
-    """
-    client_timeout = 3
-    for _ in range(connection_limit):
-        t = threading.Thread(
-            target=slow_post,
-            daemon=True,
-            args=(port, client_timeout + 10))
-        t.start()
-    time.sleep(1)
-    r = requests.get(f'http://127.0.0.1:{port}/')
+    r = requests.post(f'http://127.0.0.1:{port}/', data=gen(slow_time))
     print(r.status_code)
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse the command line arguments."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", "-p",
-                        type=int,
-                        help="Port to use")
-    parser.add_argument("--connectionlimit", "-c",
-                        type=int,
-                        help="connection limit")
-    return parser.parse_args()
-
-
-def main() -> None:
+def main():
     """Run the client."""
     args = parse_args()
-    makerequest(args.port, args.connectionlimit)
+    slow_post(args.port, args.send_time)
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
