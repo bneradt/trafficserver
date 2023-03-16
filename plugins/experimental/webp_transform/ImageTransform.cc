@@ -25,7 +25,6 @@
 #include "tscpp/api/PluginInit.h"
 #include "tscpp/api/GlobalPlugin.h"
 #include "tscpp/api/TransformationPlugin.h"
-#include "tscpp/api/Logger.h"
 #include "tscpp/api/Stat.h"
 
 #if defined(__GNUC__) && !defined(__clang__)
@@ -88,7 +87,7 @@ public:
 
     transaction.getServerResponse().getHeaders()["Vary"] = "Accept"; // to have a separate cache entry
 
-    TS_DEBUG(TAG, "url %s", transaction.getServerRequest().getUrl().getUrlString().c_str());
+    TSDbg(webp_dbg_ctl, "url %s", transaction.getServerRequest().getUrl().getUrlString().c_str());
     transaction.resume();
   }
 
@@ -183,7 +182,7 @@ public:
 
     // If we might need to convert check to see if what the browser supports
     if (transaction_convert_to_webp == true || transaction_convert_to_jpeg == true) {
-      std::string accept  = transaction.getServerRequest().getHeaders().values("Accept");
+      std::string accept  = transaction.getClientRequest().getHeaders().values("Accept");
       bool webp_supported = accept.find("image/webp") != std::string::npos;
       TSDbg(webp_dbg_ctl, "Accept: %s webp_suppported: %d", accept.c_str(), webp_supported);
 
