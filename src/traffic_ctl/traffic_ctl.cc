@@ -22,10 +22,13 @@
  */
 
 #include <iostream>
+#include <csignal>
 
 #include "tscore/I_Layout.h"
 #include "tscore/runroot.h"
 #include "tscore/ArgParser.h"
+#include "tscore/ink_assert.h"
+#include "tscore/signals.h"
 
 #include "CtrlCommands.h"
 #include "FileConfigCommand.h"
@@ -35,6 +38,54 @@ constexpr int CTRL_EX_ERROR         = 2;
 constexpr int CTRL_EX_UNIMPLEMENTED = 3;
 
 int status_code{CTRL_EX_OK};
+
+/// Provide a way for commands to handle signals. Commands can subscribe to this
+/// table by using @c subscribe_to_signal_handler . Note that the application
+/// will only execute 1 command on every execution.
+std::unordered_map<int, std::function<void()>> Signal_Handler;
+
+void
+subscribe_to_signal_handler(int signal_num, std::function<void()> handler)
+{
+  Signal_Handler[signal_num] = handler;
+}
+
+void
+unsubscribe_signal(int signal_num)
+{
+  struct sigaction act;
+
+  act.sa_handler = SIG_DFL;
+  act.sa_flags   = SA_NODEFER | SA_RESETHAND;
+  sigemptyset(&(act.sa_mask));
+
+  ink_release_assert(sigaction(signal_num, &act, nullptr) == 0);
+}
+
+namespace
+{
+void
+handle_signal(int signal_num)
+{
+  if (auto search = Signal_Handler.find(signal_num); search != std::end(Signal_Handler)) {
+    search->second();
+  }
+
+  exit(signal_num);
+}
+
+void
+signal_register_handler(int signal_num, sighandler_t handle_signal)
+{
+  struct sigaction act;
+
+  act.sa_handler = handle_signal;
+  act.sa_flags   = SA_NODEFER | SA_RESETHAND;
+  sigemptyset(&(act.sa_mask));
+
+  ink_release_assert(sigaction(signal_num, &act, nullptr) == 0);
+}
+} // namespace
 
 int
 main(int argc, const char **argv)
@@ -124,9 +175,14 @@ main(int argc, const char **argv)
   metric_command.add_command("match", "Get metrics matching a regular expression", "", MORE_THAN_ZERO_ARG_N,
                              [&]() { command->execute(); });
   metric_command
-    .add_command("monitor", "Display the value of a metric(s) over time", "", MORE_THAN_ZERO_ARG_N, [&]() { command->execute(); })
+    .add_command(
+      "monitor",
+      "Display the value of a metric(s) over time. Program stops after <count> or with a SIGINT. A brief summary is displayed.", "",
+      MORE_THAN_ZERO_ARG_N, [&]() { command->execute(); })
     .add_example_usage("traffic_ctl metric monitor METRIC -i 3 -c 10")
-    .add_option("--count", "-c", "Stop after requesting count metrics.", "", 1, "10")
+    .add_option("--count", "-c",
+                "Terminate execution after requesting <count> metrics. If 0 is passed, program should be terminated by a SIGINT",
+                "", 1, "0")
     .add_option("--interval", "-i", "Wait interval seconds between sending each metric request. Minimum value is 1s.", "", 1, "5");
   metric_command.add_command("zero", "Clear one or more metric values", "", MORE_THAN_ONE_ARG_N, [&]() { command->execute(); });
 
@@ -183,6 +239,9 @@ main(int argc, const char **argv)
     .add_example_usage("traffic_ctl rpc invoke foo_bar -p \"numbers: [1, 2, 3]\"");
 
   try {
+    // for now we only care about SIGINT(SIGQUIT, ... ?)
+    signal_register_handler(SIGINT, handle_signal);
+
     auto args = parser.parse(argv);
     argparser_runroot_handler(args.get("run-root").value(), argv[0]);
     Layout::create();
