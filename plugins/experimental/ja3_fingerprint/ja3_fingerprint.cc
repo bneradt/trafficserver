@@ -70,7 +70,7 @@ struct ja3_data {
   ja3_data() = default;
 
   // No copying.
-  ja3_data(ja3_data const &) = delete;
+  ja3_data(ja3_data const &)            = delete;
   ja3_data &operator=(ja3_data const &) = delete;
 
   class accessor
@@ -89,7 +89,7 @@ struct ja3_data {
     }
     ~accessor();
 
-    accessor(accessor const &) = delete;
+    accessor(accessor const &)            = delete;
     accessor &operator=(accessor const &) = delete;
 
     accessor(accessor &&lhs)
@@ -151,7 +151,6 @@ private:
 
     if (0 == cnt) {
       delete this;
-      TSStatIntIncrement(stat_ja3_deallocate, 1);
     }
   }
 
