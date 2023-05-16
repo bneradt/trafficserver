@@ -66,7 +66,7 @@
 #endif
 
 struct PollDescriptor;
-typedef PollDescriptor *EventLoop;
+using EventLoop = PollDescriptor *;
 
 class NetEvent;
 class UnixUDPConnection;
@@ -140,8 +140,8 @@ struct EventIO {
 
 class NetEvent;
 class NetHandler;
-typedef int (NetHandler::*NetContHandler)(int, void *);
-typedef unsigned int uint32;
+using NetContHandler = int (NetHandler::*)(int, void *);
+using uint32         = unsigned int;
 
 extern ink_hrtime last_throttle_warning;
 extern ink_hrtime last_shedding_warning;
@@ -528,7 +528,7 @@ check_transient_accept_error(int res)
   if (!last_transient_accept_error || t - last_transient_accept_error > TRANSIENT_ACCEPT_ERROR_MESSAGE_EVERY) {
     last_transient_accept_error = t;
     Warning("accept thread received transient error: errno = %d", -res);
-#if defined(linux)
+#if defined(__linux__)
     if (res == -ENOBUFS || res == -ENFILE)
       Warning("errno : %d consider a memory upgrade", -res);
 #endif

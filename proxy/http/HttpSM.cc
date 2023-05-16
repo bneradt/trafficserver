@@ -99,7 +99,7 @@ static const int boundary_size   = 2 + sizeof("RANGE_SEPARATOR") - 1 + 2;
 static const char *str_100_continue_response = "HTTP/1.1 100 Continue\r\n\r\n";
 static const int len_100_continue_response   = strlen(str_100_continue_response);
 
-// Handy typedef for short (single line) message generation.
+// Handy alias for short (single line) message generation.
 using lbw = ts::LocalBufferWriter<256>;
 
 namespace
@@ -110,12 +110,8 @@ std::atomic<int64_t> next_sm_id(0);
 /// Buffer for some error logs.
 thread_local std::string error_bw_buffer;
 
-/**
-   Outbound PROXY Protocol
+} // namespace
 
-   Write PROXY Protocol to the first block of given MIOBuffer
-   FIXME: make @vc_in const
- */
 int64_t
 do_outbound_proxy_protocol(MIOBuffer *miob, NetVConnection *vc_out, NetVConnection *vc_in, int conf)
 {
@@ -147,8 +143,6 @@ do_outbound_proxy_protocol(MIOBuffer *miob, NetVConnection *vc_out, NetVConnecti
 
   return len;
 }
-
-} // namespace
 
 ClassAllocator<HttpSM> httpSMAllocator("httpSMAllocator");
 
@@ -1560,7 +1554,7 @@ plugins required to work with sni_routing.
         api_timer = Thread::get_hrtime();
       }
 
-      hook->invoke(TS_EVENT_HTTP_READ_REQUEST_HDR + cur_hook_id, this);
+      hook->invoke(TS_EVENT_HTTP_READ_REQUEST_HDR + static_cast<int>(cur_hook_id), this);
       if (api_timer > 0) { // true if the hook did not call TxnReenable()
         this->milestone_update_api_time();
         api_timer = -Thread::get_hrtime(); // set in order to track non-active callout duration
@@ -1931,7 +1925,6 @@ HttpSM::state_http_server_open(int event, void *data)
   case CONNECT_EVENT_TXN:
     SMDebug("http", "Connection handshake complete via CONNECT_EVENT_TXN");
     if (this->create_server_txn(static_cast<PoolableSession *>(data))) {
-      write_outbound_proxy_protocol();
       handle_http_server_open();
     } else { // Failed to create transaction.  Maybe too many active transactions already
       // Try again (probably need a bounding counter here)
@@ -1944,7 +1937,6 @@ HttpSM::state_http_server_open(int event, void *data)
     // Update the time out to the regular connection timeout.
     SMDebug("http_ss", "Connection handshake complete");
     this->create_server_txn(this->create_server_session(_netvc, _netvc_read_buffer, _netvc_reader));
-    write_outbound_proxy_protocol();
     t_state.current.server->clear_connect_fail();
     handle_http_server_open();
     return 0;
@@ -2034,7 +2026,7 @@ HttpSM::state_read_server_response_header(int event, void *data)
   case VC_EVENT_READ_COMPLETE:
     // More data to parse
     // Got some data, won't retry origin connection on error
-    t_state.current.attempts.maximize(t_state.configured_connect_attempts_max_retries());
+    t_state.current.retry_attempts.maximize(t_state.configured_connect_attempts_max_retries());
     break;
 
   case VC_EVENT_ERROR:
@@ -2297,13 +2289,13 @@ HttpSM::cancel_pending_server_connection()
       ConnectingEntry *connecting_entry = ip_iter->second;
       // Found a match
       // Look for our sm in the queue
-      auto entry = connecting_entry->_connect_sms.find(this);
-      if (entry != connecting_entry->_connect_sms.end()) {
-        connecting_entry->_connect_sms.erase(entry);
-        if (connecting_entry->_connect_sms.empty()) {
-          if (connecting_entry->_netvc) {
-            connecting_entry->_netvc->do_io_write(nullptr, 0, nullptr);
-            connecting_entry->_netvc->do_io_close();
+      auto entry = connecting_entry->connect_sms.find(this);
+      if (entry != connecting_entry->connect_sms.end()) {
+        connecting_entry->connect_sms.erase(entry);
+        if (connecting_entry->connect_sms.empty()) {
+          if (connecting_entry->netvc) {
+            connecting_entry->netvc->do_io_write(nullptr, 0, nullptr);
+            connecting_entry->netvc->do_io_close();
           }
           ethread->connecting_pool->m_ip_pool.erase(ip_iter);
           delete connecting_entry;
@@ -2347,12 +2339,12 @@ HttpSM::add_to_existing_request()
   while (!retval && ip_iter != ethread->connecting_pool->m_ip_pool.end() && ip_iter->first == ip) {
     // Check that entry matches sni, hostname, and cert
     if (proposed_hostname == ip_iter->second->hostname && proposed_sni == ip_iter->second->sni &&
-        proposed_cert == ip_iter->second->cert_name && ip_iter->second->_connect_sms.size() < 50) {
+        proposed_cert == ip_iter->second->cert_name && ip_iter->second->connect_sms.size() < 50) {
       // Pre-emptively set a server connect failure that will be cleared once a WRITE_READY is received from origin or
       // bytes are received back
       this->t_state.set_connect_fail(EIO);
-      ip_iter->second->_connect_sms.insert(this);
-      Debug("http_connect", "Add entry to connection queue. size=%" PRId64, ip_iter->second->_connect_sms.size());
+      ip_iter->second->connect_sms.insert(this);
+      Debug("http_connect", "Add entry to connection queue. size=%zd", ip_iter->second->connect_sms.size());
       retval = true;
       break;
     }
@@ -4537,7 +4529,12 @@ HttpSM::do_hostdb_lookup()
 
   milestones[TS_MILESTONE_DNS_LOOKUP_BEGIN] = Thread::get_hrtime();
 
-  if (t_state.txn_conf->srv_enabled) {
+  // If directed to not look up fqdns then mark as resolved
+  if (t_state.http_config_param->no_dns_forward_to_parent && t_state.parent_result.result == PARENT_UNDEFINED) {
+    t_state.dns_info.resolved_p = true;
+    call_transact_and_set_next_state(nullptr);
+    return;
+  } else if (t_state.txn_conf->srv_enabled) {
     char d[MAXDNAME];
 
     // Look at the next_hop_scheme to determine what scheme to put in the SRV lookup
@@ -4730,7 +4727,7 @@ HttpSM::parse_range_and_compare(MIMEField *field, int64_t content_length)
     return;
   }
 
-  ranges    = new RangeRecord[n_values];
+  ranges     = new RangeRecord[n_values];
   value     += 6; // skip leading 'bytes='
   value_len -= 6;
 
@@ -5165,10 +5162,10 @@ void
 HttpSM::send_origin_throttled_response()
 {
   // if the request is to a parent proxy, do not reset
-  // t_state.current.attempts so that another parent or
+  // t_state.current.retry_attempts so that another parent or
   // NextHop may be tried.
   if (t_state.dns_info.looking_up != ResolveInfo::PARENT_PROXY) {
-    t_state.current.attempts.maximize(t_state.configured_connect_attempts_max_retries());
+    t_state.current.retry_attempts.maximize(t_state.configured_connect_attempts_max_retries());
   }
   t_state.current.state = HttpTransact::OUTBOUND_CONGESTION;
   call_transact_and_set_next_state(HttpTransact::HandleResponse);
@@ -5349,7 +5346,8 @@ HttpSM::do_http_server_open(bool raw, bool only_direct)
         SMDebug("ip_allow", "Line %d denial for '%.*s' from %s", acl.source_line(), method_str_len, method_str,
                 ats_ip_ntop(server_ip, ipb, sizeof(ipb)));
       }
-      t_state.current.attempts.maximize(t_state.configured_connect_attempts_max_retries()); // prevent any more retries with this IP
+      t_state.current.retry_attempts.maximize(
+        t_state.configured_connect_attempts_max_retries()); // prevent any more retries with this IP
       call_transact_and_set_next_state(HttpTransact::Forbidden);
       return;
     }
@@ -5603,7 +5601,7 @@ HttpSM::do_http_server_open(bool raw, bool only_direct)
 
           SMDebug("http_ss", "using pre-warmed tunnel netvc=%p", netvc);
 
-          t_state.current.attempts.clear();
+          t_state.current.retry_attempts.clear();
 
           ink_release_assert(default_handler == HttpSM::default_handler);
           handleEvent(NET_EVENT_OPEN, netvc);
@@ -5676,14 +5674,16 @@ HttpSM::do_http_server_open(bool raw, bool only_direct)
       SMDebug("http_ss", "Queue multiplexed request");
       new_entry          = new ConnectingEntry();
       new_entry->mutex   = this->mutex;
+      new_entry->ua_txn  = ua_txn;
       new_entry->handler = (ContinuationHandler)&ConnectingEntry::state_http_server_open;
-      new_entry->_ipaddr.assign(&t_state.current.server->dst_addr.sa);
-      new_entry->hostname  = t_state.current.server->name;
-      new_entry->sni       = this->get_outbound_sni();
-      new_entry->cert_name = this->get_outbound_cert();
+      new_entry->ipaddr.assign(&t_state.current.server->dst_addr.sa);
+      new_entry->hostname            = t_state.current.server->name;
+      new_entry->sni                 = this->get_outbound_sni();
+      new_entry->cert_name           = this->get_outbound_cert();
+      new_entry->is_no_plugin_tunnel = plugin_tunnel_type == HTTP_NO_PLUGIN_TUNNEL;
       this->t_state.set_connect_fail(EIO);
-      new_entry->_connect_sms.insert(this);
-      ethread->connecting_pool->m_ip_pool.insert(std::make_pair(new_entry->_ipaddr, new_entry));
+      new_entry->connect_sms.insert(this);
+      ethread->connecting_pool->m_ip_pool.insert(std::make_pair(new_entry->ipaddr, new_entry));
     }
   }
 
@@ -6532,7 +6532,7 @@ HttpSM::write_header_into_buffer(HTTPHdr *h, MIOBuffer *b)
     int tmp              = dumpoffset;
 
     ink_assert(block->write_avail() > 0);
-    done       = h->print(block->start(), block->write_avail(), &bufindex, &tmp);
+    done        = h->print(block->start(), block->write_avail(), &bufindex, &tmp);
     dumpoffset += bufindex;
     ink_assert(bufindex > 0);
     b->fill(bufindex);
@@ -6542,17 +6542,6 @@ HttpSM::write_header_into_buffer(HTTPHdr *h, MIOBuffer *b)
   } while (!done);
 
   return dumpoffset;
-}
-
-void
-HttpSM::write_outbound_proxy_protocol()
-{
-  int64_t nbytes = 1;
-  if (t_state.txn_conf->proxy_protocol_out >= 0) {
-    nbytes = do_outbound_proxy_protocol(server_txn->get_remote_reader()->mbuf, server_txn->get_netvc(), ua_txn->get_netvc(),
-                                        t_state.txn_conf->proxy_protocol_out);
-  }
-  server_entry->write_vio = server_txn->do_io_write(this, nbytes, server_txn->get_remote_reader());
 }
 
 void
@@ -6697,7 +6686,7 @@ HttpSM::setup_server_send_request()
   if (t_state.api_server_request_body_set) {
     SMDebug("http", "appending msg of %" PRId64 " bytes to request %s", msg_len, t_state.internal_msg_buffer);
     hdr_length                += server_entry->write_buffer->write(t_state.internal_msg_buffer, msg_len);
-    server_request_body_bytes = msg_len;
+    server_request_body_bytes  = msg_len;
   }
 
   milestones[TS_MILESTONE_SERVER_BEGIN_WRITE] = Thread::get_hrtime();

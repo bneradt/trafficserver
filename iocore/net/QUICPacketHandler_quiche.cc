@@ -29,7 +29,10 @@
 #include "P_QUICNetProcessor_quiche.h"
 #include "P_QUICClosedConCollector.h"
 #include "quic/QUICConnectionTable.h"
+#include "QUICMultiCertConfigLoader.h"
 #include <quiche.h>
+
+#include "swoc/BufferWriter.h"
 
 static constexpr char debug_tag[]   = "quic_sec";
 static constexpr char v_debug_tag[] = "v_quic_sec";
@@ -274,23 +277,25 @@ QUICPacketHandlerIn::_recv_packet(int event, UDPPacket *udp_packet)
     }
 
     QUICConnectionId new_cid;
-    quiche_conn *quiche_con =
-      quiche_accept(new_cid, new_cid.length(), retry_token.original_dcid(), retry_token.original_dcid().length(),
-#ifdef HAVE_QUICHE_CONFIG_SET_ACTIVE_CONNECTION_ID_LIMIT
-                    &udp_packet->to.sa, udp_packet->to.isIp4() ? sizeof(udp_packet->to.sin) : sizeof(udp_packet->to.sin6),
-#endif
-                    &udp_packet->from.sa, udp_packet->from.isIp4() ? sizeof(udp_packet->from.sin) : sizeof(udp_packet->from.sin6),
-                    &this->_quiche_config);
+
+    QUICCertConfig::scoped_config server_cert;
+    SSL *ssl = SSL_new(server_cert->defaultContext());
+
+    quiche_conn *quiche_con = quiche_conn_new_with_tls(
+      new_cid, new_cid.length(), retry_token.original_dcid(), retry_token.original_dcid().length(), &udp_packet->to.sa,
+      udp_packet->to.isIp4() ? sizeof(udp_packet->to.sin) : sizeof(udp_packet->to.sin6), &udp_packet->from.sa,
+      udp_packet->from.isIp4() ? sizeof(udp_packet->from.sin) : sizeof(udp_packet->from.sin6), &this->_quiche_config, ssl, true);
 
     if (params->get_qlog_file_base_name() != nullptr) {
-      char qlog_filepath[PATH_MAX];
+      swoc::LocalBufferWriter<PATH_MAX> w;
       const uint8_t *quic_trace_id;
-      size_t quic_trace_id_len = 0;
+      size_t quic_trace_id_len{0};
       quiche_conn_trace_id(quiche_con, &quic_trace_id, &quic_trace_id_len);
-      snprintf(qlog_filepath, PATH_MAX, "%s-%.*s.sqlog", Layout::get()->relative(params->get_qlog_file_base_name()).c_str(),
-               static_cast<int>(quic_trace_id_len), quic_trace_id);
-      if (auto success = quiche_conn_set_qlog_path(quiche_con, qlog_filepath, "Apache Traffic Server", "qlog"); !success) {
-        QUICDebug("quiche_conn_set_qlog_path failed to use %s", qlog_filepath);
+
+      w.print("{}-{}.sqlog\0", Layout::get()->relative(params->get_qlog_file_base_name()),
+              std::string_view{reinterpret_cast<const char *>(quic_trace_id), quic_trace_id_len});
+      if (auto success = quiche_conn_set_qlog_path(quiche_con, w.data(), "Apache Traffic Server", "qlog"); !success) {
+        QUICDebug("quiche_conn_set_qlog_path failed to use %s", w.data());
       }
     }
 
@@ -299,7 +304,7 @@ QUICPacketHandlerIn::_recv_packet(int event, UDPPacket *udp_packet)
     // vc->init(version, peer_cid, original_cid, ocid_in_retry_token, rcid_in_retry_token, udp_packet->getConnection(), this,
     // &this->_ctable);
     vc->init(version, peer_cid, new_cid, QUICConnectionId::ZERO(), QUICConnectionId::ZERO(), udp_packet->getConnection(),
-             quiche_con, this, &this->_ctable);
+             quiche_con, this, &this->_ctable, ssl);
     vc->id = net_next_connection_number();
     vc->con.move(con);
     vc->submit_time = Thread::get_hrtime();
@@ -320,7 +325,7 @@ QUICPacketHandlerIn::_recv_packet(int event, UDPPacket *udp_packet)
   eth = vc->thread;
 
   QUICPollEvent *qe = quicPollEventAllocator.alloc();
-  qe->init(qc, static_cast<UDPPacketInternal *>(udp_packet));
+  qe->init(qc, static_cast<UDPPacket *>(udp_packet));
   // Push the packet into QUICPollCont
   get_QUICPollCont(eth)->inQueue.push(qe);
   get_NetHandler(eth)->signalActivity();

@@ -34,8 +34,9 @@
 
 #include <openssl/rand.h>
 
+#include "swoc/swoc_ip.h"
+
 #include "tscore/ink_inet.h"
-#include "tscore/IpMap.h"
 
 #include "ConfigProcessor.h"
 
@@ -56,8 +57,8 @@ struct ssl_ticket_key_block;
 // configuration file.
 /////////////////////////////////////////////////////////////
 
-typedef void (*init_ssl_ctx_func)(void *, bool);
-typedef void (*load_ssl_file_func)(const char *);
+using init_ssl_ctx_func  = void (*)(void *, bool);
+using load_ssl_file_func = void (*)(const char *);
 
 struct SSLConfigParams : public ConfigInfo {
   enum SSL_SESSION_CACHE_MODE {
@@ -110,6 +111,10 @@ struct SSLConfigParams : public ConfigInfo {
   char *client_tls13_cipher_suites;
   char *server_groups_list;
   char *client_groups_list;
+  int server_tls_ver_min;
+  int server_tls_ver_max;
+  int client_tls_ver_min;
+  int client_tls_ver_max;
 
   char *keylog_file;
 
@@ -137,7 +142,7 @@ struct SSLConfigParams : public ConfigInfo {
   static size_t session_cache_max_bucket_size;
   static bool session_cache_skip_on_lock_contention;
 
-  static IpMap *proxy_protocol_ipmap;
+  static swoc::IPRangeSet *proxy_protocol_ip_addrs;
 
   static init_ssl_ctx_func init_ssl_ctx_cb;
   static load_ssl_file_func load_ssl_file_cb;
@@ -171,7 +176,9 @@ struct SSLConfigParams : public ConfigInfo {
   void initialize();
   void cleanup();
   void reset();
-  void SSLConfigInit(IpMap *global);
+  void SSLConfigInit(swoc::IPRangeSet *global);
+  void SetServerPolicy(const char *);
+  void SetServerPolicyProperties(const char *);
 
 private:
   // c_str() of string passed to in-progess call to updateCTX().
@@ -200,7 +207,7 @@ struct SSLConfig {
   static int get_config_index();
   static int get_loading_config_index();
   static void commit_config_id();
-  typedef ConfigProcessor::scoped_config<SSLConfig, SSLConfigParams> scoped_config;
+  using scoped_config = ConfigProcessor::scoped_config<SSLConfig, SSLConfigParams>;
 
 private:
   static int config_index;
@@ -213,7 +220,7 @@ struct SSLCertificateConfig {
   static SSLCertLookup *acquire();
   static void release(SSLCertLookup *params);
 
-  typedef ConfigProcessor::scoped_config<SSLCertificateConfig, SSLCertLookup> scoped_config;
+  using scoped_config = ConfigProcessor::scoped_config<SSLCertificateConfig, SSLCertLookup>;
 
 private:
   static int configid;
@@ -249,7 +256,7 @@ struct SSLTicketKeyConfig {
     }
   }
 
-  typedef ConfigProcessor::scoped_config<SSLTicketKeyConfig, SSLTicketParams> scoped_config;
+  using scoped_config = ConfigProcessor::scoped_config<SSLTicketKeyConfig, SSLTicketParams>;
 
 private:
   static int configid;

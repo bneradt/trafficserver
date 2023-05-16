@@ -24,13 +24,24 @@
 #define CATCH_CONFIG_MAIN
 #include "catch.hpp"
 
+#include <string>
+
+#include "swoc/bwf_base.h"
+
 #include "HostFile.h"
 #include "P_HostDBProcessor.h"
 
+namespace
+{
+
+DbgCtl dbg_ctl_hostdb{"hostdb"};
+
 const std::string_view hosts_data = "127.0.0.1 localhost\n::1 localhost\n1.2.3.4  host1\n4.3.2.1 host2 host3\n"_sv;
 
+} // end anonymous namespace
+
 void
-spit(const ts::file::path &p, std::string_view data)
+spit(const swoc::file::path &p, std::string_view data)
 {
   std::ofstream f(p.c_str(), std::ios::trunc);
   f.write(data.data(), data.size());
@@ -39,11 +50,11 @@ spit(const ts::file::path &p, std::string_view data)
 
 TEST_CASE("HostFile", "[hostdb]")
 {
-  auto tmp = ts::file::temp_directory_path();
-  ts::LocalBufferWriter<1024> w;
+  auto tmp = swoc::file::temp_directory_path();
+  swoc::LocalBufferWriter<1024> w;
   w.print("{}/localhost.{}", tmp, ::getpid());
 
-  auto hostfilepath = ts::file::path(w.view());
+  auto hostfilepath = swoc::file::path(w.view());
 
   spit(hostfilepath, hosts_data);
 
@@ -142,15 +153,15 @@ HostDBRecord::alloc(ts::TextView query_name, unsigned int rr_count, size_t srv_n
   self->_iobuffer_index = 0;
   self->_record_size    = r_size;
 
-  Debug("hostdb", "allocating %ld bytes for %.*s with %d RR records at [%p]", r_size.value(), int(query_name.size()),
-        query_name.data(), rr_count, self);
+  Dbg(dbg_ctl_hostdb, "allocating %ld bytes for %.*s with %d RR records at [%p]", r_size.value(), int(query_name.size()),
+      query_name.data(), rr_count, self);
 
   // where in our block of memory we are
   int offset = sizeof(self_type);
   memcpy(self->apply_offset<void>(offset), query_name);
   offset          += qn_size;
-  self->rr_offset = offset;
-  self->rr_count  = rr_count;
+  self->rr_offset  = offset;
+  self->rr_count   = rr_count;
   // Construct the info instances to a valid state.
   for (auto &info : self->rr_info()) {
     new (&info) std::remove_reference_t<decltype(info)>;

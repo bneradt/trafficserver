@@ -40,7 +40,7 @@
 
 /* Some defines that might be candidates for configurable settings later.
  */
-typedef int8_t TSMgmtByte; // Not for external use
+using TSMgmtByte = int8_t; // Not for external use
 
 /* ****** Cache Structure ********* */
 
@@ -366,9 +366,6 @@ public:
 
   /// Get the hook ID
   TSHttpHookID id() const;
-
-  /// Temporary function to return true. Later will be used to decide if a plugin is enabled for the hooks
-  bool is_enabled();
 
 protected:
   /// Track the state of one scope of hooks.

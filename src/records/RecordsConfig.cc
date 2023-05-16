@@ -254,7 +254,7 @@ static const RecordElement RecordsConfig[] =
   ,
   {RECT_CONFIG, "proxy.config.udp.send_retries", RECD_INT, "0", RECU_NULL, RR_NULL, RECC_NULL, nullptr, RECA_NULL}
   ,
-  {RECT_CONFIG, "proxy.config.udp.threads", RECD_INT, "0", RECU_NULL, RR_NULL, RECC_NULL, nullptr, RECA_NULL}
+  {RECT_CONFIG, "proxy.config.udp.threads", RECD_INT, "0", RECU_RESTART_TS, RR_NULL, RECC_NULL, nullptr, RECA_NULL}
   ,
   {RECT_CONFIG, "proxy.config.udp.enable_gso", RECD_INT, "1", RECU_NULL, RR_NULL, RECC_NULL, nullptr, RECA_NULL}
   ,
@@ -841,7 +841,7 @@ static const RecordElement RecordsConfig[] =
   ,
   {RECT_CONFIG, "proxy.config.cache.min_average_object_size", RECD_INT, "8000", RECU_DYNAMIC, RR_NULL, RECC_NULL, nullptr, RECA_NULL}
   ,
-  {RECT_CONFIG, "proxy.config.cache.threads_per_disk", RECD_INT, "8", RECU_DYNAMIC, RR_NULL, RECC_NULL, nullptr, RECA_NULL}
+  {RECT_CONFIG, "proxy.config.cache.threads_per_disk", RECD_INT, "8", RECU_RESTART_TS, RR_NULL, RECC_NULL, nullptr, RECA_NULL}
   ,
   {RECT_CONFIG, "proxy.config.cache.agg_write_backlog", RECD_INT, "5242880", RECU_DYNAMIC, RR_NULL, RECC_NULL, nullptr, RECA_NULL}
   ,
@@ -1022,7 +1022,7 @@ static const RecordElement RecordsConfig[] =
   ,
   {RECT_CONFIG, "proxy.config.log.config.filename", RECD_STRING, ts::filename::LOGGING, RECU_DYNAMIC, RR_NULL, RECC_NULL, nullptr, RECA_NULL}
   ,
-  {RECT_CONFIG, "proxy.config.log.preproc_threads", RECD_INT, "1", RECU_DYNAMIC, RR_REQUIRED, RECC_INT, "[1-128]", RECA_NULL}
+  {RECT_CONFIG, "proxy.config.log.preproc_threads", RECD_INT, "1", RECU_RESTART_TS, RR_REQUIRED, RECC_INT, "[1-128]", RECA_NULL}
   ,
   {RECT_CONFIG, "proxy.config.log.rolling_enabled", RECD_INT, "1", RECU_DYNAMIC, RR_NULL, RECC_INT, "[0-4]", RECA_NULL}
   ,
@@ -1085,6 +1085,14 @@ static const RecordElement RecordsConfig[] =
   ,
   {RECT_CONFIG, "proxy.config.ssl.server.session_ticket.number", RECD_INT, "2", RECU_DYNAMIC, RR_NULL, RECC_NULL, nullptr, RECA_NULL},
 
+  {RECT_CONFIG, "proxy.config.ssl.client.version.min", RECD_INT, "-1", RECU_RESTART_TS, RR_NULL, RECC_INT, "^-?[0-9]+$", RECA_NULL}
+  ,
+  {RECT_CONFIG, "proxy.config.ssl.client.version.max", RECD_INT, "-1", RECU_RESTART_TS, RR_NULL, RECC_INT, "^-?[0-9]+$", RECA_NULL}
+  ,
+  {RECT_CONFIG, "proxy.config.ssl.server.version.min", RECD_INT, "-1", RECU_RESTART_TS, RR_NULL, RECC_INT, "^-?[0-9]+$", RECA_NULL}
+  ,
+  {RECT_CONFIG, "proxy.config.ssl.server.version.max", RECD_INT, "-1", RECU_RESTART_TS, RR_NULL, RECC_INT, "^-?[0-9]+$", RECA_NULL}
+  ,
   {RECT_CONFIG, "proxy.config.ssl.TLSv1", RECD_INT, "0", RECU_RESTART_TS, RR_NULL, RECC_INT, "[0-1]", RECA_NULL}
   ,
   {RECT_CONFIG, "proxy.config.ssl.TLSv1_1", RECD_INT, "0", RECU_RESTART_TS, RR_NULL, RECC_INT, "[0-1]", RECA_NULL}
@@ -1524,14 +1532,17 @@ static const RecordElement RecordsConfig[] =
 
   //###########
   //#
-  //# AIO specific configuration
+  //# IO_URING specific configuration
   //#
   //###########
-  {RECT_CONFIG, "proxy.config.aio.io_uring.entries", RECD_INT, "1024", RECU_NULL, RR_NULL, RECC_NULL, nullptr, RECA_NULL},
-  {RECT_CONFIG, "proxy.config.aio.io_uring.sq_poll_ms", RECD_INT, "0", RECU_NULL, RR_NULL, RECC_NULL, nullptr, RECA_NULL},
-  {RECT_CONFIG, "proxy.config.aio.io_uring.attach_wq", RECD_INT, "0", RECU_NULL, RR_NULL, RECC_NULL, "[0-1]", RECA_NULL},
-  {RECT_CONFIG, "proxy.config.aio.io_uring.wq_workers_bounded", RECD_INT, "0", RECU_NULL, RR_NULL, RECC_NULL, nullptr, RECA_NULL},
-  {RECT_CONFIG, "proxy.config.aio.io_uring.wq_workers_unbounded", RECD_INT, "0", RECU_NULL, RR_NULL, RECC_NULL, nullptr, RECA_NULL},
+#if TS_USE_LINUX_IO_URING
+  {RECT_CONFIG, "proxy.config.io_uring.entries", RECD_INT, "1024", RECU_NULL, RR_NULL, RECC_NULL, nullptr, RECA_NULL},
+  {RECT_CONFIG, "proxy.config.io_uring.sq_poll_ms", RECD_INT, "0", RECU_NULL, RR_NULL, RECC_NULL, nullptr, RECA_NULL},
+  {RECT_CONFIG, "proxy.config.io_uring.attach_wq", RECD_INT, "0", RECU_NULL, RR_NULL, RECC_NULL, "[0-1]", RECA_NULL},
+  {RECT_CONFIG, "proxy.config.io_uring.wq_workers_bounded", RECD_INT, "0", RECU_NULL, RR_NULL, RECC_NULL, nullptr, RECA_NULL},
+  {RECT_CONFIG, "proxy.config.io_uring.wq_workers_unbounded", RECD_INT, "0", RECU_NULL, RR_NULL, RECC_NULL, nullptr, RECA_NULL},
+  {RECT_CONFIG, "proxy.config.aio.mode", RECD_STRING, "auto", RECU_DYNAMIC, RR_NULL, RECC_NULL, "(auto|io_uring|thread)", RECA_NULL},
+#endif
 
 };
 // clang-format on

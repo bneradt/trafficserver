@@ -26,7 +26,7 @@ add_executable(traffic_server
         traffic_server.cc
         RpcAdminPubHandlers.cc
         ${CMAKE_SOURCE_DIR}/src/shared/overridable_txn_vars.cc
-)
+        )
 target_include_directories(traffic_server PRIVATE
         ${IOCORE_INCLUDE_DIRS}
         ${PROXY_INCLUDE_DIRS}
@@ -64,3 +64,8 @@ target_link_libraries(traffic_server
 if (TS_USE_LINUX_IO_URING)
     target_link_libraries(traffic_server inkuring uring)
 endif (TS_USE_LINUX_IO_URING)
+if (TS_USE_LINUX_NATIVE_AIO)
+    target_link_libraries(traffic_server aio)
+endif (TS_USE_LINUX_NATIVE_AIO)
+
+install(TARGETS traffic_server)

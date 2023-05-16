@@ -25,7 +25,6 @@
 #include <new>
 #include "tscore/ink_platform.h"
 #include "tscore/ink_memory.h"
-#include "tscore/TsBuffer.h"
 #include "URL.h"
 #include "MIME.h"
 #include "HTTP.h"
@@ -991,8 +990,8 @@ unescape_str(char *&buf, char *buf_e, const char *&str, const char *str_e, int &
   int str_len = static_cast<int>(str_e - str);
   int min_len = (str_len < buf_len ? str_len : buf_len);
 
-  first_pct = ink_memcpy_until_char(buf, const_cast<char *>(str), min_len, '%');
-  copy_len  = static_cast<int>(first_pct - str);
+  first_pct  = ink_memcpy_until_char(buf, const_cast<char *>(str), min_len, '%');
+  copy_len   = static_cast<int>(first_pct - str);
   str       += copy_len;
   buf       += copy_len;
   if (copy_len == min_len) {
@@ -1004,16 +1003,16 @@ unescape_str(char *&buf, char *buf_e, const char *&str, const char *str_e, int &
     case 0:
       if (str[0] == '%') {
         str   += 1;
-        state = 1;
+        state  = 1;
       } else {
-        *buf++ = str[0];
+        *buf++  = str[0];
         str    += 1;
       }
       break;
     case 1:
       if (ParseRules::is_hex(str[0])) {
         str   += 1;
-        state = 2;
+        state  = 2;
       } else {
         *buf++ = str[-1];
         state  = 0;
@@ -1034,9 +1033,9 @@ unescape_str(char *&buf, char *buf_e, const char *&str, const char *str_e, int &
           tmp += str[0] - '0';
         }
 
-        *buf++ = tmp;
+        *buf++  = tmp;
         str    += 1;
-        state  = 0;
+        state   = 0;
       } else {
         *buf++ = str[-2];
         state  = 3;
@@ -1061,16 +1060,16 @@ unescape_str_tolower(char *&buf, char *end, const char *&str, const char *str_e,
     case 0:
       if (str[0] == '%') {
         str   += 1;
-        state = 1;
+        state  = 1;
       } else {
-        *buf++ = ParseRules::ink_tolower(str[0]);
+        *buf++  = ParseRules::ink_tolower(str[0]);
         str    += 1;
       }
       break;
     case 1:
       if (ParseRules::is_hex(str[0])) {
         str   += 1;
-        state = 2;
+        state  = 2;
       } else {
         *buf++ = ParseRules::ink_tolower(str[-1]);
         state  = 0;
@@ -1091,9 +1090,9 @@ unescape_str_tolower(char *&buf, char *end, const char *&str, const char *str_e,
           tmp += str[0] - '0';
         }
 
-        *buf++ = tmp;
+        *buf++  = tmp;
         str    += 1;
-        state  = 0;
+        state   = 0;
       } else {
         *buf++ = ParseRules::ink_tolower(str[-2]);
         state  = 3;
@@ -1284,7 +1283,7 @@ url_parse_internet(HdrHeap *heap, URLImpl *url, const char **start, char const *
   const char *cur = *start;
   const char *base;              // Base for host/port field.
   const char *bracket = nullptr; // marker for open bracket, if any.
-  ts::ConstBuffer user, passw, host, port;
+  swoc::TextView user, passw, host, port;
   static size_t const MAX_COLON = 8; // max # of valid colons.
   size_t n_colon                = 0;
   const char *last_colon        = nullptr; // pointer to last colon seen.
@@ -1313,7 +1312,7 @@ url_parse_internet(HdrHeap *heap, URLImpl *url, const char **start, char const *
          stripping brackets from non-IPv6 content but that gets ugly
          as well. Just not worth it.
        */
-      host.set(bracket, cur);
+      host.assign(bracket, cur);
       // Spec requires This constitute the entire host so the next
       // character must be missing (EOS), slash, or colon.
       if (cur >= end || '/' == *cur) { // done which is OK
@@ -1339,12 +1338,12 @@ url_parse_internet(HdrHeap *heap, URLImpl *url, const char **start, char const *
         return PARSE_RESULT_ERROR; // we already got one, or too many colons.
       }
       if (n_colon) {
-        user.set(base, last_colon);
-        passw.set(last_colon + 1, cur);
+        user.assign(base, last_colon);
+        passw.assign(last_colon + 1, cur);
         n_colon    = 0;
         last_colon = nullptr;
       } else {
-        user.set(base, cur);
+        user.assign(base, cur);
       }
       ++cur;
       base = cur;
@@ -1374,24 +1373,24 @@ url_parse_internet(HdrHeap *heap, URLImpl *url, const char **start, char const *
   // character past the parse area.
 
   if (user) {
-    url->set_user(heap, user._ptr, user._size, copy_strings_p);
+    url->set_user(heap, user.data(), user.size(), copy_strings_p);
     if (passw) {
-      url->set_password(heap, passw._ptr, passw._size, copy_strings_p);
+      url->set_password(heap, passw.data(), passw.size(), copy_strings_p);
     }
   }
 
   // @a host not set means no brackets to mark explicit host.
   if (!host) {
     if (1 == n_colon || MAX_COLON == n_colon) { // presume port.
-      host.set(base, last_colon);
+      host.assign(base, last_colon);
     } else { // it's all host.
-      host.set(base, cur);
+      host.assign(base, cur);
       last_colon = nullptr; // prevent port setting.
     }
   }
-  if (host._size) {
-    if (!verify_host_characters || validate_host_name(std::string_view(host._ptr, host._size))) {
-      url->set_host(heap, host._ptr, host._size, copy_strings_p);
+  if (!host.empty()) {
+    if (!verify_host_characters || validate_host_name(host)) {
+      url->set_host(heap, host.data(), host.size(), copy_strings_p);
     } else {
       return PARSE_RESULT_ERROR;
     }
@@ -1399,11 +1398,11 @@ url_parse_internet(HdrHeap *heap, URLImpl *url, const char **start, char const *
 
   if (last_colon) {
     ink_assert(n_colon);
-    port.set(last_colon + 1, cur);
-    if (!port._size) {
+    port.assign(last_colon + 1, cur);
+    if (port.empty()) {
       return PARSE_RESULT_ERROR; // colon w/o port value.
     }
-    url->set_port(heap, port._ptr, port._size, copy_strings_p);
+    url->set_port(heap, port.data(), port.size(), copy_strings_p);
   }
   *start = cur;
   return PARSE_RESULT_DONE;
@@ -1771,19 +1770,19 @@ url_CryptoHash_get_fast(const URLImpl *url, CryptoContext &ctx, CryptoHash *hash
   p = buffer;
   memcpy_tolower(p, url->m_ptr_scheme, url->m_len_scheme);
   p    += url->m_len_scheme;
-  *p++ = ':';
-  *p++ = '/';
-  *p++ = '/';
+  *p++  = ':';
+  *p++  = '/';
+  *p++  = '/';
   // no user
   *p++ = ':';
   // no password
   *p++ = '@';
   memcpy_tolower(p, url->m_ptr_host, url->m_len_host);
   p    += url->m_len_host;
-  *p++ = '/';
+  *p++  = '/';
   memcpy(p, url->m_ptr_path, url->m_len_path);
   p    += url->m_len_path;
-  *p++ = ';';
+  *p++  = ';';
   // no params
   *p++ = '?';
   // no query

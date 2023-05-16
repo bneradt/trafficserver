@@ -26,6 +26,8 @@ Linux io_uring helper library
 #include <cstring>
 #include <stdexcept>
 
+#include <unistd.h>
+
 #include "I_IO_URING.h"
 #include "tscore/ink_hrtime.h"
 
@@ -41,6 +43,9 @@ IOUringContext::set_config(const IOUringConfig &cfg)
   config = cfg;
 }
 
+static io_uring_probe probe_unsupported     = {};
+constexpr int MAX_SUPPORTED_OP_BEFORE_PROBE = 20;
+
 IOUringContext::IOUringContext()
 {
   io_uring_params p{};
@@ -55,7 +60,7 @@ IOUringContext::IOUringContext()
 
   if (config.sq_poll_ms > 0) {
     p.flags          |= IORING_SETUP_SQPOLL;
-    p.sq_thread_idle = config.sq_poll_ms;
+    p.sq_thread_idle  = config.sq_poll_ms;
   }
 
   int ret = io_uring_queue_init_params(config.queue_entries, &ring, &p);
@@ -68,16 +73,21 @@ IOUringContext::IOUringContext()
     throw std::runtime_error("No SQPOLL sharing with nonfixed");
   }
 
-  // assign this handler to the thread
-  // TODO(cmcfarlen): Assign in thread somewhere else
-  // this_ethread()->diskHandler = this;
+  // Fetch the probe info so we can check for op support
+  probe = io_uring_get_probe_ring(&ring);
+  if (probe == nullptr) {
+    probe = &probe_unsupported;
+  }
 }
 
 IOUringContext::~IOUringContext()
 {
   if (evfd != -1) {
-    close(evfd);
+    ::close(evfd);
     evfd = -1;
+  }
+  if (probe != &probe_unsupported) {
+    io_uring_free_probe(probe);
   }
   io_uring_queue_exit(&ring);
 }
@@ -141,17 +151,22 @@ IOUringContext::service()
     cqe = nullptr;
     io_uring_peek_cqe(&ring, &cqe);
   }
+
+  if (evfd != -1) {
+    uint64_t val = 0;
+    ::read(evfd, &val, sizeof(val));
+  }
 }
 
 void
-IOUringContext::submit_and_wait(int ms)
+IOUringContext::submit_and_wait(ink_hrtime t)
 {
-  ink_hrtime t              = ink_hrtime_from_msec(ms);
   timespec ts               = ink_hrtime_to_timespec(t);
   __kernel_timespec timeout = {ts.tv_sec, ts.tv_nsec};
   io_uring_cqe *cqe         = nullptr;
 
-  io_uring_submit_and_wait_timeout(&ring, &cqe, 1, &timeout, nullptr);
+  int count = io_uring_submit_and_wait_timeout(&ring, &cqe, 1, &timeout, nullptr);
+  io_uring_submissions.fetch_add(count);
   while (cqe) {
     handle_cqe(cqe);
     io_uring_completions++;
@@ -179,4 +194,16 @@ IOUringContext::local_context()
   thread_local IOUringContext threadContext;
 
   return &threadContext;
+}
+
+bool
+IOUringContext::supports_op(int op) const
+{
+  // If we don't have a probe, we can only support the ops that were supported
+  // before the probe was added.
+  if (probe == &probe_unsupported) {
+    return op <= MAX_SUPPORTED_OP_BEFORE_PROBE;
+  }
+
+  return io_uring_opcode_supported(probe, op);
 }

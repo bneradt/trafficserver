@@ -59,7 +59,11 @@ fqdn                      Both      Fully Qualified Domain Name. This item is us
 
 ip_allow                  Inbound   Specify a list of client IP address, subnets, or ranges what are allowed to complete
                                     the connection. This list is comma separated. IPv4 and IPv6 addresses can be specified.
-                                    Here is an example list: 192.168.1.0/24,192.168.10.1-4. This would allow connections
+                                    Here is an example list ::
+
+                                       192.168.1.0/24,192.168.10.1-192.168.10.4
+
+                                    This would allow connections
                                     from clients in the 19.168.1.0 network or in the range from 192.168.10.1 to 192.168.1.4.
 
                                     Alternatively, the path to a file containing
@@ -118,7 +122,25 @@ host_sni_policy           Inbound   One of the values :code:`DISABLED`, :code:`P
                                     which a malicious user may alter to some other server value whose policies are more
                                     lenient than the host he is trying to access.
 
-valid_tls_versions_in     Inbound   This specifies the list of TLS protocols that will be offered to user agents during
+valid_tls_version_min_in  Inbound   This specifies the minimum TLS version that will be offered to user agents during
+                                    the TLS negotiation.  This replaces the global settings in
+                                    :ts:cv:`proxy.config.ssl.server.version.min`,
+                                    :ts:cv:`proxy.config.ssl.TLSv1`, :ts:cv:`proxy.config.ssl.TLSv1_1`,
+                                    :ts:cv:`proxy.config.ssl.TLSv1_2`, and :ts:cv:`proxy.config.ssl.TLSv1_3`. The potential
+                                    values are TLSv1, TLSv1_1, TLSv1_2, and TLSv1_3. This key is only valid for OpenSSL
+                                    1.1.0 and later and BoringSSL. Older versions of OpenSSL do not provide a hook early enough to update
+                                    the SSL object.  It is a syntax error for |TS| built against earlier versions.
+
+valid_tls_version_max_in  Inbound   This specifies the minimum TLS version that will be offered to user agents during
+                                    the TLS negotiation.  This replaces the global settings in
+                                    :ts:cv:`proxy.config.ssl.server.version.max`,
+                                    :ts:cv:`proxy.config.ssl.TLSv1`, :ts:cv:`proxy.config.ssl.TLSv1_1`,
+                                    :ts:cv:`proxy.config.ssl.TLSv1_2`, and :ts:cv:`proxy.config.ssl.TLSv1_3`. The potential
+                                    values are TLSv1, TLSv1_1, TLSv1_2, and TLSv1_3. This key is only valid for OpenSSL
+                                    1.1.0 and later and BoringSSL. Older versions of OpenSSL do not provide a hook early enough to update
+                                    the SSL object.  It is a syntax error for |TS| built against earlier versions.
+
+valid_tls_versions_in     Inbound   Deprecated. This specifies the list of TLS protocols that will be offered to user agents during
                                     the TLS negotiation.  This replaces the global settings in
                                     :ts:cv:`proxy.config.ssl.TLSv1`, :ts:cv:`proxy.config.ssl.TLSv1_1`,
                                     :ts:cv:`proxy.config.ssl.TLSv1_2`, and :ts:cv:`proxy.config.ssl.TLSv1_3`. The potential
@@ -171,6 +193,8 @@ tunnel_route              Inbound   Destination as an FQDN and port, separated b
                                     the port that was specified by the incoming Proxy Protocol payload. See :ref:`Proxy
                                     Protocol <proxy-protocol>` for more information on Proxy Protocol and how it is
                                     configured for |TS|.
+
+                                    Note that only one of the ``{inbound_local_port}`` and ``{proxy_protocol_port}`` literal strings can be specified. The match group number can be used in combination with either one of those.
 
                                     For each of these tunnel targets, unless the port is explicitly specified in the target
                                     (e.g., if the port is derived from the Proxy Protocol header), the port must be

@@ -129,12 +129,18 @@ protected:
  * When used by the print formatting logic, there is an abstraction layer, "extraction", which
  * performs the equivalent of the @c parse method. This allows the formatting to treat
  * pre-compiled or immediately parsed format strings the same. It also enables formatted print
- * support any parser that can deliver literals and @c Spec instances.
+ * support for any parser that can deliver literals and @c Spec instances.
  */
-class Format {
-public:
+struct Format {
+  using self_type = Format; ///< Self reference type.
+
   /// Construct from a format string @a fmt.
   Format(TextView fmt);
+
+  /// Move constructor.
+  Format(self_type && that) = default;
+  /// No copy
+  Format(self_type const&) = delete;
 
   /// Extraction support for TextView.
   struct TextViewExtractor {
@@ -170,7 +176,7 @@ public:
 
   /// Extraction support for pre-parsed format strings.
   struct FormatExtractor {
-    const std::vector<Spec> &_fmt; ///< Parsed format string.
+    MemSpan<Spec const> _fmt; ///< Parsed format string.
     int _idx = 0;                  ///< Element index.
     /// @return @c true if more format string, @c false if none.
     explicit operator bool() const;
@@ -186,6 +192,9 @@ public:
 
   /// Wrap the format instance in an extractor.
   FormatExtractor bind() const;
+
+  /// @return @c true if all specifiers are literal.
+  bool is_literal() const;
 
 protected:
   /// Default constructor for use by subclasses with alternate formatting.
@@ -1174,11 +1183,10 @@ auto
 FixedBufferWriter::print_v(bwf::Format const &fmt, std::tuple<Args...> const &args) -> self_type & {
   return static_cast<self_type &>(this->super_type::print_v(fmt, args));
 }
-
 /// @endcond
 
 // Special case support for @c Scalar, because @c Scalar is a base utility for some other utilities
-// there can be some unpleasant cirularities if @c Scalar includes BufferWriter formatting. If the
+// there can be some unpleasant circularities if @c Scalar includes BufferWriter formatting. If the
 // support is here then it's fine because anything using BWF for @c Scalar must include this header.
 template <intmax_t N, typename C, typename T> class Scalar;
 namespace detail {

@@ -23,7 +23,9 @@
 
 #include "P_QUICNetVConnection_quiche.h"
 #include "P_QUICPacketHandler_quiche.h"
+#include "QUICMultiCertConfigLoader.h"
 #include "quic/QUICStream_quiche.h"
+#include "quic/QUICGlobals.h"
 #include <quiche.h>
 
 static constexpr ink_hrtime WRITE_READY_INTERVAL = HRTIME_MSECONDS(2);
@@ -46,7 +48,7 @@ QUICNetVConnection::init(QUICVersion version, QUICConnectionId peer_cid, QUICCon
 void
 QUICNetVConnection::init(QUICVersion version, QUICConnectionId peer_cid, QUICConnectionId original_cid, QUICConnectionId first_cid,
                          QUICConnectionId retry_cid, UDPConnection *udp_con, quiche_conn *quiche_con,
-                         QUICPacketHandler *packet_handler, QUICConnectionTable *ctable)
+                         QUICPacketHandler *packet_handler, QUICConnectionTable *ctable, SSL *ssl)
 {
   SET_HANDLER((NetVConnHandler)&QUICNetVConnection::acceptEvent);
   this->_udp_con                     = udp_con;
@@ -61,6 +63,10 @@ QUICNetVConnection::init(QUICVersion version, QUICConnectionId peer_cid, QUICCon
     this->_ctable->insert(this->_quic_connection_id, this);
     this->_ctable->insert(this->_original_quic_connection_id, this);
   }
+
+  this->_ssl = ssl;
+  SSL_set_ex_data(ssl, QUIC::ssl_quic_qc_index, static_cast<QUICConnection *>(this));
+  this->_bindSSLObject();
 }
 
 void
@@ -73,6 +79,10 @@ QUICNetVConnection::free()
 void
 QUICNetVConnection::remove_connection_ids()
 {
+  if (this->_ctable) {
+    this->_ctable->erase(this->_quic_connection_id, this);
+    this->_ctable->erase(this->_original_quic_connection_id, this);
+  }
 }
 
 // called by ET_UDP
@@ -110,6 +120,7 @@ QUICNetVConnection::free(EThread *t)
   this->_context->trigger(QUICContext::CallbackEvent::CONNECTION_CLOSE);
   ALPNSupport::clear();
   TLSBasicSupport::clear();
+  TLSCertSwitchSupport::_clear();
 
   this->_packet_handler->close_connection(this);
   this->_packet_handler = nullptr;
@@ -149,7 +160,7 @@ QUICNetVConnection::state_handshake(int event, Event *data)
     this->closed = 1;
     break;
   default:
-    QUICConDebug("Unhandleed event: %d", event);
+    QUICConDebug("Unhandled event: %d", event);
     break;
   }
 
@@ -180,7 +191,7 @@ QUICNetVConnection::state_established(int event, Event *data)
     this->closed = 1;
     break;
   default:
-    QUICConDebug("Unhandleed event: %d", event);
+    QUICConDebug("Unhandled event: %d", event);
     break;
   }
   return EVENT_DONE;
@@ -281,12 +292,14 @@ QUICNetVConnection::acceptEvent(int event, Event *e)
   SET_HANDLER((NetVConnHandler)&QUICNetVConnection::state_handshake);
 
   // Send this netvc to InactivityCop.
+  // Note: even though we will set the timeouts to 0, we need this so we make sure the one gets freed and the IO is properly ended.
   nh->startCop(this);
 
+  // We will take care of this by using `idle_timeout` configured by `proxy.config.quic.no_activity_timeout_in`.
+  this->set_default_inactivity_timeout(0);
+
   if (inactivity_timeout_in) {
-    set_inactivity_timeout(inactivity_timeout_in);
-  } else {
-    set_inactivity_timeout(0);
+    this->set_inactivity_timeout(inactivity_timeout_in);
   }
 
   if (active_timeout_in) {
@@ -334,10 +347,8 @@ QUICNetVConnection::handle_received_packet(UDPPacket *packet)
   quiche_recv_info recv_info = {
     &packet->from.sa,
     static_cast<socklen_t>(packet->from.isIp4() ? sizeof(packet->from.sin) : sizeof(packet->from.sin6)),
-#ifdef HAVE_QUICHE_CONFIG_SET_ACTIVE_CONNECTION_ID_LIMIT
     &packet->to.sa,
     static_cast<socklen_t>(packet->to.isIp4() ? sizeof(packet->to.sin) : sizeof(packet->to.sin6)),
-#endif
   };
 
   ssize_t done = quiche_conn_recv(this->_quiche_con, buf, buf_len, &recv_info);
@@ -485,6 +496,32 @@ QUICNetVConnection::load_buffer_and_write(int64_t towrite, MIOBufferAccessor &bu
   return 0;
 }
 
+bool
+QUICNetVConnection::getSSLHandShakeComplete() const
+{
+  return quiche_conn_is_established(this->_quiche_con);
+}
+
+void
+QUICNetVConnection::_bindSSLObject()
+{
+  TLSBasicSupport::bind(this->_ssl, this);
+  ALPNSupport::bind(this->_ssl, this);
+  TLSSessionResumptionSupport::bind(this->_ssl, this);
+  TLSSNISupport::bind(this->_ssl, this);
+  TLSCertSwitchSupport::bind(this->_ssl, this);
+}
+
+void
+QUICNetVConnection::_unbindSSLObject()
+{
+  TLSBasicSupport::unbind(this->_ssl);
+  ALPNSupport::unbind(this->_ssl);
+  TLSSessionResumptionSupport::unbind(this->_ssl);
+  TLSSNISupport::unbind(this->_ssl);
+  TLSCertSwitchSupport::unbind(this->_ssl);
+}
+
 void
 QUICNetVConnection::_schedule_packet_write_ready(bool delay)
 {
@@ -589,10 +626,8 @@ QUICNetVConnection::_handle_interval()
   quiche_conn_on_timeout(this->_quiche_con);
 
   if (quiche_conn_is_closed(this->_quiche_con)) {
-    this->_ctable->erase(this->_quic_connection_id, this);
-    this->_ctable->erase(this->_original_quic_connection_id, this);
-
     if (quiche_conn_is_timed_out(this->_quiche_con)) {
+      QUICConDebug("QUIC Idle timeout detected");
       this->thread->schedule_imm(this, VC_EVENT_INACTIVITY_TIMEOUT);
       return;
     }
@@ -630,14 +665,79 @@ QUICNetVConnection::protocol_contains(std::string_view tag) const
   return "";
 }
 
+const char *
+QUICNetVConnection::get_server_name() const
+{
+  return get_sni_server_name();
+}
+
+bool
+QUICNetVConnection::support_sni() const
+{
+  return true;
+}
+
 SSL *
 QUICNetVConnection::_get_ssl_object() const
 {
-  return nullptr;
+  return this->_ssl;
 }
 
 ssl_curve_id
 QUICNetVConnection::_get_tls_curve() const
 {
-  return 0;
+  if (getSSLSessionCacheHit()) {
+    return getSSLCurveNID();
+  } else {
+    return SSLGetCurveNID(this->_ssl);
+  }
+}
+
+void
+QUICNetVConnection::_fire_ssl_servername_event()
+{
+}
+
+const IpEndpoint &
+QUICNetVConnection::_getLocalEndpoint()
+{
+  return this->local_addr;
+}
+
+bool
+QUICNetVConnection::_isTryingRenegotiation() const
+{
+  // Renegotiation is not allowed on QUIC (TLS 1.3) connections.
+  // If handshake is completed when this function is called, that should be unallowed attempt of renegotiation.
+  return this->getSSLHandShakeComplete();
+}
+
+shared_SSL_CTX
+QUICNetVConnection::_lookupContextByName(const std::string &servername, SSLCertContextType ctxType)
+{
+  shared_SSL_CTX ctx = nullptr;
+  QUICCertConfig::scoped_config lookup;
+  SSLCertContext *cc = lookup->find(servername, ctxType);
+
+  if (cc && cc->getCtx()) {
+    ctx = cc->getCtx();
+  }
+
+  return ctx;
+}
+
+shared_SSL_CTX
+QUICNetVConnection::_lookupContextByIP()
+{
+  shared_SSL_CTX ctx = nullptr;
+  QUICCertConfig::scoped_config lookup;
+  QUICFiveTuple five_tuple = this->five_tuple();
+  IpEndpoint ip            = five_tuple.destination();
+  SSLCertContext *cc       = lookup->find(ip);
+
+  if (cc && cc->getCtx()) {
+    ctx = cc->getCtx();
+  }
+
+  return ctx;
 }

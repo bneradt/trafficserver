@@ -54,7 +54,7 @@ namespace detail
 class HttpSessionAcceptOptions
 {
 private:
-  typedef HttpSessionAcceptOptions self; ///< Self reference type.
+  using self = HttpSessionAcceptOptions; ///< Self reference type.
 public:
   HttpSessionAcceptOptions();
 
@@ -63,9 +63,7 @@ public:
   /// Set the transport type.
   self &setTransportType(int);
   /// Local address to bind for outbound connections.
-  IpAddr outbound_ip4;
-  /// Local address to bind for outbound connections.
-  IpAddr outbound_ip6;
+  ts::IPAddrPair outbound;
   /// Set the outbound IP address to @a ip.
   self &setOutboundIp(IpAddr &ip);
   /// Set the outbound IP address to @a ip.
@@ -93,7 +91,6 @@ public:
 };
 
 inline HttpSessionAcceptOptions::HttpSessionAcceptOptions()
-
 {
   host_res_preference = host_res_default_preference_order;
 }
@@ -109,19 +106,16 @@ inline HttpSessionAcceptOptions &
 HttpSessionAcceptOptions::setOutboundIp(IpAddr &ip)
 {
   if (ip.isIp4())
-    outbound_ip4 = ip;
+    outbound = swoc::IP4Addr(ip._addr._ip4);
   else if (ip.isIp6())
-    outbound_ip6 = ip;
+    outbound = swoc::IP6Addr(ip._addr._ip6);
   return *this;
 }
 
 inline HttpSessionAcceptOptions &
 HttpSessionAcceptOptions::setOutboundIp(IpEndpoint *ip)
 {
-  if (ip->isIp4())
-    outbound_ip4 = *ip;
-  else if (ip->isIp6())
-    outbound_ip6 = *ip;
+  outbound = swoc::IPAddr(&(ip->sa));
   return *this;
 }
 
@@ -175,12 +169,12 @@ HttpSessionAcceptOptions::setSessionProtocolPreference(SessionProtocolSet const 
 class HttpSessionAccept : public SessionAccept, private detail::HttpSessionAcceptOptions
 {
 private:
-  typedef HttpSessionAccept self; ///< Self reference type.
+  using self = HttpSessionAccept; ///< Self reference type.
 public:
   /** Construction options.
       Provide an easier to remember typedef for clients.
   */
-  typedef detail::HttpSessionAcceptOptions Options;
+  using Options = detail::HttpSessionAcceptOptions;
 
   /** Default constructor.
       @internal We don't use a static default options object because of

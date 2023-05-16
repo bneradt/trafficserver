@@ -72,7 +72,7 @@ namespace Utils
       for (j = (data_len - 1); ((j > i) && isspace(data[j])); --j)
         ;
       data     += i;
-      data_len = j - i + 1;
+      data_len  = j - i + 1;
     }
   }
 
@@ -101,8 +101,8 @@ namespace Utils
     parseAttributes(data.data(), data.size(), attr_list, pair_separators);
   }
 
-  typedef std::map<std::string, std::string> KeyValueMap;
-  typedef std::list<std::string> HeaderValueList;
+  using KeyValueMap     = std::map<std::string, std::string>;
+  using HeaderValueList = std::list<std::string>;
 
   // parses given lines (assumes <key><whitespace><value> format) and
   // stores them in supplied map; Lines beginning with '#' are ignored

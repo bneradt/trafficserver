@@ -88,7 +88,7 @@ if BUILD_TESTS
 libhttp_a_SOURCES += RegressionHttpTransact.cc
 endif
 
-check_PROGRAMS = test_proxy_http test_PreWarm
+check_PROGRAMS = test_proxy_http test_PreWarm test_HttpTransact
 
 TESTS = $(check_PROGRAMS)
 
@@ -104,13 +104,13 @@ test_proxy_http_SOURCES = \
 	HttpBodyFactory.h
 
 test_proxy_http_LDADD = \
-	$(top_builddir)/src/tscpp/util/libtscpputil.la \
 	$(top_builddir)/src/tscore/libtscore.la \
 	$(top_builddir)/proxy/hdrs/libhdrs.a \
 	$(top_builddir)/proxy/logging/liblogging.a \
-	$(top_builddir)/iocore/eventsystem/libinkevent.a \
 	$(top_builddir)/src/records/librecords_p.a \
+	$(top_builddir)/iocore/eventsystem/libinkevent.a \
 	$(top_builddir)/iocore/utils/libinkutils.a \
+	$(top_builddir)/src/tscpp/util/libtscpputil.la \
 	@SWOC_LIBS@ @HWLOC_LIBS@ \
 	@LIBCAP@
 
@@ -123,6 +123,42 @@ test_PreWarm_LDADD = \
 
 test_PreWarm_SOURCES = \
 	unit_tests/test_PreWarm.cc
+
+test_HttpTransact_CPPFLAGS = \
+	$(AM_CPPFLAGS) \
+	-I$(abs_top_srcdir)/tests/include
+
+if OS_LINUX
+test_HttpTransact_LDFLAGS = $(AM_LDFLAGS)
+else
+test_HttpTransact_LDFLAGS = $(AM_LDFLAGS)\
+    -Wl,-undefined -Wl,suppress -Wl,-flat_namespace -Wl,-dead_strip
+endif
+
+test_HttpTransact_LDADD  =  \
+	$(top_builddir)/proxy/http/libhttp.a \
+	$(top_builddir)/proxy/http/remap/libhttp_remap.a \
+	$(top_builddir)/proxy/logging/liblogging.a \
+	$(top_builddir)/proxy/hdrs/libhdrs.a \
+	$(top_builddir)/iocore/utils/libinkutils.a \
+	$(top_builddir)/iocore/hostdb/libinkhostdb.a \
+	$(top_builddir)/iocore/dns/libinkdns.a \
+	$(top_builddir)/iocore/cache/libinkcache.a \
+	$(top_builddir)/lib/fastlz/libfastlz.a \
+	$(top_builddir)/iocore/aio/libinkaio.a \
+	$(top_builddir)/src/tscore/libtscore.la \
+	$(top_builddir)/src/tscpp/util/libtscpputil.la \
+	$(top_builddir)/proxy/libproxy.a \
+	$(top_builddir)/iocore/net/libinknet.a \
+	$(top_builddir)/src/records/librecords_p.a \
+	$(top_builddir)/iocore/eventsystem/libinkevent.a \
+	-lz -llzma -lcrypto -lresolv -lssl \
+	@LIBPCRE@ @HWLOC_LIBS@ @SWOC_LIBS@
+
+test_HttpTransact_SOURCES = \
+	../../iocore/cache/test/stub.cc \
+	unit_tests/main.cc \
+	unit_tests/test_HttpTransact.cc
 
 clang-tidy-local: $(libhttp_a_SOURCES) $(noinst_HEADERS)
 	$(CXX_Clang_Tidy)

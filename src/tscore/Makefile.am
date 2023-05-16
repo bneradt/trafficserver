@@ -104,13 +104,11 @@ libtscore_la_SOURCES = \
 	ink_thread.cc \
 	ink_time.cc \
 	ink_uuid.cc \
-	IpMap.cc \
 	JeMiAllocator.cc \
 	Layout.cc \
 	llqueue.cc \
 	lockfile.cc \
 	MatcherUtils.cc \
-	MemArena.cc \
 	MMH.cc \
 	ParseRules.cc \
 	Random.cc \
@@ -124,7 +122,6 @@ libtscore_la_SOURCES = \
 	LogMessage.cc \
 	Throttler.cc \
 	Tokenizer.cc \
-	ts_file.cc \
 	Version.cc \
 	X509HostnameValidator.cc
 
@@ -183,10 +180,8 @@ test_tscore_SOURCES = \
 	unit_tests/test_ink_memory.cc \
 	unit_tests/test_IntrusiveHashMap.cc \
 	unit_tests/test_IntrusivePtr.cc \
-	unit_tests/test_IpMap.cc \
 	unit_tests/test_layout.cc \
 	unit_tests/test_List.cc \
-	unit_tests/test_MemArena.cc \
 	unit_tests/test_MT_hashtable.cc \
 	unit_tests/test_ParseRules.cc \
 	unit_tests/test_PluginUserArgs.cc \
@@ -196,7 +191,6 @@ test_tscore_SOURCES = \
 	unit_tests/test_scoped_resource.cc \
 	unit_tests/test_Throttler.cc \
 	unit_tests/test_Tokenizer.cc \
-	unit_tests/test_ts_file.cc \
 	unit_tests/test_Version.cc \
 	unit_tests/test_Errata.cc \
 	unit_tests/test_MMH.cc \

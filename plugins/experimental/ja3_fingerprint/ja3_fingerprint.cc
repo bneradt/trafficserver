@@ -207,7 +207,7 @@ custom_get_ja3_prefixed(int unit, const unsigned char *&data, int len, std::stri
       if (!first) {
         result += '-';
       }
-      first  = false;
+      first   = false;
       result += std::to_string(tmp);
     }
   }
@@ -256,7 +256,7 @@ custom_get_ja3(SSL *s)
   long n = s->init_num;
 
   // Get version
-  int version = (((int)p[0]) << 8) | (int)p[1];
+  int version  = (((int)p[0]) << 8) | (int)p[1];
   ja3         += std::to_string(version) + ',';
   p           += 2;
 
@@ -264,7 +264,7 @@ custom_get_ja3(SSL *s)
   p += SSL3_RANDOM_SIZE;
 
   // Skip session id
-  j = *(p++);
+  j  = *(p++);
   p += j;
 
   // No DTLS handling
@@ -275,7 +275,7 @@ custom_get_ja3(SSL *s)
   ja3 += ',';
 
   // Skip compression
-  i = *(p++);
+  i  = *(p++);
   p += i;
 
   // Get extensions
@@ -285,7 +285,7 @@ custom_get_ja3(SSL *s)
 
   // Skip length blob
   p          += 2;
-  bool first = true;
+  bool first  = true;
   while (p < d + n) {
     // Each extension blob is comprised of [2bytes] type + [2bytes] size + [size bytes] data
     n2s(p, type);
@@ -312,7 +312,7 @@ custom_get_ja3(SSL *s)
       if (!first) {
         ja3 += '-';
       }
-      first = false;
+      first  = false;
       ja3   += std::to_string(type);
     }
   }
@@ -331,7 +331,7 @@ custom_get_ja3(SSL *s)
   const unsigned char *p;
 
   // Get version
-  unsigned int version = SSL_client_hello_get0_legacy_version(s);
+  unsigned int version  = SSL_client_hello_get0_legacy_version(s);
   ja3                  += std::to_string(version) + ',';
 
   // Get cipher suites
@@ -362,7 +362,7 @@ custom_get_ja3(SSL *s)
         if (!first) {
           ja3 += '-';
         }
-        first = false;
+        first  = false;
         ja3   += std::to_string(type);
       }
     }

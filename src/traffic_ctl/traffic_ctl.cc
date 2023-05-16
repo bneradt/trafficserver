@@ -39,48 +39,22 @@ constexpr int CTRL_EX_UNIMPLEMENTED = 3;
 
 int status_code{CTRL_EX_OK};
 
-/// Provide a way for commands to handle signals. Commands can subscribe to this
-/// table by using @c subscribe_to_signal_handler . Note that the application
-/// will only execute 1 command on every execution.
-std::unordered_map<int, std::function<void()>> Signal_Handler;
-
-void
-subscribe_to_signal_handler(int signal_num, std::function<void()> handler)
-{
-  Signal_Handler[signal_num] = handler;
-}
-
-void
-unsubscribe_signal(int signal_num)
-{
-  struct sigaction act;
-
-  act.sa_handler = SIG_DFL;
-  act.sa_flags   = SA_NODEFER | SA_RESETHAND;
-  sigemptyset(&(act.sa_mask));
-
-  ink_release_assert(sigaction(signal_num, &act, nullptr) == 0);
-}
-
 namespace
 {
 void
-handle_signal(int signal_num)
+handle_signal(int signal_num, siginfo_t *, void *)
 {
-  if (auto search = Signal_Handler.find(signal_num); search != std::end(Signal_Handler)) {
-    search->second();
-  }
-
-  exit(signal_num);
+  CtrlCommand::Signal_Flagged = signal_num;
 }
 
 void
-signal_register_handler(int signal_num, sighandler_t handle_signal)
+signal_register_handler(int signal_num, signal_handler_t handle_signal)
 {
   struct sigaction act;
 
-  act.sa_handler = handle_signal;
-  act.sa_flags   = SA_NODEFER | SA_RESETHAND;
+  act.sa_handler   = nullptr;
+  act.sa_sigaction = handle_signal;
+  act.sa_flags     = SA_NODEFER | SA_RESETHAND;
   sigemptyset(&(act.sa_mask));
 
   ink_release_assert(sigaction(signal_num, &act, nullptr) == 0);

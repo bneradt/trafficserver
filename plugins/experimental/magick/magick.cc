@@ -40,7 +40,14 @@
 #include <openssl/pem.h>
 
 #if MAGICK_VERSION > 6
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wtype-limits"
+#endif
 #include <MagickWand/MagickWand.h>
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 #else
 #include <wand/MagickWand.h>
 #endif
@@ -184,19 +191,12 @@ struct EVPKey {
   EVPKey() : key(EVP_PKEY_new()) { assert(nullptr != key); }
 
   bool
-  assign(char *k) const
+  assign(RSA *k) const
   {
     assert(nullptr != k);
     const int rc = EVP_PKEY_assign_RSA(key, k);
     assert(1 == rc);
     return 1 == rc;
-  }
-
-  template <typename T>
-  bool
-  assign(T &t)
-  {
-    return assign(reinterpret_cast<char *>(t));
   }
 };
 

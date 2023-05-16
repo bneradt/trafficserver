@@ -33,14 +33,14 @@
 #include "P_QUICNetVConnection.h"
 
 class NetHandler;
-typedef int (NetHandler::*NetContHandler)(int, void *);
+using NetContHandler = int (NetHandler::*)(int, void *);
 
 void initialize_thread_for_quic_net(EThread *thread);
 
 struct QUICPollEvent {
   QUICConnection *con;
-  UDPPacketInternal *packet;
-  void init(QUICConnection *con, UDPPacketInternal *packet);
+  UDPPacket *packet;
+  void init(QUICConnection *con, UDPPacket *packet);
   void free();
 
   SLINK(QUICPollEvent, alink);
@@ -62,10 +62,10 @@ public:
 
 private:
   // Internal Queue to save Long Header Packet
-  Que(UDPPacketInternal, link) _longInQueue;
+  Que(UDPPacket, link) _longInQueue;
 
 private:
-#if HAVE_QUICHE_H
+#if TS_HAS_QUICHE
   void _process_packet(QUICPollEvent *e, NetHandler *nh);
 #else
   void _process_short_header_packet(QUICPollEvent *e, NetHandler *nh);

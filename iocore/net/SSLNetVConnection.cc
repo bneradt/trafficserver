@@ -426,8 +426,8 @@ SSLNetVConnection::read_raw_data()
   }
   NET_SUM_DYN_STAT(net_read_bytes_stat, r);
 
-  IpMap *pp_ipmap;
-  pp_ipmap = SSLConfigParams::proxy_protocol_ipmap;
+  swoc::IPRangeSet *pp_ipmap;
+  pp_ipmap = SSLConfigParams::proxy_protocol_ip_addrs;
 
   if (this->get_is_proxy_protocol() && this->get_proxy_protocol_version() == ProxyProtocolVersion::UNDEFINED) {
     Debug("proxyprotocol", "proxy protocol is enabled on this port");
@@ -438,8 +438,7 @@ SSLNetVConnection::read_raw_data()
       // proxy source IP, not the Proxy Protocol client ip. Since we are
       // checking the ip of the actual source of this connection, this is
       // what we want now.
-      void *payload = nullptr;
-      if (!pp_ipmap->contains(get_remote_addr(), &payload)) {
+      if (!pp_ipmap->contains(swoc::IPAddr(get_remote_addr()))) {
         Debug("proxyprotocol", "Source IP is NOT in the configured allowlist of trusted IPs - closing connection");
         r = -ENOTCONN; // Need a quick close/exit here to refuse the connection!!!!!!!!!
         goto proxy_protocol_bypass;
@@ -611,9 +610,9 @@ SSLNetVConnection::net_read_io(NetHandler *nh, EThread *lthread)
 
           // Copy over all data already read in during the SSL_accept
           // (the client hello message)
-          NetState *s            = &this->read;
-          MIOBufferAccessor &buf = s->vio.buffer;
-          int64_t r              = buf.writer()->write(this->handShakeHolder);
+          NetState *s             = &this->read;
+          MIOBufferAccessor &buf  = s->vio.buffer;
+          int64_t r               = buf.writer()->write(this->handShakeHolder);
           s->vio.nbytes          += r;
           s->vio.ndone           += r;
 
@@ -844,7 +843,7 @@ SSLNetVConnection::load_buffer_and_write(int64_t towrite, MIOBufferAccessor &buf
   } while (num_really_written == try_to_write && total_written < towrite);
 
   if (total_written > 0) {
-    sslLastWriteTime  = now;
+    sslLastWriteTime   = now;
     sslTotalBytesSent += total_written;
   }
   redoWriteSize = 0;
@@ -857,7 +856,7 @@ SSLNetVConnection::load_buffer_and_write(int64_t towrite, MIOBufferAccessor &buf
       break;
     case SSL_ERROR_WANT_READ:
       needs              |= EVENTIO_READ;
-      num_really_written = -EAGAIN;
+      num_really_written  = -EAGAIN;
       Debug("ssl.error", "SSL_write-SSL_ERROR_WANT_READ");
       break;
     case SSL_ERROR_WANT_WRITE:
@@ -869,7 +868,7 @@ SSLNetVConnection::load_buffer_and_write(int64_t towrite, MIOBufferAccessor &buf
         redoWriteSize = l;
       }
       needs              |= EVENTIO_WRITE;
-      num_really_written = -EAGAIN;
+      num_really_written  = -EAGAIN;
       Debug("ssl.error", "SSL_write-SSL_ERROR_WANT_WRITE");
       break;
     }
@@ -2154,7 +2153,7 @@ SSLNetVConnection::_ssl_accept()
         had_error_on_reading_early_data = true;
       } else {
         if (SSL_in_early_data(ssl)) {
-          ret = SSL_read(ssl, block->buf(), index_to_buffer_size(BUFFER_SIZE_INDEX_16K));
+          ret                         = SSL_read(ssl, block->buf(), index_to_buffer_size(BUFFER_SIZE_INDEX_16K));
           finished_reading_early_data = !SSL_in_early_data(ssl);
           if (ret < 0) {
             nread = 0;
@@ -2175,8 +2174,8 @@ SSLNetVConnection::_ssl_accept()
             }
           }
         } else {
-          nread = 0;
-          ret = 2; // SSL_READ_EARLY_DATA_FINISH
+          nread                       = 0;
+          ret                         = 2; // SSL_READ_EARLY_DATA_FINISH
           finished_reading_early_data = true;
         }
       }
@@ -2400,12 +2399,12 @@ SSLNetVConnection::_ssl_read_buffer(void *buf, int64_t nbytes, int64_t &nread)
       // If SSL_read_early_data is unavailable, it's probably OpenSSL,
       // and SSL_in_early_data should be available.
       if (SSL_in_early_data(ssl)) {
-        ret = SSL_read(ssl, buf, nbytes);
+        ret                         = SSL_read(ssl, buf, nbytes);
         finished_reading_early_data = !SSL_in_early_data(ssl);
         if (ret < 0) {
           if (!finished_reading_early_data) {
             had_error_on_reading_early_data = true;
-            ssl_error = SSL_get_error(ssl, ret);
+            ssl_error                       = SSL_get_error(ssl, ret);
           }
           read_bytes = 0;
         } else {
@@ -2413,7 +2412,7 @@ SSLNetVConnection::_ssl_read_buffer(void *buf, int64_t nbytes, int64_t &nread)
         }
       } else {
         finished_reading_early_data = true;
-        read_bytes = 0;
+        read_bytes                  = 0;
       }
 #endif
 
@@ -2456,4 +2455,37 @@ SSLNetVConnection::_ssl_read_buffer(void *buf, int64_t nbytes, int64_t &nread)
   }
 
   return ssl_error;
+}
+
+void
+SSLNetVConnection::set_valid_tls_protocols(unsigned long proto_mask, unsigned long max_mask)
+{
+  SSL_set_options(this->ssl, proto_mask);
+  SSL_clear_options(this->ssl, max_mask & ~proto_mask);
+}
+
+void
+SSLNetVConnection::set_valid_tls_version_min(int min)
+{
+  // Ignore available versions set by SSL_(CTX_)set_options if a ragne is specified
+  SSL_clear_options(this->ssl, SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1 | SSL_OP_NO_TLSv1_2 | SSL_OP_NO_TLSv1_3);
+
+  int ver = 0;
+  if (min >= 0) {
+    ver = TLS1_VERSION + min;
+  }
+  SSL_set_min_proto_version(this->ssl, ver);
+}
+
+void
+SSLNetVConnection::set_valid_tls_version_max(int max)
+{
+  // Ignore available versions set by SSL_(CTX_)set_options if a ragne is specified
+  SSL_clear_options(this->ssl, SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1 | SSL_OP_NO_TLSv1_2 | SSL_OP_NO_TLSv1_3);
+
+  int ver = 0;
+  if (max >= 0) {
+    ver = TLS1_VERSION + max;
+  }
+  SSL_set_max_proto_version(this->ssl, ver);
 }

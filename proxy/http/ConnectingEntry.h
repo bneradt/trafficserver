@@ -43,10 +43,12 @@ public:
 public:
   std::string sni;
   std::string cert_name;
-  IpEndpoint _ipaddr;
+  IpEndpoint ipaddr;
   std::string hostname;
-  std::set<HttpSM *> _connect_sms;
-  NetVConnection *_netvc = nullptr;
+  std::set<HttpSM *> connect_sms;
+  ProxyTransaction *ua_txn = nullptr;
+  NetVConnection *netvc    = nullptr;
+  bool is_no_plugin_tunnel = false;
 
 private:
   MIOBuffer *_netvc_read_buffer = nullptr;

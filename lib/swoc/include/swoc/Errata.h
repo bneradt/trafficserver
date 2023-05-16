@@ -76,7 +76,7 @@ public:
 
   /// Code used if not specified.
   static inline const code_type DEFAULT_CODE;
-  /// Severity used if not specified.
+  /// Severity reported if severity not set.
   static Severity DEFAULT_SEVERITY;
   /// Severity level at which the instance is a failure of some sort.
   static Severity FAILURE_SEVERITY;
@@ -160,7 +160,7 @@ public:
 
 protected:
   using self_type = Errata; ///< Self reference type.
-  /// Storage type for list of messages.
+  /// Storage, for list of messages.
   /// Internally the vector is accessed backwards, in order to make it LIFO.
   using Container = IntrusiveDList<Annotation::Linkage>;
 
@@ -189,7 +189,13 @@ protected:
     /// Allocate from the arena.
     swoc::MemSpan<char> alloc(size_t n);
 
-    Severity _severity{Errata::DEFAULT_SEVERITY}; ///< Severity.
+    TextView _annotation_glue_text = DEFAULT_ANNOTATION_GLUE_TEXT;
+    TextView _annotation_severity_glue_text = DEFAULT_SEVERITY_GLUE_TEXT;
+    TextView _severity_glue_text = DEFAULT_SEVERITY_GLUE_TEXT;
+    TextView _indent_text = DEFAULT_INDENT_TEXT;
+    bool _glue_final_p = true; ///< Add glue after the last annotation?
+
+    std::optional<Severity> _severity; ///< Severity.
     code_type _code{Errata::DEFAULT_CODE};        ///< Message code / ID
     Container _notes;                             ///< The message stack.
     swoc::MemArena _arena;                        ///< Annotation text storage.
@@ -204,13 +210,61 @@ public:
   self_type &operator                         =(self_type &&that); ///< Move assignment.
   ~Errata();                                                       ///< Destructor.
 
-  // Note based constructors.
+  /** Construct with a severity.
+   *
+   * @param severity Severity.
+   *
+   * No annotations are created.
+   */
   explicit Errata(Severity severity);
-  Errata(code_type const &type, Severity severity, std::string_view const &text);
+
+  /** Constructor.
+   *
+   * @param code Error code.
+   * @param severity Severity.
+   * @param text Annotation text.
+   *
+   * Constructs with error @a code and @a severity. An annotation with @a text.
+   */
+  Errata(code_type const &code, Severity severity, std::string_view const &text);
+
+  /** Constructor.
+   *
+   * @param severity Severity.
+   * @param text Annotation text.
+   *
+   * Constructs with @a severity and an annotation with @a text.
+   */
   Errata(Severity severity, std::string_view const &text);
-  Errata(code_type const &type, std::string_view const &text);
+
+  /** Constructor.
+   *
+   * @param code Error code.
+   * @param text
+   *
+   * Construct with error @a code and an annotation with @a text.
+   */
+  Errata(code_type const &code, std::string_view const &text);
+
+  /** Constructor.
+   *
+   * @param text Annotation text.
+   */
   explicit Errata(std::string_view const &text);
-  template <typename... Args> Errata(code_type const &type, Severity severity, std::string_view fmt, Args &&... args);
+
+  /** Constructor.
+   *
+   * @tparam Args Format argument types.
+   * @param code Error code.
+   * @param severity Severity.
+   * @param fmt Annotation format.
+   * @param args Annotation format arguments.
+   *
+   * Cosntructs with error @a code and @a severity and an formatted annotation.
+   */
+  template <typename... Args> Errata(code_type const &code, Severity severity, std::string_view fmt, Args &&... args);
+
+
   template <typename... Args> Errata(code_type const &type, std::string_view fmt, Args &&... args);
   template <typename... Args> Errata(Severity severity, std::string_view fmt, Args &&... args);
   template <typename... Args> explicit Errata(std::string_view fmt, Args &&... args);
@@ -360,7 +414,11 @@ public:
   friend std::ostream &operator<<(std::ostream &, self_type const &);
 
   /// Default glue value (a newline) for text rendering.
-  static std::string_view DEFAULT_GLUE;
+  static inline TextView DEFAULT_ANNOTATION_GLUE_TEXT = "\n";
+  /// Default glue text for use after the severity name.
+  static inline TextView DEFAULT_SEVERITY_GLUE_TEXT = ": ";
+  // Text used for each level of indent.
+  static inline TextView DEFAULT_INDENT_TEXT = "  ";
 
   /** Test status.
 
@@ -391,10 +449,10 @@ public:
    */
   bool is_ok() const;
 
-  /** Get the maximum severity of the messages in the erratum.
-   *
-   * @return Max severity for all messages.
-   */
+  /// @return If there is top level severity.
+  bool has_severity() const { return _data && _data->_severity.has_value(); }
+
+  /// @return Top level severity.
   Severity severity() const;
 
   /** Set the @a severity.
@@ -442,11 +500,64 @@ public:
   //! Reference one past bottom item on the stack.
   const_iterator end() const;
 
+  /** First annotation.
+   *
+   * @return The first annotation.
+   *
+   * It is an error to call this on an empty instance.
+   */
   const Annotation &front() const;
 
+  /** lask annotation.
+   *
+   * @return The last annotation.
+   *
+   * It is an error to call this on an empty instance.
+   */
   const Annotation &back() const;
 
   // Logging support.
+
+  /// @return The annotation glue text for @a this.
+  TextView annotation_glue_text() const;
+
+  /** Assign text to use between annotations while printing.
+   *
+   * @param text Glue text.
+   * @param final_glue_p Add glue after last annotation?
+   * @return @a this
+   */
+  self_type & assign_annotation_glue_text(TextView text, bool final_glue_p = false);
+
+  /// @return Glue text for the annotation severity.
+  TextView annotation_severity_glue_text() const;
+
+  /** Assign text to use after the severity for an annoation while printing.
+   *
+   * @param text Glue text.
+   * @return @a this
+   */
+  self_type & assign_annotation_severity_glue_text(TextView text);
+
+  /// @return The severity glue text for @a this.
+  TextView severity_glue_text() const;
+
+  /** Assign text to use after the severity while printing.
+   *
+   * @param text Glue text.
+   * @return @a this
+   */
+  self_type & assign_severity_glue_text(TextView text);
+
+  /// @return The text used for each level of indentation.
+  TextView indent_text() const;
+
+  /** Assign the text used for indentation.
+   *
+   * @param text Text for each level of indentation.
+   * @return @a this.
+   */
+  self_type & assign_indent_text(TextView text);
 
   /** Base class for erratum sink.
 
@@ -528,6 +639,7 @@ protected:
 
   friend struct Data;
   friend class Item;
+  friend BufferWriter &bwformat(BufferWriter &bw, bwf::Spec const &, Errata const &errata);
 };
 
 extern std::ostream &operator<<(std::ostream &os, Errata const &stat);
@@ -777,7 +889,7 @@ public:
    *
    * @return @a true if the value is valid / OK, @c false otherwise.
    */
-  inline bool is_ok() const;
+  bool is_ok() const;
 
   /// Clear the errata.
   self_type &clear();
@@ -875,7 +987,7 @@ inline Errata::Errata(const code_type &code, Severity severity) {
   d->_code     = code;
 }
 
-inline Errata::Errata(const code_type &type, Severity severity, const std::string_view &text) : Errata(type, severity) {
+inline Errata::Errata(const code_type &code, Severity severity, const std::string_view &text) : Errata(code, severity) {
   this->note(text);
 }
 
@@ -941,20 +1053,11 @@ inline auto Errata::assign(code_type code) -> self_type & {
 
 inline auto
 Errata::severity() const -> Severity {
-  return _data ? _data->_severity : DEFAULT_SEVERITY;
+  return _data ? _data->_severity.value() : DEFAULT_SEVERITY;
 }
 
 inline auto Errata::assign(Severity severity) -> self_type & {
   this->data()->_severity = severity;
-  return *this;
-}
-
-inline auto Errata::update(Severity severity) -> self_type & {
-  if (_data) {
-    _data->_severity = std::max(_data->_severity, severity);
-  } else {
-    this->assign(severity);
-  }
   return *this;
 }
 
@@ -1061,6 +1164,51 @@ Errata::end() {
 inline Errata::const_iterator
 Errata::end() const {
   return _data ? _data->_notes.end() : const_iterator();
+}
+
+inline TextView
+Errata::annotation_glue_text() const {
+  return _data ? _data->_annotation_glue_text : DEFAULT_ANNOTATION_GLUE_TEXT;
+}
+
+inline auto
+Errata::assign_annotation_glue_text(TextView text, bool final_glue_p) -> self_type & {
+  this->data()->_annotation_glue_text = this->data()->localize(text);
+  this->data()->_glue_final_p = final_glue_p;
+  return *this;
+}
+
+inline TextView
+Errata::annotation_severity_glue_text() const {
+  return _data ? _data->_annotation_severity_glue_text : DEFAULT_SEVERITY_GLUE_TEXT;
+}
+
+inline auto
+Errata::assign_annotation_severity_glue_text(TextView text) -> self_type & {
+  this->data()->_annotation_severity_glue_text = this->data()->localize(text);
+  return *this;
+}
+
+inline TextView
+Errata::severity_glue_text() const {
+  return _data ? _data->_severity_glue_text : DEFAULT_SEVERITY_GLUE_TEXT;
+}
+
+inline auto
+Errata::assign_severity_glue_text(TextView text) -> self_type & {
+  this->data()->_severity_glue_text = this->data()->localize(text);
+  return *this;
+}
+
+inline TextView
+Errata::indent_text() const {
+  return _data ? _data->_indent_text : DEFAULT_INDENT_TEXT;
+}
+
+inline auto
+Errata::assign_indent_text(TextView text) -> self_type & {
+  this->data()->_indent_text = this->data()->localize(text);
+  return *this;
 }
 
 inline void

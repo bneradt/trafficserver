@@ -39,7 +39,6 @@
 #include "ts/apidefs.h"
 #include "YamlSNIConfig.h"
 #include "tscpp/util/TextView.h"
-#include "tscore/IpMap.h"
 
 #define CONNECT_SUCCESS 1
 #define CONNECT_FAILURE 0
@@ -70,7 +69,7 @@ typedef enum {
     that protocol. If it's not an IP protocol, IPv4 will be used.
 */
 struct NetVCOptions {
-  typedef NetVCOptions self; ///< Self reference type.
+  using self = NetVCOptions; ///< Self reference type.
 
   /// Values for valid IP protocols.
   enum ip_protocol_t {

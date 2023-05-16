@@ -46,6 +46,7 @@ add_library(inknet STATIC
         SSLUtils.cc
         OCSPStapling.cc
         TLSBasicSupport.cc
+        TLSCertSwitchSupport.cc
         TLSEarlyDataSupport.cc
         TLSKeyLogger.cc
         TLSSessionResumptionSupport.cc
@@ -61,8 +62,8 @@ add_library(inknet STATIC
         UnixUDPConnection.cc
         UnixUDPNet.cc
         SSLDynlock.cc
-	SNIActionPerformer.cc
-)
+        SNIActionPerformer.cc
+        )
 target_link_libraries(inknet inkevent records_p)
 target_compile_options(inknet PUBLIC -Wno-deprecated-declarations)
 target_include_directories(inknet PRIVATE
@@ -77,11 +78,13 @@ target_include_directories(inknet PRIVATE
         ${CMAKE_SOURCE_DIR}/proxy/hdrs
         ${CMAKE_SOURCE_DIR}/proxy/shared
         ${CMAKE_SOURCE_DIR}/proxy/http
+        ${CMAKE_SOURCE_DIR}/proxy/http/remap
         ${CMAKE_SOURCE_DIR}/mgmt
         ${CMAKE_SOURCE_DIR}/mgmt/utils
+        ${CMAKE_SOURCE_DIR}/src/traffic_server
         ${OPENSSL_INCLUDE_DIRS}
         ${YAML_INCLUDE_DIRS}
-)
+        )
 
 # Fails to link because of circular dep with proxy (ParentSelection)
 # add_executable(test_net unit_tests/test_ProxyProtocol.cc)

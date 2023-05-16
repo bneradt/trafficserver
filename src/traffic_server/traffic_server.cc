@@ -30,6 +30,8 @@
 
  ****************************************************************************/
 
+#include "swoc/swoc_file.h"
+
 #include "tscore/ink_platform.h"
 #include "tscore/ink_sys_control.h"
 #include "tscore/ink_args.h"
@@ -40,7 +42,6 @@
 #include "tscore/hugepages.h"
 #include "tscore/runroot.h"
 #include "tscore/Filenames.h"
-#include "tscore/ts_file.h"
 
 #include "ts/ts.h" // This is sadly needed because of us using TSThreadInit() for some reason.
 
@@ -50,11 +51,11 @@
 #include <list>
 #include <string>
 
-#if !defined(linux)
+#if !defined(__linux__)
 #include <sys/lock.h>
 #endif
 
-#if defined(linux)
+#if defined(__linux__)
 extern "C" int plock(int);
 #else
 #include <sys/filio.h>
@@ -77,7 +78,7 @@ extern "C" int plock(int);
 #include "tscore/I_Layout.h"
 #include "I_Machine.h"
 #include "records/I_RecordsConfig.h"
-#include "records/I_RecProcess.h"
+#include "RecProcess.h"
 #include "Transform.h"
 #include "ConfigProcessor.h"
 #include "HttpProxyServerMain.h"
@@ -672,7 +673,6 @@ initialize_process_manager()
   RecProcessInit(diags());
   LibRecordsConfigInit();
 
-  RecProcessInitMessage();
   check_config_directories();
 
   //
@@ -1008,7 +1008,7 @@ load_plugin(plugin_type_t plugin_type, const fs::path &plugin_path, std::string 
     return plugin_dso_load(plugin_path.c_str(), handle, initptr, error);
   }
   case plugin_type_t::REMAP: {
-    auto temporary_directory = fs::temp_directory_path();
+    auto temporary_directory  = fs::temp_directory_path();
     temporary_directory      /= fs::path(std::string("verify_plugin_") + std::to_string(getpid()));
     std::error_code ec;
     if (!fs::create_directories(temporary_directory, ec)) {
@@ -1017,7 +1017,7 @@ load_plugin(plugin_type_t plugin_type, const fs::path &plugin_path, std::string 
       error = error_os.str();
       return false;
     }
-    const auto runtime_path = temporary_directory / ts::file::filename(plugin_path);
+    const auto runtime_path = temporary_directory / plugin_path.filename();
     const fs::path unused_config;
     auto plugin_info = std::make_unique<RemapPluginInfo>(unused_config, plugin_path, runtime_path);
     bool loaded      = plugin_info->load(error);
@@ -1400,30 +1400,30 @@ struct ShowStats : public Continuation {
     int64_t sval, cval;
 
     NET_READ_DYN_SUM(net_calls_to_readfromnet_stat, sval);
-    int64_t d_rb = sval - last_rb;
+    int64_t d_rb  = sval - last_rb;
     last_rb      += d_rb;
 
     NET_READ_DYN_SUM(net_calls_to_writetonet_stat, sval);
-    int64_t d_wb = sval - last_wb;
+    int64_t d_wb  = sval - last_wb;
     last_wb      += d_wb;
 
     NET_READ_DYN_STAT(net_read_bytes_stat, sval, cval);
-    int64_t d_nrb = sval - last_nrb;
+    int64_t d_nrb  = sval - last_nrb;
     last_nrb      += d_nrb;
-    int64_t d_nr  = cval - last_nr;
+    int64_t d_nr   = cval - last_nr;
     last_nr       += d_nr;
 
     NET_READ_DYN_STAT(net_write_bytes_stat, sval, cval);
-    int64_t d_nwb = sval - last_nwb;
+    int64_t d_nwb  = sval - last_nwb;
     last_nwb      += d_nwb;
-    int64_t d_nw  = cval - last_nw;
+    int64_t d_nw   = cval - last_nw;
     last_nw       += d_nw;
 
     NET_READ_GLOBAL_DYN_SUM(net_connections_currently_open_stat, sval);
     int64_t d_o = sval;
 
     NET_READ_DYN_STAT(net_handler_run_stat, sval, cval);
-    int64_t d_p = cval - last_p;
+    int64_t d_p  = cval - last_p;
     last_p      += d_p;
     printf("%" PRId64 ":%" PRId64 ":%" PRId64 ":%" PRId64 " %" PRId64 ":%" PRId64 " %" PRId64 " %" PRId64 "\n", d_rb, d_wb, d_nrb,
            d_nr, d_nwb, d_nw, d_o, d_p);
@@ -1722,6 +1722,35 @@ bind_outputs(const char *bind_stdout_p, const char *bind_stderr_p)
   }
 }
 
+#if TS_USE_LINUX_IO_URING
+// Load config items for io_uring
+static void
+configure_io_uring()
+{
+  IOUringConfig cfg;
+
+  RecInt aio_io_uring_queue_entries = cfg.queue_entries;
+  RecInt aio_io_uring_sq_poll_ms    = cfg.sq_poll_ms;
+  RecInt aio_io_uring_attach_wq     = cfg.attach_wq;
+  RecInt aio_io_uring_wq_bounded    = cfg.wq_bounded;
+  RecInt aio_io_uring_wq_unbounded  = cfg.wq_unbounded;
+
+  REC_ReadConfigInteger(aio_io_uring_queue_entries, "proxy.config.io_uring.entries");
+  REC_ReadConfigInteger(aio_io_uring_sq_poll_ms, "proxy.config.io_uring.sq_poll_ms");
+  REC_ReadConfigInteger(aio_io_uring_attach_wq, "proxy.config.io_uring.attach_wq");
+  REC_ReadConfigInteger(aio_io_uring_wq_bounded, "proxy.config.io_uring.wq_workers_bounded");
+  REC_ReadConfigInteger(aio_io_uring_wq_unbounded, "proxy.config.io_uring.wq_workers_unbounded");
+
+  cfg.queue_entries = aio_io_uring_queue_entries;
+  cfg.sq_poll_ms    = aio_io_uring_sq_poll_ms;
+  cfg.attach_wq     = aio_io_uring_attach_wq;
+  cfg.wq_bounded    = aio_io_uring_wq_bounded;
+  cfg.wq_unbounded  = aio_io_uring_wq_unbounded;
+
+  IOUringContext::set_config(cfg);
+}
+#endif
+
 //
 // Main
 //
@@ -1749,7 +1778,7 @@ main(int /* argc ATS_UNUSED */, const char **argv)
   // Before accessing file system initialize Layout engine
   Layout::create();
   // Let's be clear on what exactly is starting up.
-  printf("Traffic Server " PACKAGE_VERSION BUILD_NUMBER " " __DATE__ " " __TIME__ " " BUILD_MACHINE "\n");
+  printf("Traffic Server " PACKAGE_VERSION "-" BUILD_NUMBER " " __DATE__ " " __TIME__ " " BUILD_MACHINE "\n");
   chdir_root(); // change directory to the install root of traffic server.
 
   std::sort(argument_descriptions, argument_descriptions + countof(argument_descriptions),
@@ -1939,16 +1968,16 @@ main(int /* argc ATS_UNUSED */, const char **argv)
   /* Set up the machine with the outbound address if that's set,
      or the inbound address if set, otherwise let it default.
   */
-  IpEndpoint machine_addr;
+  swoc::IPEndpoint machine_addr;
   ink_zero(machine_addr);
-  if (HttpConfig::m_master.outbound_ip4.isValid()) {
-    machine_addr.assign(HttpConfig::m_master.outbound_ip4);
-  } else if (HttpConfig::m_master.outbound_ip6.isValid()) {
-    machine_addr.assign(HttpConfig::m_master.outbound_ip6);
-  } else if (HttpConfig::m_master.inbound_ip4.isValid()) {
-    machine_addr.assign(HttpConfig::m_master.inbound_ip4);
-  } else if (HttpConfig::m_master.inbound_ip6.isValid()) {
-    machine_addr.assign(HttpConfig::m_master.inbound_ip6);
+  if (HttpConfig::m_master.outbound.has_ip4()) {
+    machine_addr.assign(HttpConfig::m_master.outbound.ip4());
+  } else if (HttpConfig::m_master.outbound.has_ip6()) {
+    machine_addr.assign(HttpConfig::m_master.outbound.ip6());
+  } else if (HttpConfig::m_master.inbound.has_ip4()) {
+    machine_addr.assign(HttpConfig::m_master.inbound.ip4());
+  } else if (HttpConfig::m_master.inbound.has_ip6()) {
+    machine_addr.assign(HttpConfig::m_master.inbound.ip6());
   }
   char *hostname = REC_ConfigReadString("proxy.config.log.hostname");
   if (hostname != nullptr && std::string_view(hostname) == "localhost") {
@@ -2007,6 +2036,10 @@ main(int /* argc ATS_UNUSED */, const char **argv)
 
   REC_ReadConfigInteger(thread_max_heartbeat_mseconds, "proxy.config.thread.max_heartbeat_mseconds");
 
+#if TS_USE_LINUX_IO_URING
+  configure_io_uring();
+#endif
+
   ink_event_system_init(ts::ModuleVersion(1, 0, ts::ModuleVersion::PRIVATE));
   ink_net_init(ts::ModuleVersion(1, 0, ts::ModuleVersion::PRIVATE));
   ink_aio_init(ts::ModuleVersion(1, 0, ts::ModuleVersion::PRIVATE));
@@ -2040,7 +2073,6 @@ main(int /* argc ATS_UNUSED */, const char **argv)
   }
 
 #if TS_USE_LINUX_IO_URING == 1
-  Note("Using io_uring for AIO");
   IOUringContext *ur = IOUringContext::local_context();
   IOUringContext::set_main_queue(ur);
   auto [bounded, unbounded] = ur->get_wq_max_workers();
@@ -2248,7 +2280,7 @@ main(int /* argc ATS_UNUSED */, const char **argv)
 
   while (!TSSystemState::is_event_system_shut_down()) {
 #if TS_USE_LINUX_IO_URING == 1
-    ur->submit_and_wait(1000);
+    ur->submit_and_wait(1 * HRTIME_SECOND);
 #else
     sleep(1);
 #endif
