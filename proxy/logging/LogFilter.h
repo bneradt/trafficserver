@@ -23,8 +23,9 @@
 
 #pragma once
 
+#include "swoc/swoc_ip.h"
+
 #include "tscore/ink_platform.h"
-#include "tscore/IpMap.h"
 #include "tscore/Ptr.h"
 #include "LogAccess.h"
 #include "LogField.h"
@@ -151,7 +152,7 @@ private:
 
   // note: OperatorFunction's must return 0 (zero) if condition is satisfied
   // (as strcmp does)
-  typedef int (*OperatorFunction)(const char *, const char *);
+  using OperatorFunction = int (*)(const char *, const char *);
 
   static int
   _isSubstring(const char *s0, const char *s1)
@@ -217,7 +218,7 @@ private:
 class LogFilterIP : public LogFilter
 {
 public:
-  LogFilterIP(const char *name, LogField *field, Action a, Operator o, IpAddr value);
+  LogFilterIP(const char *name, LogField *field, Action a, Operator o, swoc::IPAddr value);
   LogFilterIP(const char *name, LogField *field, Action a, Operator o, size_t num_values, IpAddr *value);
   LogFilterIP(const char *name, LogField *field, Action a, Operator o, char *values);
   LogFilterIP(const LogFilterIP &rhs);
@@ -233,13 +234,10 @@ public:
   LogFilterIP &operator=(LogFilterIP &rhs) = delete;
 
 private:
-  IpMap m_map;
+  swoc::IPRangeSet m_addrs;
 
   /// Initialization common to all constructors.
   void init();
-
-  void displayRanges(FILE *fd);
-  void displayRange(FILE *fd, IpMap::iterator const &iter);
 
   // Checks for a match on this filter.
   bool is_match(LogAccess *lad);
@@ -423,12 +421,12 @@ updatePatternForFieldValue(char **field, const char *pattern_str, int field_pos,
   char *temp_text = buf_dest_to_field;
   memcpy(temp_text, buf_dest, (pattern_str - buf_dest));
   temp_text             += (pattern_str - buf_dest);
-  const char *value_str = strchr(pattern_str, '=');
+  const char *value_str  = strchr(pattern_str, '=');
   if (value_str) {
     value_str++;
     memcpy(temp_text, pattern_str, (value_str - pattern_str));
     temp_text                  += (value_str - pattern_str);
-    const char *next_param_str = strchr(value_str, '&');
+    const char *next_param_str  = strchr(value_str, '&');
     if (next_param_str) {
       for (int i = 0; i < (next_param_str - value_str); i++) {
         temp_text[i] = 'X';

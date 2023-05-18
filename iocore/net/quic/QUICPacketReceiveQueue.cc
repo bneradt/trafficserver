@@ -27,7 +27,7 @@
 #include "QUICIntUtil.h"
 
 #include "P_UDPConnection.h"
-#include "P_UDPPacket.h"
+#include "I_UDPPacket.h"
 
 static bool
 is_vn(QUICVersion v)
@@ -72,7 +72,7 @@ QUICPacketReceiveQueue::dequeue(uint8_t *packet_buf, QUICPacketCreationResult &r
     while (b) {
       memcpy(this->_payload.get() + written, b->start(), b->read_avail());
       written += b->read_avail();
-      b       = b->next.get();
+      b        = b->next.get();
     }
   }
 

@@ -40,13 +40,13 @@ enum RecErrT {
 //-------------------------------------------------------------------------
 #define RecStringNull nullptr
 
-typedef int64_t RecInt;
-typedef float RecFloat;
-typedef char *RecString;
-typedef const char *RecStringConst;
-typedef int64_t RecCounter;
-typedef int8_t RecByte;
-typedef bool RecBool;
+using RecInt         = int64_t;
+using RecFloat       = float;
+using RecString      = char *;
+using RecStringConst = const char *;
+using RecCounter     = int64_t;
+using RecByte        = int8_t;
+using RecBool        = bool;
 
 enum RecT {
   RECT_NULL    = 0x00,
@@ -151,6 +151,19 @@ struct RecRawStat {
   uint32_t version;
 };
 
+struct RecRawStatBlock;
+
+// This defines the interface to the low level stat block operations
+// The implementation of this was moved out of the records library due to a circular dependency this produced.
+// look for the implementation of RecRawStatBlockOps in iocore/eventsystem
+struct RecRawStatBlockOps {
+  virtual int raw_stat_clear_sum(RecRawStatBlock *rsb, int id)                    = 0;
+  virtual int raw_stat_clear_count(RecRawStatBlock *rsb, int id)                  = 0;
+  virtual int raw_stat_get_total(RecRawStatBlock *rsb, int id, RecRawStat *total) = 0;
+  virtual int raw_stat_sync_to_global(RecRawStatBlock *rsb, int id)               = 0;
+  virtual int raw_stat_clear(RecRawStatBlock *rsb, int id)                        = 0;
+};
+
 // WARNING!  It's advised that developers do not modify the contents of
 // the RecRawStatBlock.  ^_^
 struct RecRawStatBlock {
@@ -159,11 +172,12 @@ struct RecRawStatBlock {
   int num_stats;          // number of stats in this block
   int max_stats;          // maximum number of stats for this block
   ink_mutex mutex;
+  RecRawStatBlockOps *ops;
 };
 
 //-------------------------------------------------------------------------
 // RecCore Callback Types
 //-------------------------------------------------------------------------
-typedef int (*RecConfigUpdateCb)(const char *name, RecDataT data_type, RecData data, void *cookie);
-typedef int (*RecStatUpdateFunc)(const char *name, RecDataT data_type, RecData *data, RecRawStatBlock *rsb, int id, void *cookie);
-typedef int (*RecRawStatSyncCb)(const char *name, RecDataT data_type, RecData *data, RecRawStatBlock *rsb, int id);
+using RecConfigUpdateCb = int (*)(const char *, RecDataT, RecData, void *);
+using RecStatUpdateFunc = int (*)(const char *, RecDataT, RecData *, RecRawStatBlock *, int, void *);
+using RecRawStatSyncCb  = int (*)(const char *, RecDataT, RecData *, RecRawStatBlock *, int);

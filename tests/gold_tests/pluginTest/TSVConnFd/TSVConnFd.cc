@@ -20,6 +20,7 @@
 #include <utility>
 #include <string>
 #include <vector>
+#include <cstdint>
 #include <cstdlib>
 #include <atomic>
 
@@ -145,7 +146,7 @@ Io_buffer_consume::consume(std::int64_t amount)
   if (!_block_avail) {
     return nullptr;
   }
-  char const *result = _block_data;
+  char const *result  = _block_data;
   _block_data        += amount;
   _block_avail       -= amount;
 

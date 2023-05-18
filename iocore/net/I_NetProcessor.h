@@ -24,7 +24,6 @@
 
 #pragma once
 
-#include "tscore/IpMap.h"
 #include "I_EventSystem.h"
 #include "I_Socks.h"
 #include "I_NetVConnection.h"
@@ -45,7 +44,7 @@ public:
   /** Options for @c accept.
    */
   struct AcceptOptions {
-    typedef AcceptOptions self; ///< Self reference type.
+    using self = AcceptOptions; ///< Self reference type.
 
     /// Port on which to listen.
     /// 0 => don't care, which is useful if the socket is already bound.

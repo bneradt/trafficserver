@@ -511,12 +511,12 @@ HttpTransact::is_server_negative_cached(State *s)
 
 inline static void
 update_current_info(HttpTransact::CurrentInfo *into, HttpTransact::ConnectionAttributes *from,
-                    ResolveInfo::UpstreamResolveStyle who, bool clear_attempts)
+                    ResolveInfo::UpstreamResolveStyle who, bool clear_retry_attempts)
 {
   into->request_to = who;
   into->server     = from;
-  if (clear_attempts) {
-    into->attempts.clear();
+  if (clear_retry_attempts) {
+    into->retry_attempts.clear();
   }
 }
 
@@ -1971,11 +1971,11 @@ HttpTransact::OSDNSLookup(State *s)
       action = s->http_config_param->redirect_actions_self_action;
       TxnDebug("http_trans", "[OSDNSLookup] Self action - %d.", int(action));
     } else {
-      // Make sure the return value from contains is big enough for a void*.
-      intptr_t x{intptr_t(RedirectEnabled::Action::INVALID)};
       ink_release_assert(s->http_config_param->redirect_actions_map != nullptr);
-      ink_release_assert(s->http_config_param->redirect_actions_map->contains(s->dns_info.addr, reinterpret_cast<void **>(&x)));
-      action = static_cast<RedirectEnabled::Action>(x);
+      auto &addrs = *(s->http_config_param->redirect_actions_map);
+      auto spot   = addrs.find(swoc::IPAddr(&s->dns_info.addr.sa));
+      ink_release_assert(spot != addrs.end()); // Should always find an entry.
+      action = std::get<1>(*spot);
       TxnDebug("http_trans", "[OSDNSLookup] Mapped action - %d for family %d.", int(action),
                int(s->dns_info.active->data.ip.family()));
     }
@@ -3323,7 +3323,7 @@ HttpTransact::HandleCacheOpenReadMiss(State *s)
       }
     }
     build_request(s, &s->hdr_info.client_request, &s->hdr_info.server_request, s->current.server->http_version);
-    s->current.attempts.clear();
+    s->current.retry_attempts.clear();
     s->next_action = how_to_open_connection(s);
     if (s->current.server == &s->server_info && s->next_hop_scheme == URL_WKSIDX_HTTP) {
       HttpTransactHeaders::remove_host_name_from_url(&s->hdr_info.server_request);
@@ -3628,7 +3628,7 @@ HttpTransact::handle_response_from_parent(State *s)
     }
 
     char addrbuf[INET6_ADDRSTRLEN];
-    TxnDebug("http_trans", "[%d] failed to connect to parent %s", s->current.attempts.get(),
+    TxnDebug("http_trans", "[%d] failed to connect to parent %s", s->current.retry_attempts.get(),
              ats_ip_ntop(&s->current.server->dst_addr.sa, addrbuf, sizeof(addrbuf)));
 
     // If the request is not retryable, just give up!
@@ -3641,20 +3641,21 @@ HttpTransact::handle_response_from_parent(State *s)
       return;
     }
 
-    if (s->current.attempts.get() < s->txn_conf->parent_connect_attempts) {
+    if (s->current.retry_attempts.get() < (s->txn_conf->parent_connect_attempts - 1)) {
       HTTP_INCREMENT_DYN_STAT(http_total_parent_retries_stat);
-      s->current.attempts.increment(s->configured_connect_attempts_max_retries());
+      s->current.retry_attempts.increment();
 
       // Are we done with this particular parent?
-      if ((s->current.attempts.get() - 1) % s->txn_conf->per_parent_connect_attempts != 0) {
+      if (s->current.retry_attempts.get() % s->txn_conf->per_parent_connect_attempts != 0) {
         // No we are not done with this parent so retry
         HTTP_INCREMENT_DYN_STAT(http_total_parent_switches_stat);
         s->next_action = how_to_open_connection(s);
         TxnDebug("http_trans", "%s Retrying parent for attempt %d, max %" PRId64, "[handle_response_from_parent]",
-                 s->current.attempts.get(), s->txn_conf->per_parent_connect_attempts);
+                 s->current.retry_attempts.get(), s->txn_conf->per_parent_connect_attempts);
         return;
       } else {
-        TxnDebug("http_trans", "%s %d per parent attempts exhausted", "[handle_response_from_parent]", s->current.attempts.get());
+        TxnDebug("http_trans", "%s %d per parent attempts exhausted", "[handle_response_from_parent]",
+                 s->current.retry_attempts.get());
         HTTP_INCREMENT_DYN_STAT(http_total_parent_retries_exhausted_stat);
 
         // Only mark the parent down if we failed to connect
@@ -3762,9 +3763,10 @@ HttpTransact::handle_response_from_server(State *s)
       max_connect_retries = s->txn_conf->connect_attempts_max_retries;
     }
 
-    TxnDebug("http_trans", "max_connect_retries: %d s->current.attempts: %d", max_connect_retries, s->current.attempts.get());
+    TxnDebug("http_trans", "max_connect_retries: %d s->current.retry_attempts: %d", max_connect_retries,
+             s->current.retry_attempts.get());
 
-    if (is_request_retryable(s) && s->current.attempts.get() < max_connect_retries &&
+    if (is_request_retryable(s) && s->current.retry_attempts.get() < max_connect_retries &&
         !HttpTransact::is_response_valid(s, &s->hdr_info.server_response)) {
       // If this is a round robin DNS entry & we're tried configured
       //    number of times, we should try another node
@@ -3781,7 +3783,7 @@ HttpTransact::handle_response_from_server(State *s)
         return CallOSDNSLookup(s);
       } else {
         if ((s->txn_conf->connect_attempts_rr_retries > 0) &&
-            ((s->current.attempts.get() + 1) % s->txn_conf->connect_attempts_rr_retries == 0)) {
+            ((s->current.retry_attempts.get() + 1) % s->txn_conf->connect_attempts_rr_retries == 0)) {
           s->dns_info.select_next_rr();
         }
         retry_server_connection_not_open(s, s->current.state, max_connect_retries);
@@ -3813,7 +3815,7 @@ void
 HttpTransact::error_log_connection_failure(State *s, ServerState_t conn_state)
 {
   char addrbuf[INET6_ADDRSTRLEN];
-  TxnDebug("http_trans", "[%d] failed to connect [%d] to %s", s->current.attempts.get(), conn_state,
+  TxnDebug("http_trans", "[%d] failed to connect [%d] to %s", s->current.retry_attempts.get(), conn_state,
            ats_ip_ntop(&s->current.server->dst_addr.sa, addrbuf, sizeof(addrbuf)));
 
   if (s->current.server->had_connect_fail()) {
@@ -3826,10 +3828,10 @@ HttpTransact::error_log_connection_failure(State *s, ServerState_t conn_state)
     std::string_view host_name{host_name_ptr, size_t(host_len)};
     ts::bwprint(error_bw_buffer,
                 "CONNECT: attempt fail [{}] to {} for host='{}' "
-                "connection_result={::s} error={::s} attempts={} url='{}'",
+                "connection_result={::s} error={::s} retry_attempts={} url='{}'",
                 HttpDebugNames::get_server_state_name(conn_state), s->current.server->dst_addr, host_name,
                 ts::bwf::Errno(s->current.server->connect_result), ts::bwf::Errno(s->cause_of_death_errno),
-                s->current.attempts.get(), ts::bwf::FirstOf(url_str, "<none>"));
+                s->current.retry_attempts.get(), ts::bwf::FirstOf(url_str, "<none>"));
     Log::error("%s", error_bw_buffer.c_str());
 
     s->arena.str_free(url_str);
@@ -3853,7 +3855,7 @@ HttpTransact::retry_server_connection_not_open(State *s, ServerState_t conn_stat
 {
   ink_assert(s->current.state != CONNECTION_ALIVE);
   ink_assert(s->current.state != ACTIVE_TIMEOUT);
-  ink_assert(s->current.attempts.get() <= max_retries);
+  ink_assert(s->current.retry_attempts.get() < max_retries);
   ink_assert(s->cause_of_death_errno != -UNKNOWN_INTERNAL_ERROR);
 
   error_log_connection_failure(s, conn_state);
@@ -3862,9 +3864,9 @@ HttpTransact::retry_server_connection_not_open(State *s, ServerState_t conn_stat
   // disable keep-alive for request and retry //
   //////////////////////////////////////////////
   s->current.server->keep_alive = HTTP_NO_KEEPALIVE;
-  s->current.attempts.increment(s->configured_connect_attempts_max_retries());
+  s->current.retry_attempts.increment();
 
-  TxnDebug("http_trans", "attempts now: %d, max: %d", s->current.attempts.get(), max_retries);
+  TxnDebug("http_trans", "retry attempts now: %d, max: %d", s->current.retry_attempts.get(), max_retries);
 
   return;
 }
@@ -5043,11 +5045,17 @@ HttpTransact::merge_response_header_with_cached_header(HTTPHdr *cached_header, H
     //
     if (field.m_next_dup) {
       if (dups_seen == false) {
+        const char *name2;
+        int name_len2;
+
         // use a second iterator to delete the
         // remaining response headers in the cached response,
         // so that they will be added in the next iterations.
         for (auto spot2 = spot; spot2 != limit; ++spot2) {
-          cached_header->field_delete(&*spot2, true);
+          MIMEField &field2{*spot2};
+          name2 = field2.name_get(&name_len2);
+
+          cached_header->field_delete(name2, name_len2);
         }
         dups_seen = true;
       }
@@ -7828,7 +7836,19 @@ HttpTransact::build_response(State *s, HTTPHdr *base_response, HTTPHdr *outgoing
                              HTTPStatus status_code, const char *reason_phrase)
 {
   if (reason_phrase == nullptr) {
-    reason_phrase = http_hdr_reason_lookup(status_code);
+    if (status_code != HTTP_STATUS_NONE) {
+      reason_phrase = http_hdr_reason_lookup(status_code);
+      Debug("http_transact", "Using reason phrase from status %d: %s", status_code, reason_phrase);
+    } else if (base_response != nullptr && base_response->status_get() != HTTP_STATUS_NONE) {
+      HTTPStatus const base_response_status = base_response->status_get();
+      reason_phrase                         = http_hdr_reason_lookup(base_response_status);
+      Debug("http_transact", "Using reason phrase from base_response status %d: %s", base_response_status, reason_phrase);
+    } else {
+      // We have to set some value for build_base_response which expects a
+      // non-nullptr reason_phrase.
+      reason_phrase = http_hdr_reason_lookup(status_code);
+      Debug("http_transact", "Using HTTP_STATUS_NONE reason phrase %d: %s", status_code, reason_phrase);
+    }
   }
 
   if (base_response == nullptr) {
@@ -7936,7 +7956,15 @@ HttpTransact::build_response(State *s, HTTPHdr *base_response, HTTPHdr *outgoing
     HttpTransactHeaders::insert_via_header_in_response(s, outgoing_response);
   }
 
-  HttpTransactHeaders::convert_response(outgoing_version, outgoing_response);
+  // When converting a response, only set a reason phrase if one was not already
+  // set via some explicit call above.
+  char const *reason_phrase_for_convert = nullptr;
+  int outgoing_reason_phrase_len        = 0;
+  char const *outgoing_reason_phrase    = outgoing_response->reason_get(&outgoing_reason_phrase_len);
+  if (outgoing_reason_phrase == nullptr || outgoing_reason_phrase_len == 0) {
+    reason_phrase_for_convert = reason_phrase;
+  }
+  HttpTransactHeaders::convert_response(outgoing_version, outgoing_response, reason_phrase_for_convert);
 
   // process reverse mappings on the location header
   // TS-1364: do this regardless of response code

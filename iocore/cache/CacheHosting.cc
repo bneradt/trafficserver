@@ -21,15 +21,24 @@
   limitations under the License.
  */
 
+#include "swoc/swoc_file.h"
+
 #include "P_Cache.h"
 #include "tscore/I_Layout.h"
 #include "tscore/HostLookup.h"
 #include "tscore/Tokenizer.h"
 #include "tscore/Regression.h"
 #include "tscore/Filenames.h"
-#include "tscore/ts_file.h"
 
 extern int gndisks;
+
+namespace
+{
+
+DbgCtl dbg_ctl_cache_hosting{"cache_hosting"};
+DbgCtl dbg_ctl_matcher{"matcher"};
+
+} // end anonymous namespace
 
 /*************************************************************
  *   Begin class HostMatcher
@@ -168,7 +177,7 @@ CacheHostMatcher::NewEntry(matcher_line *line_info)
     memset(static_cast<void *>(cur_d), 0, sizeof(CacheHostRecord));
     return;
   }
-  Debug("cache_hosting", "hostname: %s, host record: %p", match_data, cur_d);
+  Dbg(dbg_ctl_cache_hosting, "hostname: %s, host record: %p", match_data, cur_d);
   // Fill in the matching info
   host_lookup->NewEntry(match_data, (line_info->type == MATCH_DOMAIN) ? true : false, cur_d);
 
@@ -230,7 +239,7 @@ CacheHostTable::config_callback(const char * /* name ATS_UNUSED */, RecDataT /* 
                                 RecData /* data ATS_UNUSED */, void *cookie)
 {
   ReplaceablePtr<CacheHostTable> *ppt = static_cast<ReplaceablePtr<CacheHostTable> *>(cookie);
-  eventProcessor.schedule_imm(new CacheHostTableConfig(ppt));
+  eventProcessor.schedule_imm(new CacheHostTableConfig(ppt), ET_TASK);
   return 0;
 }
 
@@ -383,7 +392,7 @@ CacheHostTable::BuildTableFromString(const char *config_file_path, char *file_bu
 
   ink_assert(second_pass == numEntries);
 
-  if (is_debug_tag_set("matcher")) {
+  if (is_dbg_ctl_enabled(dbg_ctl_matcher)) {
     Print();
   }
   return numEntries;
@@ -393,7 +402,7 @@ int
 CacheHostTable::BuildTable(const char *config_file_path)
 {
   std::error_code ec;
-  std::string content{ts::file::load(ts::file::path{config_file_path}, ec)};
+  std::string content{swoc::file::load(swoc::file::path{config_file_path}, ec)};
 
   if (ec) {
     switch (ec.value()) {
@@ -425,7 +434,7 @@ CacheHostRecord::Init(CacheType typ)
   CacheVol *cachep = cp_list.head;
   for (; cachep; cachep = cachep->link.next) {
     if (cachep->scheme == type) {
-      Debug("cache_hosting", "Host Record: %p, Volume: %d, size: %" PRId64, this, cachep->vol_number, (int64_t)cachep->size);
+      Dbg(dbg_ctl_cache_hosting, "Host Record: %p, Volume: %d, size: %" PRId64, this, cachep->vol_number, (int64_t)cachep->size);
       cp[num_cachevols] = cachep;
       num_cachevols++;
       num_vols += cachep->num_vols;
@@ -516,8 +525,8 @@ CacheHostRecord::Init(matcher_line *line_info, CacheType typ)
             if (cachep->vol_number == volume_number) {
               is_vol_present = 1;
               if (cachep->scheme == type) {
-                Debug("cache_hosting", "Host Record: %p, Volume: %d, size: %ld", this, volume_number,
-                      (long)(cachep->size * STORE_BLOCK_SIZE));
+                Dbg(dbg_ctl_cache_hosting, "Host Record: %p, Volume: %d, size: %ld", this, volume_number,
+                    (long)(cachep->size * STORE_BLOCK_SIZE));
                 cp[num_cachevols] = cachep;
                 num_cachevols++;
                 num_vols += cachep->num_vols;
@@ -593,7 +602,7 @@ ConfigVolumes::read_config_file()
   Note("%s loading ...", ts::filename::VOLUME);
 
   std::error_code ec;
-  std::string content{ts::file::load(ts::file::path{config_path}, ec)};
+  std::string content{swoc::file::load(swoc::file::path{config_path}, ec)};
 
   if (ec) {
     switch (ec.value()) {
@@ -685,7 +694,7 @@ ConfigVolumes::BuildListFromString(char *config_file_path, char *file_buf)
 
       if (strcasecmp(tmp, "volume") == 0) { // match volume
         tmp           += 7;                 // size of string volume including null
-        volume_number = atoi(tmp);
+        volume_number  = atoi(tmp);
 
         if (volume_seen[volume_number]) {
           err = "Volume Already Specified";
@@ -706,17 +715,17 @@ ConfigVolumes::BuildListFromString(char *config_file_path, char *file_buf)
 
         if (!strcasecmp(tmp, "http")) {
           tmp    += 4;
-          scheme = CACHE_HTTP_TYPE;
+          scheme  = CACHE_HTTP_TYPE;
         } else if (!strcasecmp(tmp, "mixt")) {
           tmp    += 4;
-          scheme = CACHE_RTSP_TYPE;
+          scheme  = CACHE_RTSP_TYPE;
         } else {
           err = "Unexpected end of line";
           break;
         }
       } else if (strcasecmp(tmp, "size") == 0) { // match size
         tmp  += 5;
-        size = atoi(tmp);
+        size  = atoi(tmp);
 
         while (ParseRules::is_digit(*tmp)) {
           tmp++;
@@ -739,10 +748,10 @@ ConfigVolumes::BuildListFromString(char *config_file_path, char *file_buf)
         tmp += 9;
         if (!strcasecmp(tmp, "false")) {
           tmp              += 5;
-          ramcache_enabled = false;
+          ramcache_enabled  = false;
         } else if (!strcasecmp(tmp, "true")) {
           tmp              += 4;
-          ramcache_enabled = true;
+          ramcache_enabled  = true;
         } else {
           err = "Unexpected end of line";
           break;
@@ -779,8 +788,8 @@ ConfigVolumes::BuildListFromString(char *config_file_path, char *file_buf)
       } else {
         ink_release_assert(!"Unexpected non-HTTP cache volume");
       }
-      Debug("cache_hosting", "added volume=%d, scheme=%d, size=%d percent=%d, ramcache enabled=%d", volume_number, scheme, size,
-            in_percent, ramcache_enabled);
+      Dbg(dbg_ctl_cache_hosting, "added volume=%d, scheme=%d, size=%d percent=%d, ramcache enabled=%d", volume_number, scheme, size,
+          in_percent, ramcache_enabled);
     }
 
     tmp = bufTok.iterNext(&i_state);
@@ -875,7 +884,7 @@ create_config(RegressionTest *t, int num)
       off_t vol_blocks = gdisks[i]->num_usable_blocks;
       /* round down the blocks to the nearest
          multiple of STORE_BLOCKS_PER_VOL */
-      vol_blocks  = (vol_blocks / STORE_BLOCKS_PER_VOL) * STORE_BLOCKS_PER_VOL;
+      vol_blocks   = (vol_blocks / STORE_BLOCKS_PER_VOL) * STORE_BLOCKS_PER_VOL;
       total_space += vol_blocks;
     }
 
@@ -920,7 +929,7 @@ create_config(RegressionTest *t, int num)
       off_t vol_blocks = gdisks[i]->num_usable_blocks;
       /* round down the blocks to the nearest
          multiple of STORE_BLOCKS_PER_VOL */
-      vol_blocks  = (vol_blocks / STORE_BLOCKS_PER_VOL) * STORE_BLOCKS_PER_VOL;
+      vol_blocks   = (vol_blocks / STORE_BLOCKS_PER_VOL) * STORE_BLOCKS_PER_VOL;
       total_space += vol_blocks;
 
       if (num == 2) {
@@ -1044,14 +1053,14 @@ execute_and_verify(RegressionTest *t)
 
   for (int i = 0; i < gndisks; i++) {
     CacheDisk *d = gdisks[i];
-    if (is_debug_tag_set("cache_hosting")) {
-      Debug("cache_hosting", "Disk: %d: Vol Blocks: %u: Free space: %" PRIu64, i, d->header->num_diskvol_blks, d->free_space);
+    if (is_dbg_ctl_enabled(dbg_ctl_cache_hosting)) {
+      Dbg(dbg_ctl_cache_hosting, "Disk: %d: Vol Blocks: %u: Free space: %" PRIu64, i, d->header->num_diskvol_blks, d->free_space);
       for (int j = 0; j < static_cast<int>(d->header->num_volumes); j++) {
-        Debug("cache_hosting", "\tVol: %d Size: %" PRIu64, d->disk_vols[j]->vol_number, d->disk_vols[j]->size);
+        Dbg(dbg_ctl_cache_hosting, "\tVol: %d Size: %" PRIu64, d->disk_vols[j]->vol_number, d->disk_vols[j]->size);
       }
       for (int j = 0; j < static_cast<int>(d->header->num_diskvol_blks); j++) {
-        Debug("cache_hosting", "\tBlock No: %d Size: %" PRIu64 " Free: %u", d->header->vol_info[j].number,
-              d->header->vol_info[j].len, d->header->vol_info[j].free);
+        Dbg(dbg_ctl_cache_hosting, "\tBlock No: %d Size: %" PRIu64 " Free: %u", d->header->vol_info[j].number,
+            d->header->vol_info[j].len, d->header->vol_info[j].free);
       }
     }
   }

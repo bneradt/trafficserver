@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// SPDX-License-Identifier: Apache-2.0
 // Copyright Apache Software Foundation 2019
+
 /** @file
 
     Formatted output for BufferWriter.
@@ -27,7 +27,9 @@ swoc::bwf::ExternalNames swoc::bwf::Global_Names;
 using swoc::svto_radix;
 
 namespace swoc { inline namespace SWOC_VERSION_NS {
+
 namespace bwf {
+
 const Spec Spec::DEFAULT;
 
 const Spec::Property Spec::_prop;
@@ -625,7 +627,18 @@ Format::Format(TextView fmt) {
   }
 }
 
+bool
+Format::is_literal() const {
+  for (auto const& spec : _items) {
+    if (Spec::LITERAL_TYPE != spec._type) {
+      return false;
+    }
+  }
+  return true;
+}
+
 NameBinding::~NameBinding() {}
+
 } // namespace bwf
 
 BufferWriter &
@@ -936,25 +949,19 @@ bwformat(BufferWriter &w, bwf::Spec const &spec, bwf::Date const &date) {
 
 BufferWriter &
 bwformat(BufferWriter &w, bwf::Spec const &spec, bwf::Pattern const &pattern) {
-  auto limit        = std::min<size_t>(spec._max, pattern._text.size() * pattern._n);
-  decltype(limit) n = 0;
-  while (n < limit) {
-    w.write(pattern._text);
-    n += pattern._text.size();
+  if (! pattern._text.empty()) { // If there's no text, no point in looping.
+    auto limit        = std::min<size_t>(spec._max, pattern._text.size() * pattern._n);
+    decltype(limit) n = 0;
+    while (n < limit) {
+      w.write(pattern._text);
+      n += pattern._text.size();
+    }
   }
   return w;
 }
 
-}} // namespace swoc::SWOC_VERSION_NS
-
-namespace std {
-ostream &
-operator<<(ostream &s, swoc::FixedBufferWriter &w) {
-  return s << w.view();
-}
-
 swoc::BufferWriter &
-bwformat(swoc::BufferWriter &w, swoc::bwf::Spec const &spec, error_code const &ec) {
+bwformat(swoc::BufferWriter &w, swoc::bwf::Spec const &spec, std::error_code const &ec) {
   static const auto GENERIC_CATEGORY = &std::generic_category();
   static const auto SYSTEM_CATEGORY  = &std::system_category();
 
@@ -975,6 +982,14 @@ bwformat(swoc::BufferWriter &w, swoc::bwf::Spec const &spec, error_code const &e
     }
   }
   return w;
+}
+
+}} // namespace swoc::SWOC_VERSION_NS
+
+namespace std {
+ostream &
+operator<<(ostream &s, swoc::FixedBufferWriter &w) {
+  return s << w.view();
 }
 
 } // namespace std

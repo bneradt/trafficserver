@@ -29,6 +29,8 @@
 #include <sys/socket.h>
 #include <string_view>
 
+#include "swoc/swoc_ip.h"
+
 #include "tscore/ink_memory.h"
 #include "tscore/ink_apidefs.h"
 #include "tscore/BufferWriterForward.h"
@@ -93,7 +95,7 @@ struct IpAddr; // forward declare.
 
  */
 union IpEndpoint {
-  typedef IpEndpoint self; ///< Self reference type.
+  using self = IpEndpoint; ///< Self reference type.
 
   struct sockaddr sa;       ///< Generic address.
   struct sockaddr_in sin;   ///< IPv4
@@ -1025,9 +1027,9 @@ ats_ip_ntop(IpEndpoint const *addr, ///< Address.
 /// Buffer size sufficient for IPv6 address and port.
 static size_t const INET6_ADDRPORTSTRLEN = INET6_ADDRSTRLEN + 6;
 /// Convenience type for address formatting.
-typedef char ip_text_buffer[INET6_ADDRSTRLEN];
+using ip_text_buffer = char[INET6_ADDRSTRLEN];
 /// Convenience type for address formatting.
-typedef char ip_port_text_buffer[INET6_ADDRPORTSTRLEN];
+using ip_port_text_buffer = char[INET6_ADDRPORTSTRLEN];
 
 /** Write a null terminated string for @a addr to @a dst with port.
     A buffer of size INET6_ADDRPORTSTRLEN suffices, including a terminating nul.
@@ -1164,7 +1166,7 @@ int ats_ip_to_hex(sockaddr const *addr, ///< Address to convert. Must be IP.
     @note This is not easily used as an address for system calls.
 */
 struct IpAddr {
-  typedef IpAddr self; ///< Self reference type.
+  using self = IpAddr; ///< Self reference type.
 
   /// Default construct (invalid address).
   IpAddr() {}
@@ -1329,6 +1331,17 @@ struct IpAddr {
 
   ///< Pre-constructed invalid instance.
   static self const INVALID;
+
+  operator swoc::IPAddr()
+  {
+    switch (_family) {
+    case AF_INET:
+      return swoc::IPAddr{ntohl(_addr._ip4)}; // types store in opposite order.
+    case AF_INET6:
+      return swoc::IPAddr{_addr._ip6};
+    }
+    return {};
+  }
 };
 
 inline IpAddr &

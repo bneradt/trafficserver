@@ -214,7 +214,7 @@ freelist_new(InkFreeList *f)
     if (TO_PTR(FREELIST_POINTER(item)) == nullptr) {
       uint32_t i;
       void *newp        = nullptr;
-      size_t alloc_size = f->chunk_size * f->type_size;
+      size_t alloc_size = static_cast<size_t>(f->chunk_size) * f->type_size;
       size_t alignment  = 0;
 
       if (f->use_hugepages) {
@@ -481,7 +481,7 @@ ink_freelists_dump(FILE *f)
             fll->fl->type_size, fll->fl->chunk_size, fll->fl->hugepages_failure, fll->fl->name ? fll->fl->name : "<unknown>");
     total_allocated += static_cast<uint64_t>(fll->fl->allocated) * static_cast<uint64_t>(fll->fl->type_size);
     total_used      += static_cast<uint64_t>(fll->fl->used) * static_cast<uint64_t>(fll->fl->type_size);
-    fll             = fll->next;
+    fll              = fll->next;
   }
   fprintf(f, " %18" PRIu64 " | %18" PRIu64 " |            | TOTAL\n", total_allocated, total_used);
   fprintf(f, "-----------------------------------------------------------------------------------------\n");

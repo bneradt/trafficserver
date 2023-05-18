@@ -71,6 +71,15 @@ int threads_per_disk = 1;
 int delete_disks     = 0;
 int max_size         = 0;
 int use_lseek        = 0;
+int num_processors   = 0;
+#if TS_USE_LINUX_IO_URING
+int io_uring_queue_entries = 32;
+int io_uring_sq_poll_ms    = 0;
+int io_uring_attach_wq     = 0;
+int io_uring_wq_bounded    = 0;
+int io_uring_wq_unbounded  = 0;
+int io_uring_force_thread  = 0;
+#endif
 
 int chains                    = 1;
 double seq_read_percent       = 0.0;
@@ -195,11 +204,11 @@ dump_summary()
   printf("aggregate results\n");
   printf("-----------------\n");
   total_secs /= orig_n_accessors;
-  float sr   = (total_seq_reads * seq_read_size) / total_secs;
+  float sr    = (total_seq_reads * seq_read_size) / total_secs;
   sr         /= 1024.0 * 1024.0;
-  float sw   = (total_seq_writes * seq_write_size) / total_secs;
+  float sw    = (total_seq_writes * seq_write_size) / total_secs;
   sw         /= 1024.0 * 1024.0;
-  float rr   = (total_rand_reads * rand_read_size) / total_secs;
+  float rr    = (total_rand_reads * rand_read_size) / total_secs;
   rr         /= 1024.0 * 1024.0;
   printf("%f ops %0.2f mbytes/sec %0.1f ops/sec %0.1f ops/sec/disk seq_read\n", total_seq_reads, sr, total_seq_reads / total_secs,
          total_seq_reads / total_secs / n_disk_path);
@@ -209,6 +218,14 @@ dump_summary()
          total_rand_reads / total_secs, total_rand_reads / total_secs / n_disk_path);
   printf("%0.2f total mbytes/sec\n", sr + sw + rr);
   printf("----------------------------------------------------------\n");
+
+#if TS_USE_LINUX_IO_URING
+  printf("-----------------\n");
+  printf("IO_URING results\n");
+  printf("-----------------\n");
+  printf("submissions: %lu\n", io_uring_submissions.load());
+  printf("completions: %lu\n", io_uring_completions.load());
+#endif
 
   if (delete_disks) {
     for (int i = 0; i < n_disk_path; i++) {
@@ -262,10 +279,10 @@ AIO_Device::do_fd(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
     return 0;
   }
 
-  off_t max_offset        = (static_cast<off_t>(disk_size)) * 1024 * 1024;   // MB-GB
-  off_t max_hotset_offset = (static_cast<off_t>(hotset_size)) * 1024 * 1024; // MB-GB
-  off_t seq_read_point    = (static_cast<off_t> MIN_OFFSET);
-  off_t seq_write_point   = (static_cast<off_t> MIN_OFFSET) + max_offset / 2 + write_after * 1024 * 1024;
+  off_t max_offset         = (static_cast<off_t>(disk_size)) * 1024 * 1024;   // MB-GB
+  off_t max_hotset_offset  = (static_cast<off_t>(hotset_size)) * 1024 * 1024; // MB-GB
+  off_t seq_read_point     = (static_cast<off_t> MIN_OFFSET);
+  off_t seq_write_point    = (static_cast<off_t> MIN_OFFSET) + max_offset / 2 + write_after * 1024 * 1024;
   seq_write_point         += (id % n_disk_path) * (max_offset / (threads_per_disk * 4));
   if (seq_write_point > max_offset) {
     seq_write_point = MIN_OFFSET;
@@ -375,6 +392,15 @@ read_config(const char *config_filename)
     PARAM(chains)
     PARAM(threads_per_disk)
     PARAM(delete_disks)
+    PARAM(num_processors)
+#if TS_USE_LINUX_IO_URING
+    PARAM(io_uring_queue_entries)
+    PARAM(io_uring_sq_poll_ms)
+    PARAM(io_uring_attach_wq)
+    PARAM(io_uring_wq_bounded)
+    PARAM(io_uring_wq_unbounded)
+    PARAM(io_uring_force_thread)
+#endif
     else if (strcmp(field_name, "disk_path") == 0)
     {
       assert(n_disk_path < MAX_DISK_THREADS);
@@ -405,16 +431,70 @@ read_config(const char *config_filename)
   return (1);
 }
 
+#if TS_USE_LINUX_IO_URING
+
+class IOUringLoopTailHandler : public EThread::LoopTailHandler
+{
+public:
+  int
+  waitForActivity(ink_hrtime timeout) override
+  {
+    IOUringContext::local_context()->submit_and_wait(timeout);
+
+    return 0;
+  }
+  /** Unblock.
+
+  This is required to unblock (wake up) the block created by calling @a cb.
+      */
+  void
+  signalActivity() override
+  {
+  }
+
+  ~IOUringLoopTailHandler() override {}
+} uring_handler;
+
+#endif
+
 int
 main(int /* argc ATS_UNUSED */, char *argv[])
 {
   int i;
+  printf("input file %s\n", argv[1]);
+  if (!read_config(argv[1])) {
+    exit(1);
+  }
+  if (num_processors == 0) {
+    num_processors = ink_number_of_processors();
+  }
+  printf("Using %d processor threads\n", num_processors);
+
+  AIOBackend backend = AIOBackend::AIO_BACKEND_AUTO;
+
+#if TS_USE_LINUX_IO_URING
+  {
+    IOUringConfig cfg;
+
+    cfg.queue_entries = io_uring_queue_entries;
+    cfg.sq_poll_ms    = io_uring_sq_poll_ms;
+    cfg.attach_wq     = io_uring_attach_wq;
+    cfg.wq_bounded    = io_uring_wq_bounded;
+    cfg.wq_unbounded  = io_uring_wq_unbounded;
+
+    IOUringContext::set_config(cfg);
+
+    if (io_uring_force_thread) {
+      backend = AIOBackend::AIO_BACKEND_THREAD;
+    }
+  };
+#endif
 
   Layout::create();
   init_diags("", nullptr);
   RecProcessInit();
   ink_event_system_init(EVENT_SYSTEM_MODULE_PUBLIC_VERSION);
-  eventProcessor.start(ink_number_of_processors());
+  eventProcessor.start(num_processors);
 
   Thread *main_thread = new EThread;
   main_thread->set_specific();
@@ -425,14 +505,17 @@ main(int /* argc ATS_UNUSED */, char *argv[])
     et->schedule_imm(et->diskHandler);
   }
 #endif
+#if TS_USE_LINUX_IO_URING
+  if (!io_uring_force_thread) {
+    for (EThread *et : eventProcessor.active_group_threads(ET_NET)) {
+      et->set_tail_handler(&uring_handler);
+    }
+  }
+#endif
 
   RecProcessStart();
-  ink_aio_init(AIO_MODULE_PUBLIC_VERSION);
+  ink_aio_init(AIO_MODULE_PUBLIC_VERSION, backend);
   ts::Random::seed(time(nullptr));
-  printf("input file %s\n", argv[1]);
-  if (!read_config(argv[1])) {
-    exit(1);
-  }
 
   max_size = seq_read_size;
   if (seq_write_size > max_size) {
@@ -466,7 +549,12 @@ main(int /* argc ATS_UNUSED */, char *argv[])
   }
 
   while (!TSSystemState::is_event_system_shut_down()) {
+#if TS_USE_LINUX_IO_URING
+    IOUringContext::local_context()->submit_and_wait(1 * HRTIME_SECOND);
+#else
     sleep(1);
+#endif
   }
+
   delete main_thread;
 }

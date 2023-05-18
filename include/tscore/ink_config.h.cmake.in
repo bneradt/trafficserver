@@ -70,6 +70,12 @@
 #cmakedefine01 HAVE_SSL_CTX_SET_TLSEXT_TICKET_KEY_CB
 
 #cmakedefine HAVE_BIO_METH_NEW 1
+#cmakedefine HAVE_BIO_SET_DATA 1
+#cmakedefine HAVE_BIO_GET_DATA 1
+#cmakedefine HAVE_BIO_GET_SHUTDOWN 1
+#cmakedefine HAVE_BIO_METH_GET_CTRL 1
+#cmakedefine HAVE_BIO_METH_GET_CREATE 1
+#cmakedefine HAVE_BIO_METH_GET_DESTROY 1
 
 /* TODO(cmcfarlen): make this configurable */
 #define TS_PKGSYSUSER "@pkgsysuser@"
@@ -101,6 +107,7 @@ const int DEFAULT_STACKSIZE = @DEFAULT_STACK_SIZE@;
 #cmakedefine01 TS_USE_EPOLL
 #cmakedefine01 TS_USE_KQUEUE
 #cmakedefine01 TS_USE_LINUX_IO_URING
+#cmakedefine01 TS_USE_LINUX_NATIVE_AIO
 #cmakedefine01 TS_USE_SET_RBIO
 #cmakedefine01 TS_USE_DIAGS
 #cmakedefine01 TS_USE_GET_DH_2048_256
@@ -108,4 +115,3 @@ const int DEFAULT_STACKSIZE = @DEFAULT_STACK_SIZE@;
 #define TS_BUILD_CANONICAL_HOST "@CMAKE_HOST@"
 
 #cmakedefine YAMLCPP_LIB_VERSION "@YAMLCPP_LIB_VERSION@"
-

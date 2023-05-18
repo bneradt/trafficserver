@@ -276,6 +276,15 @@ Http2Stream::send_request(Http2ConnectionState &cstate)
     }
   }
 
+  if (_receive_header.type_get() == HTTP_TYPE_REQUEST) {
+    // Check whether the request uses CONNECT method
+    int method_len;
+    const char *method = _receive_header.method_get(&method_len);
+    if (method_len == HTTP_LEN_CONNECT && strncmp(method, HTTP_METHOD_CONNECT, HTTP_LEN_CONNECT) == 0) {
+      this->_is_tunneling = true;
+    }
+  }
+
   if (this->expect_send_trailer()) {
     // Send read complete to terminate previous data tunnel
     this->read_vio.nbytes = this->read_vio.ndone;
@@ -298,7 +307,7 @@ Http2Stream::send_request(Http2ConnectionState &cstate)
       this->_receive_buffer.add_block();
       block = this->_receive_buffer.get_current_block();
     }
-    done       = _receive_header.print(block->end(), block->write_avail(), &bufindex, &tmp);
+    done        = _receive_header.print(block->end(), block->write_avail(), &bufindex, &tmp);
     dumpoffset += bufindex;
     this->_receive_buffer.fill(bufindex);
     if (!done) {
@@ -549,7 +558,7 @@ Http2Stream::initiating_close()
   if (!closed) {
     SCOPED_MUTEX_LOCK(lock, this->mutex, this_ethread());
     REMEMBER(NO_EVENT, this->reentrancy_count);
-    Http2StreamDebug("initiating_close client_window=%" PRId64 " session_window=%" PRId64, _peer_rwnd,
+    Http2StreamDebug("initiating_close client_window=%zd session_window=%zd", _peer_rwnd,
                      this->get_connection_state().get_peer_rwnd());
 
     if (this->is_state_writeable()) { // Let the other end know we are going away
@@ -616,6 +625,12 @@ bool
 Http2Stream::is_outbound_connection() const
 {
   return _is_outbound;
+}
+
+bool
+Http2Stream::is_tunneling() const
+{
+  return _is_tunneling;
 }
 
 /* Replace existing event only if the new event is different than the inprogress event */
@@ -729,11 +744,10 @@ Http2Stream::update_write_request(bool call_update)
   SCOPED_MUTEX_LOCK(lock, write_vio.mutex, this_ethread());
 
   IOBufferReader *vio_reader = write_vio.get_reader();
-  if (write_vio.ntodo() > 0 && (!vio_reader->is_read_avail_more_than(0) ||
-                                // If there is no window left, just give up now too until we receive a WINDOW_UPDATE.
-                                std::min(_peer_rwnd, this->get_connection_state().get_peer_rwnd()) == 0)) {
-    Http2StreamDebug("update_write_request give up without doing anything ntodo=%" PRId64 " is_read_avail=%d client_window=%" PRId64
-                     " session_window=%" PRId64,
+
+  if (write_vio.ntodo() > 0 && (!vio_reader->is_read_avail_more_than(0))) {
+    Http2StreamDebug("update_write_request give up without doing anything ntodo=%" PRId64 " is_read_avail=%d client_window=%zd"
+                     " session_window=%zd",
                      write_vio.ntodo(), vio_reader->is_read_avail_more_than(0), _peer_rwnd,
                      this->get_connection_state().get_peer_rwnd());
     return;

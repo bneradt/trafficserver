@@ -265,8 +265,8 @@ CacheControlHeader::update(TSMBuffer bufp, TSMLoc hdr_loc)
 
         // Update max-age if necessary
         if (strncasecmp(val, TS_HTTP_VALUE_MAX_AGE, TS_HTTP_LEN_MAX_AGE) == 0) {
-          unsigned int max_age = 0;
-          char *ptr            = const_cast<char *>(val);
+          unsigned int max_age  = 0;
+          char *ptr             = const_cast<char *>(val);
           ptr                  += TS_HTTP_LEN_MAX_AGE;
           while ((*ptr == ' ') || (*ptr == '\t')) {
             ptr++;
@@ -320,7 +320,7 @@ CacheControlHeader::generate() const
   immutable = (_immutable ? ", " HTTP_IMMUTABLE : "");
   max_age   = (_max_age == numeric_limits<unsigned int>::max() ? 315360000 : _max_age); // default is 10 years
 
-  sprintf(line_buf, "Cache-Control: max-age=%u, %s%s\r\n", max_age, publicity, immutable);
+  snprintf(line_buf, sizeof(line_buf), "Cache-Control: max-age=%u, %s%s\r\n", max_age, publicity, immutable);
   return string(line_buf);
 }
 
@@ -866,7 +866,7 @@ readInterceptRequest(InterceptData &int_data)
         int_data.read_complete = true;
       }
       consumed += data_len;
-      block    = TSIOBufferBlockNext(block);
+      block     = TSIOBufferBlockNext(block);
     }
   }
   LOG_DEBUG("Consumed %d bytes from input vio", consumed);

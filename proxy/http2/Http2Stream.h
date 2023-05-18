@@ -85,6 +85,7 @@ public:
   void send_request(Http2ConnectionState &cstate);
   void initiating_close();
   bool is_outbound_connection() const;
+  bool is_tunneling() const;
   void terminate_if_possible();
   void update_read_request(bool send_update);
   void update_write_request(bool send_update);
@@ -137,8 +138,8 @@ public:
     return &_send_header;
   }
 
-  void read_update(int count);
-  void read_done();
+  void update_read_length(int count);
+  void set_read_done();
 
   void clear_io_events();
 
@@ -169,7 +170,7 @@ public:
   void reset_send_headers();
   MIOBuffer *read_vio_writer() const;
   int64_t read_vio_read_avail();
-  bool read_enabled() const;
+  bool is_read_enabled() const;
 
   //////////////////
   // Variables
@@ -229,6 +230,14 @@ private:
    * session close in which is_outbound is not accessible.
    */
   bool _is_outbound = false;
+
+  /** Whether CONNECT method is used.
+   *
+   * We cannot buffer outgoing data if this stream is used for tunneling (CONNECT method), because we don't know the
+   * protocol used in the tunnel and we cannot expect additional data from (following read event) from the server side
+   * without sending the data ATS currently has.
+   */
+  bool _is_tunneling = false;
 
   /** Whether the stream has been registered with the connection state. */
   bool _registered_stream = true;
@@ -409,7 +418,7 @@ Http2Stream::read_vio_writer() const
 }
 
 inline bool
-Http2Stream::read_enabled() const
+Http2Stream::is_read_enabled() const
 {
   return !this->read_vio.is_disabled();
 }
@@ -422,13 +431,13 @@ Http2Stream::_clear_timers()
 }
 
 inline void
-Http2Stream::read_update(int count)
+Http2Stream::update_read_length(int count)
 {
   read_vio.ndone += count;
 }
 
 inline void
-Http2Stream::read_done()
+Http2Stream::set_read_done()
 {
   read_vio.nbytes = read_vio.ndone;
 }

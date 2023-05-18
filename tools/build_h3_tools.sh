@@ -22,7 +22,7 @@
 set -e
 
 # Update this as the draft we support updates.
-OPENSSL_BRANCH=${OPENSSL_BRANCH:-"OpenSSL_1_1_1q+quic"}
+OPENSSL_BRANCH=${OPENSSL_BRANCH:-"OpenSSL_1_1_1t+quic"}
 
 # Set these, if desired, to change these to your preferred installation
 # directory
@@ -34,44 +34,103 @@ MAKE="make"
 # These are for Linux like systems, specially the LDFLAGS, also depends on dirs above
 CFLAGS=${CFLAGS:-"-O3 -g"}
 CXXFLAGS=${CXXFLAGS:-"-O3 -g"}
-LDFLAGS=${LDFLAGS:-"-Wl,-rpath=${OPENSSL_PREFIX}/lib"}
+LDFLAGS=${LDFLAGS:-"-Wl,-rpath,${OPENSSL_PREFIX}/lib"}
 
 if [ -e /etc/redhat-release ]; then
     MAKE="gmake"
+    TMP_QUICHE_BSSL_PATH="${BASE}/boringssl/lib64"
     echo "+-------------------------------------------------------------------------+"
     echo "| You probably need to run this, or something like this, for your system: |"
     echo "|                                                                         |"
     echo "|   sudo yum -y install libev-devel jemalloc-devel python2-devel          |"
     echo "|   sudo yum -y install libxml2-devel c-ares-devel libevent-devel         |"
-    echo "|   sudo yum -y install jansson-devel zlib-devel systemd-devel            |"
+    echo "|   sudo yum -y install jansson-devel zlib-devel systemd-devel cargo      |"
+    echo "|                                                                         |"
+    echo "| Rust may be needed too, see https://rustup.rs for the details           |"
     echo "+-------------------------------------------------------------------------+"
     echo
     echo
 elif [ -e /etc/debian_version ]; then
+    TMP_QUICHE_BSSL_PATH="${BASE}/boringssl/lib"
     echo "+-------------------------------------------------------------------------+"
     echo "| You probably need to run this, or something like this, for your system: |"
     echo "|                                                                         |"
     echo "|   sudo apt -y install libev-dev libjemalloc-dev python2-dev libxml2-dev |"
     echo "|   sudo apt -y install libpython2-dev libc-ares-dev libsystemd-dev       |"
-    echo "|   sudo apt -y install libevent-dev libjansson-dev zlib1g-dev            |"
+    echo "|   sudo apt -y install libevent-dev libjansson-dev zlib1g-dev cargo      |"
+    echo "|                                                                         |"
+    echo "| Rust may be needed too, see https://rustup.rs for the details           |"
     echo "+-------------------------------------------------------------------------+"
     echo
     echo
 fi
 
+if [ -z ${QUICHE_BSSL_PATH+x} ]; then
+   QUICHE_BSSL_PATH=${TMP_QUICHE_BSSL_PATH:-"${BASE}/boringssl/lib"}
+fi
+
 set -x
+if [ `uname -s` = "Linux" ]
+then
+  num_threads=$(nproc)
+else
+  # MacOS.
+  num_threads=$(sysctl -n hw.logicalcpu)
+fi
+
+# boringssl
+echo "Building boringssl..."
+
+# We need this go version.
+sudo mkdir -p ${BASE}/go
+
+if [ `uname -m` = "arm64" -o `uname -m` = "aarch64" ]; then
+    ARCH="arm64"
+else
+    ARCH="amd64"
+fi
+
+if [ `uname -s` = "Darwin" ]; then
+    OS="darwin"
+else
+    OS="linux"
+fi
+
+wget https://go.dev/dl/go1.20.1.${OS}-${ARCH}.tar.gz
+sudo rm -rf ${BASE}/go && sudo tar -C ${BASE} -xf go1.20.1.${OS}-${ARCH}.tar.gz
+rm go1.20.1.${OS}-${ARCH}.tar.gz
+
+GO_BINARY_PATH=${BASE}/go/bin/go
+if [ ! -d boringssl ]; then
+  git clone https://boringssl.googlesource.com/boringssl
+  cd boringssl
+  git checkout 31bad2514d21f6207f3925ba56754611c462a873
+  cd ..
+fi
+cd boringssl
+mkdir -p build
+cd build
+cmake \
+  -DGO_EXECUTABLE=${GO_BINARY_PATH} \
+  -DCMAKE_INSTALL_PREFIX=${BASE}/boringssl \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_SHARED_LIBS=1 ../
+
+${MAKE} -j ${num_threads}
+sudo ${MAKE} install
+cd ..
 
 # Build quiche
 # Steps borrowed from: https://github.com/apache/trafficserver-ci/blob/main/docker/rockylinux8/Dockerfile
 echo "Building quiche"
-QUICHE_BASE=${BASE:-"/opt/quiche"}
+QUICHE_BASE="${BASE:-/opt}/quiche"
 [ ! -d quiche ] && git clone --recursive https://github.com/cloudflare/quiche.git
 cd quiche
-cargo build -j4 --package quiche --release --features ffi,pkg-config-meta,qlog
+QUICHE_BSSL_PATH=${QUICHE_BSSL_PATH} QUICHE_BSSL_LINK_KIND=dylib cargo build -j4 --package quiche --release --features ffi,pkg-config-meta,qlog
 sudo mkdir -p ${QUICHE_BASE}/lib/pkgconfig
 sudo mkdir -p ${QUICHE_BASE}/include
 sudo cp target/release/libquiche.a ${QUICHE_BASE}/lib/
-sudo cp target/release/libquiche.so ${QUICHE_BASE}/lib/
+[ -f target/release/libquiche.so ] && sudo cp target/release/libquiche.so ${QUICHE_BASE}/lib/
 sudo cp quiche/include/quiche.h ${QUICHE_BASE}/include/
 sudo cp target/release/quiche.pc ${QUICHE_BASE}/lib/pkgconfig
 cd ..
@@ -81,7 +140,7 @@ echo "Building OpenSSL with QUIC support"
 [ ! -d openssl-quic ] && git clone -b ${OPENSSL_BRANCH} --depth 1 https://github.com/quictls/openssl.git openssl-quic
 cd openssl-quic
 ./config enable-tls1_3 --prefix=${OPENSSL_PREFIX}
-${MAKE} -j $(nproc)
+${MAKE} -j ${num_threads}
 sudo ${MAKE} -j install
 
 # The symlink target provides a more convenient path for the user while also
@@ -94,7 +153,7 @@ echo "Building nghttp3..."
 if [ ! -d nghttp3 ]; then
   git clone https://github.com/ngtcp2/nghttp3.git
   cd nghttp3
-  git checkout -b v0.8.0 v0.8.0
+  git checkout -b v0.9.0 v0.9.0
   cd ..
 fi
 cd nghttp3
@@ -106,7 +165,7 @@ autoreconf -if
   CXXFLAGS="${CXXFLAGS}" \
   LDFLAGS="${LDFLAGS}" \
   --enable-lib-only
-${MAKE} -j $(nproc)
+${MAKE} -j ${num_threads}
 sudo ${MAKE} install
 cd ..
 
@@ -127,7 +186,7 @@ autoreconf -if
   CXXFLAGS="${CXXFLAGS}" \
   LDFLAGS="${LDFLAGS}" \
   --enable-lib-only
-${MAKE} -j $(nproc)
+${MAKE} -j ${num_threads}
 sudo ${MAKE} install
 cd ..
 
@@ -141,6 +200,13 @@ if [ ! -d nghttp2 ]; then
 fi
 cd nghttp2
 autoreconf -if
+if [ `uname -s` = "Darwin" ]
+then
+  # --enable-app requires systemd which is not available on Mac.
+  ENABLE_APP=""
+else
+  ENABLE_APP="--enable-app"
+fi
 ./configure \
   --prefix=${BASE} \
   PKG_CONFIG_PATH=${BASE}/lib/pkgconfig:${OPENSSL_PREFIX}/lib/pkgconfig \
@@ -148,16 +214,18 @@ autoreconf -if
   CXXFLAGS="${CXXFLAGS}" \
   LDFLAGS="${LDFLAGS}" \
   --enable-http3 \
-  --enable-app
-${MAKE} -j $(nproc)
+  ${ENABLE_APP}
+${MAKE} -j ${num_threads}
 sudo ${MAKE} install
 cd ..
 
-# And finally curl
+# Then curl
 echo "Building curl ..."
-[ ! -d curl ] && git clone https://github.com/curl/curl.git
+[ ! -d curl ] && git clone --branch curl-7_88_1 https://github.com/curl/curl.git
 cd curl
-autoreconf -i
+# On mac autoreconf fails on the first attempt with an issue finding ltmain.sh.
+# The second runs fine.
+autoreconf -fi || autoreconf -fi
 ./configure \
   --prefix=${BASE} \
   --with-ssl=${OPENSSL_PREFIX} \
@@ -167,5 +235,6 @@ autoreconf -i
   CFLAGS="${CFLAGS}" \
   CXXFLAGS="${CXXFLAGS}" \
   LDFLAGS="${LDFLAGS}"
-${MAKE} -j $(nproc)
+${MAKE} -j ${num_threads}
 sudo ${MAKE} install
+cd ..

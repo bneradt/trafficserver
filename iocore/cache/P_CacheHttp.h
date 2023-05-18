@@ -27,9 +27,9 @@
 #include "HTTP.h"
 #include "URL.h"
 
-typedef URL CacheURL;
-typedef HTTPHdr CacheHTTPHdr;
-typedef HTTPInfo CacheHTTPInfo;
+using CacheURL      = URL;
+using CacheHTTPHdr  = HTTPHdr;
+using CacheHTTPInfo = HTTPInfo;
 
 #define OFFSET_BITS 24
 enum {
@@ -76,7 +76,7 @@ struct CacheHTTPInfoVector {
   Ptr<RefCountObj> vector_buf;
 };
 
-TS_INLINE CacheHTTPInfo *
+inline CacheHTTPInfo *
 CacheHTTPInfoVector::get(int idx)
 {
   ink_assert(idx >= 0);

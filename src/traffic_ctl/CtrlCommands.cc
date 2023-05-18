@@ -18,19 +18,21 @@
   See the License for the specific language governing permissions and
   limitations under the License.
  */
+#include "CtrlCommands.h"
+
 #include <fstream>
 #include <unordered_map>
 #include <chrono>
 #include <thread>
 #include <csignal>
+#include <unistd.h>
 
-#include "CtrlCommands.h"
+#include <swoc/TextView.h>
+#include <swoc/BufferWriter.h>
+#include <swoc/bwf_base.h>
+
 #include "jsonrpc/CtrlRPCRequests.h"
 #include "jsonrpc/ctrl_yaml_codecs.h"
-#include "utils/yaml_utils.h"
-#include "swoc/TextView.h"
-#include "swoc/BufferWriter.h"
-#include "swoc/bwf_base.h"
 
 extern std::unordered_map<int, std::function<void()>> Signal_Handler;
 extern void subscribe_to_signal_handler(int signal_num, std::function<void()> handler);
@@ -40,11 +42,12 @@ namespace
 {
 /// We use yamlcpp as codec implementation.
 using Codec = yamlcpp_json_emitter;
-} // namespace
+
 const std::unordered_map<std::string_view, BasePrinter::Options::OutputFormat> _Fmt_str_to_enum = {
   {"json", BasePrinter::Options::OutputFormat::JSON},
   {"rpc",  BasePrinter::Options::OutputFormat::RPC }
 };
+} // namespace
 
 BasePrinter::Options::OutputFormat
 parse_format(ts::Arguments *args)
@@ -63,13 +66,13 @@ parse_format(ts::Arguments *args)
   }
   return val;
 }
-
 BasePrinter::Options
 parse_print_opts(ts::Arguments *args)
 {
   return {parse_format(args)};
 }
 
+std::atomic_int CtrlCommand::Signal_Flagged{0};
 //------------------------------------------------------------------------------------------------------------------------------------
 CtrlCommand::CtrlCommand(ts::Arguments *args) : _arguments(args) {}
 
@@ -300,7 +303,7 @@ MetricCommand::metric_monitor()
   const int32_t interval = std::stoi(get_parsed_arguments()->get("interval").value());
   // default count is 0.
   if (count < 0 || interval <= 0) {
-    throw std::runtime_error(ts::bwprint(err_text, "monitor: invalid input, count: {}(>=0), interval: {}(>=1)", count, interval));
+    throw std::runtime_error(swoc::bwprint(err_text, "monitor: invalid input, count: {}(>=0), interval: {}(>=1)", count, interval));
   }
 
   // keep track of each metric
@@ -316,30 +319,23 @@ MetricCommand::metric_monitor()
   // To be used to print all the stats. This is a lambda function as this could
   // be called when SIGINT is invoked, so we dump what we have before exit.
   auto dump = [&](std::unordered_map<std::string, ctx> const &_summary) {
-    unsubscribe_signal(SIGINT);
-
     if (_summary.size() == 0) {
       // nothing to report.
       return;
     }
 
-    _printer->write_output(ts::bwprint(err_text, "--- metric monitor statistics({}) ---", query_count));
+    _printer->write_output(swoc::bwprint(err_text, "--- metric monitor statistics({}) ---", query_count));
 
     for (auto const &item : _summary) {
       ctx const &s  = item.second;
       const int avg = s.sum / query_count;
-      _printer->write_output(ts::bwprint(err_text, "┌ {}\n└─ min/avg/max = {:.5}/{}/{:.5}", item.first, s.min, avg, s.max));
+      _printer->write_output(swoc::bwprint(err_text, "┌ {}\n└─ min/avg/max = {:.5}/{}/{:.5}", item.first, s.min, avg, s.max));
     }
   };
 
   std::unordered_map<std::string, ctx> summary;
 
-  subscribe_to_signal_handler(SIGINT, [&]() -> void {
-    // print out all the stats.
-    dump(summary);
-  });
-
-  for (;;) {
+  while (!Signal_Flagged.load()) {
     // Request will hold all metrics in a single message.
     shared::rpc::JSONRPCResponse const &resp = record_fetch(arg, shared::rpc::NOT_REGEX, RecordQueryType::METRIC);
 
@@ -359,8 +355,8 @@ MetricCommand::metric_monitor()
       const float val = std::stof(rec.currentValue);
 
       s.sum += val;
-      s.max = std::max<float>(s.max, val);
-      s.min = std::min<float>(s.min, val);
+      s.max  = std::max<float>(s.max, val);
+      s.min  = std::min<float>(s.min, val);
       std::string symbol;
       if (query_count > 0) {
         if (val > s.last) {
@@ -370,14 +366,14 @@ MetricCommand::metric_monitor()
         }
       }
       s.last = val;
-      _printer->write_output(ts::bwprint(err_text, "{}: {} {}", rec.name, rec.currentValue, symbol));
+      _printer->write_output(swoc::bwprint(err_text, "{}: {} {}", rec.name, rec.currentValue, symbol));
     }
 
     if ((query_count++ == count - 1) && count > 0 /* could be a forever loop*/) {
       break;
     }
 
-    std::this_thread::sleep_for(std::chrono::seconds(interval));
+    sleep(interval);
   }
 
   // all done, print summary.
@@ -462,6 +458,7 @@ PluginCommand::plugin_msg()
   }
   BasicPluginMessageRequest request{params};
   auto response = invoke_rpc(request);
+  _printer->write_output(response);
 }
 //------------------------------------------------------------------------------------------------------------------------------------
 DirectRPCCommand::DirectRPCCommand(ts::Arguments *args) : CtrlCommand(args)

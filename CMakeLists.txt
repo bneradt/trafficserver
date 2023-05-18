@@ -104,6 +104,10 @@ check_symbol_exists(epoll_create "sys/epoll.h" TS_USE_EPOLL)
 check_symbol_exists(kqueue "sys/event.h" TS_USE_KQUEUE)
 set(CMAKE_REQUIRED_LIBRARIES uring)
 check_symbol_exists(io_uring_queue_init "liburing.h" HAVE_IOURING)
+unset(CMAKE_REQUIRED_LIBRARIES)
+set(CMAKE_REQUIRED_LIBRARIES aio)
+check_symbol_exists(io_submit "libaio.h" HAVE_LIBAIO)
+unset(CMAKE_REQUIRED_LIBRARIES)
 check_symbol_exists(getresuid unistd.h HAVE_GETRESUID)
 check_symbol_exists(getresgid unistd.h HAVE_GETRESGID)
 check_symbol_exists(accept4 sys/socket.h HAVE_ACCEPT4)
@@ -117,10 +121,22 @@ if (HAVE_IOURING AND USE_IOURING)
     set(TS_USE_LINUX_IO_URING 1)
 endif(HAVE_IOURING AND USE_IOURING)
 
+option(USE_LIBAIO "Use experimental libaio (linux only)" 0)
+if (HAVE_LIBAIO AND USE_LIBAIO)
+    message(Using libaio)
+    set(TS_USE_LINUX_NATIVE_AIO 1)
+endif(HAVE_LIBAIO AND USE_LIBAIO)
+
 # Check ssl functionality
 list(APPEND CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
 list(APPEND CMAKE_REQUIRED_LIBRARIES ${OPENSSL_CRYPTO_LIBRARY})
 check_symbol_exists(BIO_meth_new "openssl/bio.h" HAVE_BIO_METH_NEW)
+check_symbol_exists(BIO_set_data "openssl/bio.h" HAVE_BIO_SET_DATA)
+check_symbol_exists(BIO_get_data "openssl/bio.h" HAVE_BIO_GET_DATA)
+check_symbol_exists(BIO_get_shutdown "openssl/bio.h" HAVE_BIO_GET_SHUTDOWN)
+check_symbol_exists(BIO_meth_get_ctrl "openssl/bio.h" HAVE_BIO_METH_GET_CTRL)
+check_symbol_exists(BIO_meth_get_create "openssl/bio.h" HAVE_BIO_METH_GET_CREATE)
+check_symbol_exists(BIO_meth_get_destroy "openssl/bio.h" HAVE_BIO_METH_GET_DESTROY)
 check_symbol_exists(DH_get_2048_256 "openssl/dh.h" TS_USE_GET_DH_2048_256)
 
 # Catch2 for tests
@@ -129,6 +145,22 @@ set(CATCH_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/tests/include)
 include(CTest)
 
 message("Configuring for ${HOST_OS}")
+
+if(HOST_OS STREQUAL "linux")
+    set(CMAKE_THREAD_LIBS_INIT "-lpthread")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread")
+    set(CMAKE_HAVE_THREADS_LIBRARY 1)
+    set(CMAKE_USE_WIN32_THREADS_INIT 0)
+    set(CMAKE_USE_PTHREADS_INIT 1)
+    set(THREADS_PREFER_PTHREAD_FLAG ON)
+    link_libraries(dl)
+endif(HOST_OS STREQUAL "linux")
+
+if (HOST_OS STREQUAL "darwin")
+    set(CMAKE_MACOSX_RPATH 1)
+endif(HOST_OS STREQUAL "darwin")
+
+set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
 
 add_compile_definitions(${HOST_OS} PACKAGE_NAME="ats" PACKAGE_VERSION="${TS_VERSION_STRING}")
 add_compile_options(-Wno-invalid-offsetof)
@@ -141,6 +173,7 @@ include_directories(
 )
 if (OPENSSL_FOUND)
     include_directories(${OPENSSL_INCLUDE_DIR})
+    link_libraries(${OPENSSL_CRYPTO_LIBRARY})
 endif(OPENSSL_FOUND)
 
 add_subdirectory(lib)
@@ -157,6 +190,7 @@ configure_file(include/tscore/ink_config.h.cmake.in include/tscore/ink_config.h)
 configure_file(include/ts/apidefs.h.in include/ts/apidefs.h)
 
 add_subdirectory(src/tscpp/util)
+add_subdirectory(src/tscpp/api)
 add_subdirectory(src/tscore)
 add_subdirectory(src/records)
 add_subdirectory(iocore)
@@ -165,3 +199,55 @@ add_subdirectory(mgmt/utils)
 add_subdirectory(mgmt/config)
 add_subdirectory(mgmt/rpc)
 add_subdirectory(src/traffic_server)
+add_subdirectory(src/traffic_ctl)
+add_subdirectory(src/tests)
+add_subdirectory(plugins)
+add_subdirectory(configs)
+
+add_custom_target(clang-format-install
+        COMMAND ${CMAKE_SOURCE_DIR}/tools/clang-format.sh --install
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        BYPRODUCTS ${CMAKE_SOURCE_DIR}/.git/fmt/.clang-format-installed
+        COMMENT "Installing clang-format"
+        VERBATIM
+        )
+
+function(add_clang_format_target target)
+    add_custom_target(clang-format-${target}
+            ${CMAKE_SOURCE_DIR}/tools/clang-format.sh ${CMAKE_SOURCE_DIR}/${target}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            COMMENT "Checking clang-format for ${target}"
+            VERBATIM
+            )
+    add_dependencies(clang-format-${target} clang-format-install)
+    list(APPEND CLANG_FORMAT_TARGETS clang-format-${target})
+    set(CLANG_FORMAT_TARGETS ${CLANG_FORMAT_TARGETS} PARENT_SCOPE)
+endfunction(add_clang_format_target)
+
+add_clang_format_target(src)
+add_clang_format_target(example)
+add_clang_format_target(iocore)
+add_clang_format_target(include)
+add_clang_format_target(mgmt)
+add_clang_format_target(plugins)
+add_clang_format_target(proxy)
+add_clang_format_target(tools)
+add_clang_format_target(tests)
+
+add_custom_target(clang-format
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "formatting all files"
+        DEPENDS ${CLANG_FORMAT_TARGETS}
+        VERBATIM
+        )
+
+add_custom_target(autopep8 ${CMAKE_SOURCE_DIR}/tools/autopep8.sh ${CMAKE_SOURCE_DIR}
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "formatting python files"
+        VERBATIM
+        )
+
+if(NOT EXISTS ${CMAKE_SOURCE_DIR}/.git/hooks/pre-commit)
+    message("Installing github hook")
+    configure_file(${CMAKE_SOURCE_DIR}/tools/git/pre-commit ${CMAKE_SOURCE_DIR}/.git/hooks/pre-commit COPYONLY)
+endif()

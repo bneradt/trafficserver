@@ -94,24 +94,27 @@ HttpDataFetcherImpl::addFetchRequest(const string &url, FetchedDataProcessor *ca
   char buff[1024];
   char *http_req;
   int length;
+  size_t req_buf_size = 0;
 
   length = sizeof("GET ") - 1 + url.length() + sizeof(" HTTP/1.0\r\n") - 1 + _headers_str.length() + sizeof("\r\n") - 1;
   if (length < static_cast<int>(sizeof(buff))) {
-    http_req = buff;
+    http_req     = buff;
+    req_buf_size = sizeof(buff);
   } else {
-    http_req = static_cast<char *>(malloc(length + 1));
+    req_buf_size = length + 1;
+    http_req     = static_cast<char *>(malloc(req_buf_size));
     if (http_req == nullptr) {
       TSError("[HttpDataFetcherImpl][%s] malloc %d bytes fail", __FUNCTION__, length + 1);
       return false;
     }
   }
 
-  sprintf(http_req, "GET %s HTTP/1.0\r\n%s\r\n", url.c_str(), _headers_str.c_str());
+  snprintf(http_req, req_buf_size, "GET %s HTTP/1.0\r\n%s\r\n", url.c_str(), _headers_str.c_str());
 
   TSFetchEvent event_ids;
-  event_ids.success_event_id = _curr_event_id_base;
-  event_ids.failure_event_id = _curr_event_id_base + 1;
-  event_ids.timeout_event_id = _curr_event_id_base + 2;
+  event_ids.success_event_id  = _curr_event_id_base;
+  event_ids.failure_event_id  = _curr_event_id_base + 1;
+  event_ids.timeout_event_id  = _curr_event_id_base + 2;
   _curr_event_id_base        += 3;
 
   TSFetchUrl(http_req, length, reinterpret_cast<sockaddr *>(&_client_addr), _contp, AFTER_BODY, event_ids);

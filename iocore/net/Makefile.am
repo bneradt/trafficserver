@@ -30,9 +30,10 @@ AM_CPPFLAGS += \
 	-I$(abs_top_srcdir)/mgmt \
 	-I$(abs_top_srcdir)/mgmt/utils \
 	-I$(abs_top_srcdir)/proxy/http \
+	-I$(abs_top_srcdir)/proxy/http/remap \
+	-I$(abs_top_srcdir)/src/traffic_server \
 	$(TS_INCLUDES) \
 	@OPENSSL_INCLUDES@ \
-	@BORINGOCSP_INCLUDES@ \
 	@YAMLCPP_INCLUDES@ \
 	@SWOC_INCLUDES@
 
@@ -164,7 +165,6 @@ libinknet_a_SOURCES = \
 	P_UDPConnection.h \
 	P_UDPIOEvent.h \
 	P_UDPNet.h \
-	P_UDPPacket.h \
 	P_UnixCompletionUtil.h \
 	P_UnixNet.h \
 	P_UnixNetProcessor.h \
@@ -214,7 +214,6 @@ libinknet_a_SOURCES = \
 	SNIActionPerformer.cc
 
 if ENABLE_QUIC
-if USE_QUICHE
 libinknet_a_SOURCES += \
   P_QUICClosedConCollector.h \
   P_QUICPacketHandler.h \
@@ -228,22 +227,6 @@ libinknet_a_SOURCES += \
   QUICNetVConnection_quiche.cc \
   QUICNextProtocolAccept_quiche.cc \
   QUICPacketHandler_quiche.cc
-else
-libinknet_a_SOURCES += \
-  P_QUICClosedConCollector.h \
-  P_QUICPacketHandler.h \
-  P_QUICNet.h \
-  P_QUICNetProcessor.h \
-  P_QUICNetVConnection.h \
-  P_QUICNextProtocolAccept.h \
-  QUICClosedConCollector.cc \
-  QUICPacketHandler.cc \
-  QUICMultiCertConfigLoader.cc \
-  QUICNet.cc \
-  QUICNetProcessor.cc \
-  QUICNetVConnection.cc \
-  QUICNextProtocolAccept.cc
-endif
 endif
 
 if BUILD_TESTS

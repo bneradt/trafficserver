@@ -23,7 +23,10 @@
 
 #pragma once
 
+#include "I_CacheDefs.h"
 #include "P_CacheHttp.h"
+#include "I_EventSystem.h"
+#include "I_Continuation.h"
 
 struct Vol;
 struct InterimCacheVol;
@@ -108,7 +111,6 @@ struct CacheVC;
 #define OPEN_DIR_BUCKETS 256
 
 struct EvacuationBlock;
-typedef uint32_t DirInfo;
 
 // Cache Directory
 
@@ -137,23 +139,6 @@ struct Dir {
 #else
   uint16_t w[5];
   Dir() { dir_clear(this); }
-#endif
-};
-
-// INTERNAL: do not access these members directly, use the
-// accessors below (e.g. dir_offset, dir_set_offset)
-struct FreeDir {
-#if DO_NOT_REMOVE_THIS
-  // THE BIT-FIELD INTERPRETATION OF THIS STRUCT WHICH HAS TO
-  // USE MACROS TO PREVENT UNALIGNED LOADS
-  unsigned int offset      : 24; // 0: empty
-  unsigned int reserved    : 8;
-  unsigned int prev        : 16; // (2)
-  unsigned int next        : 16; // (3)
-  unsigned int offset_high : 16; // 0: empty
-#else
-  uint16_t w[5];
-  FreeDir() { dir_clear(this); }
 #endif
 };
 
@@ -273,41 +258,37 @@ struct CacheSync : public Continuation {
 
 // Global Functions
 
-void vol_init_dir(Vol *d);
+void vol_init_dir(Vol *vol);
 int dir_probe(const CacheKey *, Vol *, Dir *, Dir **);
-int dir_insert(const CacheKey *key, Vol *d, Dir *to_part);
-int dir_overwrite(const CacheKey *key, Vol *d, Dir *to_part, Dir *overwrite, bool must_overwrite = true);
-int dir_delete(const CacheKey *key, Vol *d, Dir *del);
-int dir_lookaside_probe(const CacheKey *key, Vol *d, Dir *result, EvacuationBlock **eblock);
-int dir_lookaside_insert(EvacuationBlock *b, Vol *d, Dir *to);
-int dir_lookaside_fixup(const CacheKey *key, Vol *d);
-void dir_lookaside_cleanup(Vol *d);
-void dir_lookaside_remove(const CacheKey *key, Vol *d);
-void dir_free_entry(Dir *e, int s, Vol *d);
+int dir_insert(const CacheKey *key, Vol *vol, Dir *to_part);
+int dir_overwrite(const CacheKey *key, Vol *vol, Dir *to_part, Dir *overwrite, bool must_overwrite = true);
+int dir_delete(const CacheKey *key, Vol *vol, Dir *del);
+int dir_lookaside_probe(const CacheKey *key, Vol *vol, Dir *result, EvacuationBlock **eblock);
+int dir_lookaside_insert(EvacuationBlock *b, Vol *vol, Dir *to);
+int dir_lookaside_fixup(const CacheKey *key, Vol *vol);
+void dir_lookaside_cleanup(Vol *vol);
+void dir_lookaside_remove(const CacheKey *key, Vol *vol);
+void dir_free_entry(Dir *e, int s, Vol *vol);
 void dir_sync_init();
-int check_dir(Vol *d);
-void dir_clean_vol(Vol *d);
-void dir_clear_range(off_t start, off_t end, Vol *d);
-int dir_segment_accounted(int s, Vol *d, int offby = 0, int *free = nullptr, int *used = nullptr, int *empty = nullptr,
+int check_dir(Vol *vol);
+void dir_clean_vol(Vol *vol);
+void dir_clear_range(off_t start, off_t end, Vol *vol);
+int dir_segment_accounted(int s, Vol *vol, int offby = 0, int *free = nullptr, int *used = nullptr, int *empty = nullptr,
                           int *valid = nullptr, int *agg_valid = nullptr, int *avg_size = nullptr);
-uint64_t dir_entries_used(Vol *d);
+uint64_t dir_entries_used(Vol *vol);
 void sync_cache_dir_on_shutdown();
-
-// Global Data
-
-extern Dir empty_dir;
 
 // Inline Functions
 
 #define dir_in_seg(_s, _i) ((Dir *)(((char *)(_s)) + (SIZEOF_DIR * (_i))))
 
-TS_INLINE bool
+inline bool
 dir_compare_tag(const Dir *e, const CacheKey *key)
 {
   return (dir_tag(e) == DIR_MASK_TAG(key->slice32(2)));
 }
 
-TS_INLINE Dir *
+inline Dir *
 dir_from_offset(int64_t i, Dir *seg)
 {
 #if DIR_DEPTH < 5
@@ -321,14 +302,14 @@ dir_from_offset(int64_t i, Dir *seg)
 #endif
 }
 
-TS_INLINE Dir *
+inline Dir *
 next_dir(Dir *d, Dir *seg)
 {
   int i = dir_next(d);
   return dir_from_offset(i, seg);
 }
 
-TS_INLINE int64_t
+inline int64_t
 dir_to_offset(const Dir *d, const Dir *seg)
 {
 #if DIR_DEPTH < 5
@@ -340,13 +321,13 @@ dir_to_offset(const Dir *d, const Dir *seg)
 #endif
 }
 
-TS_INLINE Dir *
+inline Dir *
 dir_bucket(int64_t b, Dir *seg)
 {
   return dir_in_seg(seg, b * DIR_DEPTH);
 }
 
-TS_INLINE Dir *
+inline Dir *
 dir_bucket_row(Dir *b, int64_t i)
 {
   return dir_in_seg(b, i);

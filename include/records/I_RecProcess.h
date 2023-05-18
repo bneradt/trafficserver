@@ -27,22 +27,12 @@
 #include "I_EventSystem.h"
 
 //-------------------------------------------------------------------------
-// Initialization/Starting
-//-------------------------------------------------------------------------
-int RecProcessInit(Diags *diags = nullptr);
-int RecProcessInitMessage();
-int RecProcessStart();
-
-//-------------------------------------------------------------------------
-// Setters for manipulating internal sleep intervals
-//-------------------------------------------------------------------------
-void RecProcess_set_raw_stat_sync_interval_ms(int ms);
-void RecProcess_set_config_update_interval_ms(int ms);
-void RecProcess_set_remote_sync_interval_ms(int ms);
-
-//-------------------------------------------------------------------------
 // RawStat Registration
 //-------------------------------------------------------------------------
+
+using RecRawStatBlockAllocator = RecRawStatBlock *(*)(int num_stats);
+
+void SetRecAllocateRawStatBlockAllocator(RecRawStatBlockAllocator);
 RecRawStatBlock *RecAllocateRawStatBlock(int num_stats);
 
 int _RecRegisterRawStat(RecRawStatBlock *rsb, RecT rec_type, const char *name, RecDataT data_type, RecPersistT persist_type, int id,
@@ -124,7 +114,7 @@ raw_stat_get_tlp(RecRawStatBlock *rsb, int id, EThread *ethread)
 inline int
 RecIncrRawStat(RecRawStatBlock *rsb, EThread *ethread, int id, int64_t incr)
 {
-  RecRawStat *tlp = raw_stat_get_tlp(rsb, id, ethread);
+  RecRawStat *tlp  = raw_stat_get_tlp(rsb, id, ethread);
   tlp->sum        += incr;
   tlp->count      += 1;
   return REC_ERR_OKAY;
@@ -133,7 +123,7 @@ RecIncrRawStat(RecRawStatBlock *rsb, EThread *ethread, int id, int64_t incr)
 inline int
 RecDecrRawStat(RecRawStatBlock *rsb, EThread *ethread, int id, int64_t decr)
 {
-  RecRawStat *tlp = raw_stat_get_tlp(rsb, id, ethread);
+  RecRawStat *tlp  = raw_stat_get_tlp(rsb, id, ethread);
   tlp->sum        -= decr;
   tlp->count      += 1;
   return REC_ERR_OKAY;
@@ -142,7 +132,7 @@ RecDecrRawStat(RecRawStatBlock *rsb, EThread *ethread, int id, int64_t decr)
 inline int
 RecIncrRawStatSum(RecRawStatBlock *rsb, EThread *ethread, int id, int64_t incr)
 {
-  RecRawStat *tlp = raw_stat_get_tlp(rsb, id, ethread);
+  RecRawStat *tlp  = raw_stat_get_tlp(rsb, id, ethread);
   tlp->sum        += incr;
   return REC_ERR_OKAY;
 }
@@ -150,7 +140,7 @@ RecIncrRawStatSum(RecRawStatBlock *rsb, EThread *ethread, int id, int64_t incr)
 inline int
 RecIncrRawStatCount(RecRawStatBlock *rsb, EThread *ethread, int id, int64_t incr)
 {
-  RecRawStat *tlp = raw_stat_get_tlp(rsb, id, ethread);
+  RecRawStat *tlp  = raw_stat_get_tlp(rsb, id, ethread);
   tlp->count      += incr;
   return REC_ERR_OKAY;
 }

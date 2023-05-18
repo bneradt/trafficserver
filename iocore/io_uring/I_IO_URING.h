@@ -25,9 +25,10 @@ Linux io_uring helper library
 
 #include <liburing.h>
 #include <utility>
+#include "tscore/ink_hrtime.h"
 
 struct IOUringConfig {
-  int queue_entries = 1024;
+  int queue_entries = 32;
   int sq_poll_ms    = 0;
   int attach_wq     = 0;
   int wq_bounded    = 0;
@@ -58,12 +59,14 @@ public:
     return result;
   }
 
+  bool supports_op(int op) const;
+
   int set_wq_max_workers(unsigned int bounded, unsigned int unbounded);
   std::pair<int, int> get_wq_max_workers();
 
   void submit();
   void service();
-  void submit_and_wait(int ms);
+  void submit_and_wait(ink_hrtime ms);
 
   int register_eventfd();
 
@@ -74,8 +77,9 @@ public:
   static int get_main_queue_fd();
 
 private:
-  io_uring ring = {};
-  int evfd      = -1;
+  io_uring ring         = {};
+  io_uring_probe *probe = nullptr;
+  int evfd              = -1;
 
   void handle_cqe(io_uring_cqe *);
   static IOUringConfig config;

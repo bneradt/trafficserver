@@ -87,7 +87,7 @@ Http2ConnectionState::rcv_data_frame(const Http2Frame &frame)
   uint8_t pad_length            = 0;
   const uint32_t payload_length = frame.header().length;
 
-  Http2StreamDebug(this->session, id, "Received DATA frame");
+  Http2StreamDebug(this->session, id, "Received DATA frame, flags: %d", frame.header().flags);
 
   // Update connection window size, before any stream specific handling
   this->decrement_local_rwnd(payload_length);
@@ -161,7 +161,7 @@ Http2ConnectionState::rcv_data_frame(const Http2Frame &frame)
 
     // Pure END_STREAM
     if (payload_length == 0) {
-      if (stream->read_enabled()) {
+      if (stream->is_read_enabled()) {
         stream->signal_read_event(VC_EVENT_READ_COMPLETE);
       }
       return Http2Error(Http2ErrorClass::HTTP2_ERROR_CLASS_NONE);
@@ -224,16 +224,16 @@ Http2ConnectionState::rcv_data_frame(const Http2Frame &frame)
       return Http2Error(Http2ErrorClass::HTTP2_ERROR_CLASS_STREAM, Http2ErrorCode::HTTP2_ERROR_INTERNAL_ERROR, "Write mismatch");
     }
     myreader->consume(num_written);
-    stream->read_update(num_written);
+    stream->update_read_length(num_written);
   }
   myreader->writer()->dealloc_reader(myreader);
 
   if (frame.header().flags & HTTP2_FLAGS_DATA_END_STREAM) {
     // TODO: set total written size to read_vio.nbytes
-    stream->read_done();
+    stream->set_read_done();
   }
 
-  if (stream->read_enabled()) {
+  if (stream->is_read_enabled()) {
     if (frame.header().flags & HTTP2_FLAGS_DATA_END_STREAM) {
       if (this->get_peer_stream_count() > 1 && this->get_local_rwnd() == 0) {
         // This final DATA frame for this stream consumed all the bytes for the
@@ -992,7 +992,7 @@ Http2ConnectionState::rcv_continuation_frame(const Http2Frame &frame)
     }
   }
 
-  uint32_t header_blocks_offset = stream->header_blocks_length;
+  uint32_t header_blocks_offset  = stream->header_blocks_length;
   stream->header_blocks_length  += payload_length;
 
   // ATS advertises SETTINGS_MAX_HEADER_LIST_SIZE as a limit of total header blocks length. (Details in [RFC 7560] 10.5.1.)
@@ -1698,17 +1698,6 @@ Http2ConnectionState::find_stream(Http2StreamId id) const
 }
 
 void
-Http2ConnectionState::start_streams()
-{
-  Http2Stream *s = stream_list.head;
-  while (s) {
-    Http2Stream *next = static_cast<Http2Stream *>(s->link.next);
-    s->reenable_write();
-    s = next;
-  }
-}
-
-void
 Http2ConnectionState::restart_streams()
 {
   Http2Stream *s = stream_list.head;
@@ -2103,7 +2092,7 @@ Http2ConnectionState::send_a_data_frame(Http2Stream *stream, size_t &payload_len
                    _peer_rwnd, stream->get_peer_rwnd(), payload_length, flags);
 
   Http2DataFrame data(stream->get_id(), flags, resp_reader, payload_length);
-  this->session->xmit(data);
+  this->session->xmit(data, stream->is_tunneling() || flags & HTTP2_FLAGS_DATA_END_STREAM);
 
   if (flags & HTTP2_FLAGS_DATA_END_STREAM) {
     Http2StreamDebug(session, stream->get_id(), "END_STREAM");
@@ -2200,7 +2189,7 @@ Http2ConnectionState::send_headers_frame(Http2Stream *stream)
 
   // Send a HEADERS frame
   if (header_blocks_size <= static_cast<uint32_t>(BUFFER_SIZE_FOR_INDEX(buffer_size_index[HTTP2_FRAME_TYPE_HEADERS]))) {
-    payload_length = header_blocks_size;
+    payload_length  = header_blocks_size;
     flags          |= HTTP2_FLAGS_HEADERS_END_HEADERS;
     if (stream->is_outbound_connection()) { // Will be sending a request_header
       int method = send_hdr->method_get_wksidx();
@@ -2224,14 +2213,14 @@ Http2ConnectionState::send_headers_frame(Http2Stream *stream)
         // TODO deal with the chunked encoding case
         Http2StreamDebug(session, stream->get_id(), "request END_STREAM");
         flags                   |= HTTP2_FLAGS_HEADERS_END_STREAM;
-        stream->send_end_stream = true;
+        stream->send_end_stream  = true;
       }
     } else {
       if ((send_hdr->presence(MIME_PRESENCE_CONTENT_LENGTH) && send_hdr->get_content_length() == 0) ||
           (!send_hdr->expect_final_response() && stream->is_write_vio_done())) {
         Http2StreamDebug(session, stream->get_id(), "response END_STREAM");
         flags                   |= HTTP2_FLAGS_HEADERS_END_STREAM;
-        stream->send_end_stream = true;
+        stream->send_end_stream  = true;
       }
     }
     stream->mark_milestone(Http2StreamMilestone::START_TX_HEADERS_FRAMES);
@@ -2321,7 +2310,7 @@ Http2ConnectionState::send_push_promise_frame(Http2Stream *stream, URL &url, con
   Http2PushPromise push_promise;
   if (header_blocks_size <=
       BUFFER_SIZE_FOR_INDEX(buffer_size_index[HTTP2_FRAME_TYPE_PUSH_PROMISE]) - sizeof(push_promise.promised_streamid)) {
-    payload_length = header_blocks_size;
+    payload_length  = header_blocks_size;
     flags          |= HTTP2_FLAGS_PUSH_PROMISE_END_HEADERS;
   } else {
     payload_length =
@@ -2648,13 +2637,12 @@ Http2ConnectionState::increment_peer_rwnd(size_t amount)
   this->_recent_rwnd_increment[this->_recent_rwnd_increment_index] = amount;
   ++this->_recent_rwnd_increment_index;
   this->_recent_rwnd_increment_index %= this->_recent_rwnd_increment.size();
-  // SKH Causing problems with gRPC processing.  Python example resulted in amount 8
-  // double sum = std::accumulate(this->_recent_rwnd_increment.begin(), this->_recent_rwnd_increment.end(), 0.0);
-  // double avg = sum / this->_recent_rwnd_increment.size();
-  // if (avg < Http2::min_avg_window_update) {
-  //  HTTP2_INCREMENT_THREAD_DYN_STAT(HTTP2_STAT_INSUFFICIENT_AVG_WINDOW_UPDATE, this_ethread());
-  //  return Http2ErrorCode::HTTP2_ERROR_ENHANCE_YOUR_CALM;
-  //}
+  double sum = std::accumulate(this->_recent_rwnd_increment.begin(), this->_recent_rwnd_increment.end(), 0.0);
+  double avg = sum / this->_recent_rwnd_increment.size();
+  if (avg < Http2::min_avg_window_update) {
+    HTTP2_INCREMENT_THREAD_DYN_STAT(HTTP2_STAT_INSUFFICIENT_AVG_WINDOW_UPDATE, this_ethread());
+    return Http2ErrorCode::HTTP2_ERROR_ENHANCE_YOUR_CALM;
+  }
   return Http2ErrorCode::HTTP2_ERROR_NO_ERROR;
 }
 

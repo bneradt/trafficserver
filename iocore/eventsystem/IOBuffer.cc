@@ -79,22 +79,23 @@ init_buffer_allocators(int iobuffer_advice)
 auto
 make_buffer_size_parser()
 {
-  return [l = swoc::Lexicon<int>{
-            {{0, {"128"}},
-             {1, {"256"}},
-             {2, {"512"}},
-             {3, {"1k", "1024"}},
-             {4, {"2k", "2048"}},
-             {5, {"4k", "4096"}},
-             {6, {"8k", "8192"}},
-             {7, {"16k"}},
-             {8, {"32k"}},
-             {9, {"64k"}},
-             {10, {"128k"}},
-             {11, {"256k"}},
-             {12, {"512k"}},
-             {13, {"1M", "1024k"}},
-             {14, {"2M", "2048k"}}},
+  using L = swoc::Lexicon<int>;
+  return [l = L{
+            L::with_multi{{0, {"128"}},
+                          {1, {"256"}},
+                          {2, {"512"}},
+                          {3, {"1k", "1024"}},
+                          {4, {"2k", "2048"}},
+                          {5, {"4k", "4096"}},
+                          {6, {"8k", "8192"}},
+                          {7, {"16k"}},
+                          {8, {"32k"}},
+                          {9, {"64k"}},
+                          {10, {"128k"}},
+                          {11, {"256k"}},
+                          {12, {"512k"}},
+                          {13, {"1M", "1024k"}},
+                          {14, {"2M", "2048k"}}},
             -1
   }](swoc::TextView esize) -> std::optional<int> {
     int result = l[esize];
@@ -199,7 +200,7 @@ MIOBuffer::write(IOBufferBlock const *b, int64_t alen, int64_t offset)
   int64_t len = alen;
 
   while (b && len > 0) {
-    int64_t max_bytes = b->read_avail();
+    int64_t max_bytes  = b->read_avail();
     max_bytes         -= offset;
     if (max_bytes <= 0) {
       offset = -max_bytes;
@@ -212,13 +213,13 @@ MIOBuffer::write(IOBufferBlock const *b, int64_t alen, int64_t offset)
     } else {
       bytes = len;
     }
-    IOBufferBlock *bb = b->clone();
+    IOBufferBlock *bb  = b->clone();
     bb->_start        += offset;
     bb->_buf_end = bb->_end = bb->_start + bytes;
     append_block(bb);
-    offset = 0;
+    offset  = 0;
     len    -= bytes;
-    b      = b->next.get();
+    b       = b->next.get();
   }
 
   return alen - len;
@@ -264,7 +265,7 @@ IOBufferReader::read(void *ab, int64_t len)
     b     += l;
     n     -= l;
     bytes += l;
-    l     = block_read_avail();
+    l      = block_read_avail();
   }
   return bytes;
 }
@@ -273,12 +274,12 @@ IOBufferReader::read(void *ab, int64_t len)
 int64_t
 IOBufferReader::memchr(char c, int64_t len, int64_t offset)
 {
-  IOBufferBlock *b = block.get();
+  IOBufferBlock *b  = block.get();
   offset           += start_offset;
-  int64_t o        = offset;
+  int64_t o         = offset;
 
   while (b && len) {
-    int64_t max_bytes = b->read_avail();
+    int64_t max_bytes  = b->read_avail();
     max_bytes         -= offset;
     if (max_bytes <= 0) {
       offset = -max_bytes;
@@ -298,8 +299,8 @@ IOBufferReader::memchr(char c, int64_t len, int64_t offset)
     }
     o      += bytes;
     len    -= bytes;
-    b      = b->next.get();
-    offset = 0;
+    b       = b->next.get();
+    offset  = 0;
   }
 
   return -1;
@@ -308,12 +309,12 @@ IOBufferReader::memchr(char c, int64_t len, int64_t offset)
 char *
 IOBufferReader::memcpy(void *ap, int64_t len, int64_t offset)
 {
-  char *p          = static_cast<char *>(ap);
-  IOBufferBlock *b = block.get();
+  char *p           = static_cast<char *>(ap);
+  IOBufferBlock *b  = block.get();
   offset           += start_offset;
 
   while (b && len) {
-    int64_t max_bytes = b->read_avail();
+    int64_t max_bytes  = b->read_avail();
     max_bytes         -= offset;
     if (max_bytes <= 0) {
       offset = -max_bytes;
@@ -329,8 +330,8 @@ IOBufferReader::memcpy(void *ap, int64_t len, int64_t offset)
     ::memcpy(p, b->start() + offset, bytes);
     p      += bytes;
     len    -= bytes;
-    b      = b->next.get();
-    offset = 0;
+    b       = b->next.get();
+    offset  = 0;
   }
 
   return p;
@@ -354,7 +355,7 @@ IOBufferChain::write(IOBufferBlock *blocks, int64_t length, int64_t offset)
       if (offset) {
         bb->consume(offset);
         block_bytes -= offset; // bytes really available to use.
-        offset      = 0;
+        offset       = 0;
       }
       if (block_bytes > n) {
         bb->_end -= (block_bytes - n);
@@ -384,7 +385,7 @@ IOBufferChain::write(IOBufferData *data, int64_t length, int64_t offset)
   b->set(data, length, offset);
   this->append(b);
 
-  zret = b->read_avail();
+  zret  = b->read_avail();
   _len += zret;
   return zret;
 }
@@ -410,13 +411,13 @@ IOBufferChain::consume(int64_t size)
 
   while (_head != nullptr && size > 0 && (bytes = _head->read_avail()) > 0) {
     if (size >= bytes) {
-      _head = _head->next;
+      _head  = _head->next;
       zret  += bytes;
       size  -= bytes;
     } else {
       _head->consume(size);
       zret += size;
-      size = 0;
+      size  = 0;
     }
   }
   _len -= zret;

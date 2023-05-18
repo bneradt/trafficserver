@@ -357,7 +357,7 @@ System Variables
 Thread Variables
 ----------------
 
-.. ts:cv:: CONFIG proxy.config.exec_thread.autoconfig INT 1
+.. ts:cv:: CONFIG proxy.config.exec_thread.autoconfig.enabled INT 1
 
    When enabled (the default, ``1``), |TS| scales threads according to the
    available CPU cores. See the config option below.
@@ -370,7 +370,7 @@ Thread Variables
 
 .. ts:cv:: CONFIG proxy.config.exec_thread.limit INT 2
 
-   The number of threads |TS| will create if `proxy.config.exec_thread.autoconfig`
+   The number of threads |TS| will create if `proxy.config.exec_thread.autoconfig.enabled`
    is set to ``0``, otherwise this option is ignored.
 
 .. ts:cv:: CONFIG proxy.config.exec_thread.listen INT 0
@@ -525,6 +525,9 @@ Network
    the ones matching that ``remap.config`` rule.
 
    See :ref:`admin-performance-timeouts` for more discussion on |TS| timeouts.
+
+   Note that for QUIC this will be ignored and ``proxy.config.quic.no_activity_timeout_in``
+   should be used instead.
 
 .. ts:cv:: CONFIG proxy.config.net.inactivity_check_frequency INT 1
 
@@ -3580,11 +3583,45 @@ SSL Termination
 
    This configuration works with OpenSSL v1.0.2 and above.
 
+.. ts:cv:: CONFIG proxy.config.ssl.server.version.min INT -1
+
+   Specifies the minimum TLS version that will be offered to clients during the TLS negotiation.
+
+   ======== ===================================================================
+   Value    Version
+   ======== ===================================================================
+   ``0``    TLS 1.0
+   ``1``    TLS 1.1
+   ``2``    TLS 1.2
+   ``3``    TLS 1.3
+   ======== ===================================================================
+
+.. ts:cv:: CONFIG proxy.config.ssl.server.version.max INT -1
+
+   Specifies the maximum TLS version that will be offered to clients during the TLS negotiation.
+
+   ======== ===================================================================
+   Value    Version
+   ======== ===================================================================
+   ``0``    TLS 1.0
+   ``1``    TLS 1.1
+   ``2``    TLS 1.2
+   ``3``    TLS 1.3
+   ======== ===================================================================
+
 .. ts:cv:: CONFIG proxy.config.ssl.TLSv1 INT 0
+   :deprecated:
+
+   This setting is deprecated in favor of :ts:cv:`proxy.config.ssl.server.version.min` and
+   :ts:cv:`proxy.config.ssl.server.version.min`, and will be ignored if those new settings are used.
 
    Enables (``1``) or disables (``0``) TLSv1.0. If not specified, disabled by default.
 
 .. ts:cv:: CONFIG proxy.config.ssl.TLSv1_1 INT 0
+   :deprecated:
+
+   This setting is deprecated in favor of :ts:cv:`proxy.config.ssl.server.version.min` and
+   :ts:cv:`proxy.config.ssl.server.version.min`, and will be ignored if those new settings are used.
 
    Enables (``1``) or disables (``0``) TLS v1.1.  If not specified, disabled by default.  [Requires OpenSSL v1.0.1 and higher]
 
@@ -3596,10 +3633,18 @@ SSL Termination
 
 
 .. ts:cv:: CONFIG proxy.config.ssl.TLSv1_2 INT 1
+   :deprecated:
+
+   This setting is deprecated in favor of :ts:cv:`proxy.config.ssl.server.version.min` and
+   :ts:cv:`proxy.config.ssl.server.version.min`, and will be ignored if those new settings are used.
 
    Enables (``1``) or disables (``0``) TLS v1.2.  If not specified, enabled by default.  [Requires OpenSSL v1.0.1 and higher]
 
 .. ts:cv:: CONFIG proxy.config.ssl.TLSv1_3 INT 1
+   :deprecated:
+
+   This setting is deprecated in favor of :ts:cv:`proxy.config.ssl.server.version.min` and
+   :ts:cv:`proxy.config.ssl.server.version.min`, and will be ignored if those new settings are used.
 
    Enables (``1``) or disables (``0``) TLS v1.3.  If not specified, enabled by default.  [Requires OpenSSL v1.1.1 and higher]
 
@@ -4005,19 +4050,61 @@ Client-Related Configuration
          warning and return an immediate HTTP 400 response.
    ===== ======================================================================
 
+.. ts:cv:: CONFIG proxy.config.ssl.client.version.min INT -1
+
+   Specifies the minimum TLS version that will be offered to servers during the TLS negotiation.
+
+   ======== ===================================================================
+   Value    Version
+   ======== ===================================================================
+   ``0``    TLS 1.0
+   ``1``    TLS 1.1
+   ``2``    TLS 1.2
+   ``3``    TLS 1.3
+   ======== ===================================================================
+
+.. ts:cv:: CONFIG proxy.config.ssl.client.version.max INT -1
+
+   Specifies the maximum TLS version that will be offered to servers during the TLS negotiation.
+
+   ======== ===================================================================
+   Value    Version
+   ======== ===================================================================
+   ``0``    TLS 1.0
+   ``1``    TLS 1.1
+   ``2``    TLS 1.2
+   ``3``    TLS 1.3
+   ======== ===================================================================
+
 .. ts:cv:: CONFIG proxy.config.ssl.client.TLSv1 INT 0
+   :deprecated:
+
+   This setting is deprecated in favor of :ts:cv:`proxy.config.ssl.client.version.min` and
+   :ts:cv:`proxy.config.ssl.client.version.min`, and will be ignored if those new settings are used.
 
    Enables (``1``) or disables (``0``) TLSv1.0 in the ATS client context. If not specified, enabled by default
 
 .. ts:cv:: CONFIG proxy.config.ssl.client.TLSv1_1 INT 0
+   :deprecated:
+
+   This setting is deprecated in favor of :ts:cv:`proxy.config.ssl.client.version.min` and
+   :ts:cv:`proxy.config.ssl.client.version.min`, and will be ignored if those new settings are used.
 
    Enables (``1``) or disables (``0``) TLSv1_1 in the ATS client context. If not specified, enabled by default
 
 .. ts:cv:: CONFIG proxy.config.ssl.client.TLSv1_2 INT 1
+   :deprecated:
+
+   This setting is deprecated in favor of :ts:cv:`proxy.config.ssl.client.version.min` and
+   :ts:cv:`proxy.config.ssl.client.version.min`, and will be ignored if those new settings are used.
 
    Enables (``1``) or disables (``0``) TLSv1_2 in the ATS client context. If not specified, enabled by default
 
 .. ts:cv:: CONFIG proxy.config.ssl.client.TLSv1_3 INT 1
+   :deprecated:
+
+   This setting is deprecated in favor of :ts:cv:`proxy.config.ssl.client.version.min` and
+   :ts:cv:`proxy.config.ssl.client.version.min`, and will be ignored if those new settings are used.
 
    Enables (``1``) or disables (``0``) TLSv1_3 in the ATS client context. If not specified, enabled by default
 
@@ -4551,6 +4638,11 @@ removed in the future without prior notice.
    This value will be advertised as ``idle_timeout`` Transport Parameter.
    Transport Parameter.
 
+   .. important::
+
+      QUIC ignores any settings for ``proxy.config.net.default_inactivity_timeout`` and only
+      honors the ``proxy.config.quic.no_activity_timeout_in``.
+
 .. ts:cv:: CONFIG proxy.config.quic.no_activity_timeout_out INT 30000
    :reloadable:
 
@@ -5019,12 +5111,20 @@ Sockets
 
    Make sure accept threads are enabled
 
-   The relevant configurations for this are::
+   The relevant configurations for this are
 
-       CONFIG proxy.config.exec_thread.autoconfig INT 0
-       CONFIG proxy.config.exec_thread.limit INT 2
-       CONFIG proxy.config.accept_threads INT 1
-       CONFIG proxy.config.cache.threads_per_disk INT 8
+   .. code-block:: yaml
+      :linenos:
+
+      ts:
+        exec_thread:
+          autoconfig:
+            enabled: 0
+          limit: 2
+        accept_threads: 1
+        cache:
+          threads_per_disk: 8
+
 
    See :ref:`admin-performance-timeouts` for more discussion on |TS| timeouts.
 
@@ -5180,3 +5280,45 @@ Sockets
 
 .. _Traffic Shaping:
                  https://cwiki.apache.org/confluence/display/TS/Traffic+Shaping
+
+IO_URING
+========
+
+.. ts:cv:: CONFIG proxy.config.io_uring.entries INT 32
+
+   Specify the number of entries in each io_uring.  There will be on io_uring instance per thread that uses io_uring
+   for IO.  This parameter is passed to io_uring_queue_init.
+
+.. ts:cv:: CONFIG proxy.config.io_uring.sq_poll_ms INT 0
+
+   If this value is >0 then use submit queue polling mode.  The value will be used to specifiy the sq_thread_idle parameter
+   to io_uring setup. More information about submit queue polling mode can be found here: https://unixism.net/loti/tutorial/sq_poll.html
+
+.. ts:cv:: CONFIG proxy.config.io_uring.attach_wq INT 0
+
+   Set this to 1 if you want io_uring to re-use the same worker queue backend for each thread.
+
+.. ts:cv:: CONFIG proxy.config.io_uring.wq_workers_bounded INT 0
+.. ts:cv:: CONFIG proxy.config.io_uring.wq_workers_unbounded INT 0
+
+   These settings configured the number of threads for the io_uring worker queue backend.  See the manpage for
+   io_uring_register_iowq_max_workers for more information.
+
+AIO
+===
+
+.. ts:cv:: CONFIG proxy.config.aio.mode STRING auto
+
+   (Only if io_uring is enabled in the build)
+   Normally, ATS will detect if io_uring can be used for async disk IO.  Using this config item, the AIO mode
+   can instead be specified.  The value can be one of:
+
+   ============ ======================================================================
+   Value        Description
+   ============ ======================================================================
+   ``auto``     Use the default detection logic
+   ``thread``   Use the AIO thread pool for disk IO
+   ``io_uring`` Use io_uring for disk IO
+   ============ ======================================================================
+
+   Note: If you force the backend to use io_uring, you might experience failures with some (older, pre 5.4) kernel versions

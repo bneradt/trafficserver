@@ -26,10 +26,18 @@
 #define SCAN_BUF_SIZE              RECOVERY_SIZE
 #define SCAN_WRITER_LOCK_MAX_RETRY 5
 
+namespace
+{
+
+DbgCtl dbg_ctl_cache_scan{"cache_scan"};
+DbgCtl dbg_ctl_cache_scan_truss{"cache_scan_truss"};
+
+} // end anonymous namespace
+
 Action *
 Cache::scan(Continuation *cont, const char *hostname, int host_len, int KB_per_second)
 {
-  Debug("cache_scan_truss", "inside scan");
+  Dbg(dbg_ctl_cache_scan_truss, "inside scan");
   if (!CacheProcessor::IsCacheReady(CACHE_FRAG_TYPE_HTTP)) {
     cont->handleEvent(CACHE_EVENT_SCAN_FAILED, nullptr);
     return ACTION_RESULT_DONE;
@@ -53,7 +61,7 @@ Cache::scan(Continuation *cont, const char *hostname, int host_len, int KB_per_s
 int
 CacheVC::scanVol(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
 {
-  Debug("cache_scan_truss", "inside %p:scanVol", this);
+  Dbg(dbg_ctl_cache_scan_truss, "inside %p:scanVol", this);
   if (_action.cancelled) {
     return free_CacheVC(this);
   }
@@ -100,11 +108,11 @@ Ldone:
  * vol_map - precalculated map
  * offset - offset to start looking at (and data at this location has not been read yet). */
 static off_t
-next_in_map(Vol *d, char *vol_map, off_t offset)
+next_in_map(Vol *vol, char *vol_map, off_t offset)
 {
-  off_t start_offset = d->vol_offset_to_offset(0);
+  off_t start_offset = vol->vol_offset_to_offset(0);
   off_t new_off      = (offset - start_offset);
-  off_t vol_len      = d->vol_relative_length(start_offset);
+  off_t vol_len      = vol->vol_relative_length(start_offset);
 
   while (new_off < vol_len && !vol_map[new_off / SCAN_BUF_SIZE]) {
     new_off += SCAN_BUF_SIZE;
@@ -116,7 +124,7 @@ next_in_map(Vol *d, char *vol_map, off_t offset)
 }
 
 // Function in CacheDir.cc that we need for make_vol_map().
-int dir_bucket_loop_fix(Dir *start_dir, int s, Vol *d);
+int dir_bucket_loop_fix(Dir *start_dir, int s, Vol *vol);
 
 // TODO: If we used a bit vector, we could make a smaller map structure.
 // TODO: If we saved a high water mark we could have a smaller buf, and avoid searching it
@@ -125,11 +133,11 @@ int dir_bucket_loop_fix(Dir *start_dir, int s, Vol *d);
  *
  * d - Vol to make a map of. */
 static char *
-make_vol_map(Vol *d)
+make_vol_map(Vol *vol)
 {
   // Map will be one byte for each SCAN_BUF_SIZE bytes.
-  off_t start_offset = d->vol_offset_to_offset(0);
-  off_t vol_len      = d->vol_relative_length(start_offset);
+  off_t start_offset = vol->vol_offset_to_offset(0);
+  off_t vol_len      = vol->vol_relative_length(start_offset);
   size_t map_len     = (vol_len + (SCAN_BUF_SIZE - 1)) / SCAN_BUF_SIZE;
   char *vol_map      = static_cast<char *>(ats_malloc(map_len));
 
@@ -137,16 +145,16 @@ make_vol_map(Vol *d)
 
   // Scan directories.
   // Copied from dir_entries_used() and modified to fill in the map instead.
-  for (int s = 0; s < d->segments; s++) {
-    Dir *seg = d->dir_segment(s);
-    for (int b = 0; b < d->buckets; b++) {
+  for (int s = 0; s < vol->segments; s++) {
+    Dir *seg = vol->dir_segment(s);
+    for (int b = 0; b < vol->buckets; b++) {
       Dir *e = dir_bucket(b, seg);
-      if (dir_bucket_loop_fix(e, s, d)) {
+      if (dir_bucket_loop_fix(e, s, vol)) {
         break;
       }
       while (e) {
-        if (dir_offset(e) && dir_valid(d, e) && dir_agg_valid(d, e) && dir_head(e)) {
-          off_t offset = d->vol_offset(e) - start_offset;
+        if (dir_offset(e) && dir_valid(vol, e) && dir_agg_valid(vol, e) && dir_head(e)) {
+          off_t offset = vol->vol_offset(e) - start_offset;
           if (offset <= vol_len) {
             vol_map[offset / SCAN_BUF_SIZE] = 1;
           }
@@ -164,7 +172,7 @@ make_vol_map(Vol *d)
 int
 CacheVC::scanObject(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
 {
-  Debug("cache_scan_truss", "inside %p:scanObject", this);
+  Dbg(dbg_ctl_cache_scan_truss, "inside %p:scanObject", this);
 
   Doc *doc     = nullptr;
   void *result = nullptr;
@@ -182,7 +190,7 @@ CacheVC::scanObject(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
 
   CACHE_TRY_LOCK(lock, vol->mutex, mutex->thread_holding);
   if (!lock.is_locked()) {
-    Debug("cache_scan_truss", "delay %p:scanObject", this);
+    Dbg(dbg_ctl_cache_scan_truss, "delay %p:scanObject", this);
     mutex->thread_holding->schedule_in_local(this, HRTIME_MSECONDS(cache_config_mutex_retry_delay));
     return EVENT_CONT;
   }
@@ -198,7 +206,7 @@ CacheVC::scanObject(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
     io.aiocb.aio_buf    = buf->data();
     io.action           = this;
     io.thread           = AIO_CALLBACK_THREAD_ANY;
-    Debug("cache_scan_truss", "read %p:scanObject", this);
+    Dbg(dbg_ctl_cache_scan_truss, "read %p:scanObject", this);
     goto Lread;
   }
 
@@ -214,8 +222,8 @@ CacheVC::scanObject(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
     io.aio_result          += scan_fix_buffer_offset;
     io.aiocb.aio_nbytes    += scan_fix_buffer_offset;
     io.aiocb.aio_offset    -= scan_fix_buffer_offset;
-    io.aiocb.aio_buf       = static_cast<char *>(io.aiocb.aio_buf) - scan_fix_buffer_offset;
-    scan_fix_buffer_offset = 0;
+    io.aiocb.aio_buf        = static_cast<char *>(io.aiocb.aio_buf) - scan_fix_buffer_offset;
+    scan_fix_buffer_offset  = 0;
   }
   while (static_cast<off_t>(reinterpret_cast<char *>(doc) - buf->data()) + next_object_len <
          static_cast<off_t>(io.aiocb.aio_nbytes)) {
@@ -227,7 +235,7 @@ CacheVC::scanObject(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
 
     if (doc->magic != DOC_MAGIC) {
       next_object_len = CACHE_BLOCK_SIZE;
-      Debug("cache_scan_truss", "blockskip %p:scanObject", this);
+      Dbg(dbg_ctl_cache_scan_truss, "blockskip %p:scanObject", this);
       continue;
     }
 
@@ -275,7 +283,7 @@ CacheVC::scanObject(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
       if (!hostinfo_copied) {
         memccpy(hname, vector.get(i)->request_get()->host_get(&hlen), 0, 500);
         hname[hlen] = 0;
-        Debug("cache_scan", "hostname = '%s', hostlen = %d", hname, hlen);
+        Dbg(dbg_ctl_cache_scan, "hostname = '%s', hostlen = %d", hname, hlen);
         hostinfo_copied = true;
       }
       vector.get(i)->object_key_get(&key);
@@ -352,14 +360,14 @@ CacheVC::scanObject(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
     // Copy partial object to beginning of the buffer.
     memmove(buf->data(), reinterpret_cast<char *>(doc), partial_object_len);
     io.aiocb.aio_offset    += io.aiocb.aio_nbytes;
-    io.aiocb.aio_nbytes    = SCAN_BUF_SIZE - partial_object_len;
-    io.aiocb.aio_buf       = buf->data() + partial_object_len;
-    scan_fix_buffer_offset = partial_object_len;
+    io.aiocb.aio_nbytes     = SCAN_BUF_SIZE - partial_object_len;
+    io.aiocb.aio_buf        = buf->data() + partial_object_len;
+    scan_fix_buffer_offset  = partial_object_len;
   } else { // Normal case, where we ended on a object boundary.
     io.aiocb.aio_offset += (reinterpret_cast<char *>(doc) - buf->data()) + next_object_len;
-    Debug("cache_scan_truss", "next %p:scanObject %" PRId64, this, (int64_t)io.aiocb.aio_offset);
+    Dbg(dbg_ctl_cache_scan_truss, "next %p:scanObject %" PRId64, this, (int64_t)io.aiocb.aio_offset);
     io.aiocb.aio_offset = next_in_map(vol, scan_vol_map, io.aiocb.aio_offset);
-    Debug("cache_scan_truss", "next_in_map %p:scanObject %" PRId64, this, (int64_t)io.aiocb.aio_offset);
+    Dbg(dbg_ctl_cache_scan_truss, "next_in_map %p:scanObject %" PRId64, this, (int64_t)io.aiocb.aio_offset);
     io.aiocb.aio_nbytes    = SCAN_BUF_SIZE;
     io.aiocb.aio_buf       = buf->data();
     scan_fix_buffer_offset = 0;
@@ -379,11 +387,12 @@ Lread:
   }
   offset = 0;
   ink_assert(ink_aio_read(&io) >= 0);
-  Debug("cache_scan_truss", "read %p:scanObject %" PRId64 " %zu", this, (int64_t)io.aiocb.aio_offset, (size_t)io.aiocb.aio_nbytes);
+  Dbg(dbg_ctl_cache_scan_truss, "read %p:scanObject %" PRId64 " %zu", this, (int64_t)io.aiocb.aio_offset,
+      (size_t)io.aiocb.aio_nbytes);
   return EVENT_CONT;
 
 Ldone:
-  Debug("cache_scan_truss", "done %p:scanObject", this);
+  Dbg(dbg_ctl_cache_scan_truss, "done %p:scanObject", this);
   _action.continuation->handleEvent(CACHE_EVENT_SCAN_DONE, result);
 Lcancel:
   return free_CacheVC(this);
@@ -392,8 +401,8 @@ Lcancel:
 int
 CacheVC::scanRemoveDone(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
 {
-  Debug("cache_scan_truss", "inside %p:scanRemoveDone", this);
-  Debug("cache_scan", "remove done.");
+  Dbg(dbg_ctl_cache_scan_truss, "inside %p:scanRemoveDone", this);
+  Dbg(dbg_ctl_cache_scan, "remove done.");
   alternate.destroy();
   SET_HANDLER(&CacheVC::scanObject);
   return handleEvent(EVENT_IMMEDIATE, nullptr);
@@ -402,12 +411,12 @@ CacheVC::scanRemoveDone(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
 int
 CacheVC::scanOpenWrite(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
 {
-  Debug("cache_scan_truss", "inside %p:scanOpenWrite", this);
+  Dbg(dbg_ctl_cache_scan_truss, "inside %p:scanOpenWrite", this);
   cancel_trigger();
   // get volume lock
   if (writer_lock_retry > SCAN_WRITER_LOCK_MAX_RETRY) {
     int r = _action.continuation->handleEvent(CACHE_EVENT_SCAN_OPERATION_BLOCKED, nullptr);
-    Debug("cache_scan", "still haven't got the writer lock, asking user..");
+    Dbg(dbg_ctl_cache_scan, "still haven't got the writer lock, asking user..");
     switch (r) {
     case CACHE_SCAN_RESULT_RETRY:
       writer_lock_retry = 0;
@@ -421,11 +430,11 @@ CacheVC::scanOpenWrite(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
   {
     CACHE_TRY_LOCK(lock, vol->mutex, mutex->thread_holding);
     if (!lock.is_locked()) {
-      Debug("cache_scan", "vol->mutex %p:scanOpenWrite", this);
+      Dbg(dbg_ctl_cache_scan, "vol->mutex %p:scanOpenWrite", this);
       VC_SCHED_LOCK_RETRY();
     }
 
-    Debug("cache_scan", "trying for writer lock");
+    Dbg(dbg_ctl_cache_scan, "trying for writer lock");
     if (vol->open_write(this, false, 1)) {
       writer_lock_retry++;
       SET_HANDLER(&CacheVC::scanOpenWrite);
@@ -443,7 +452,7 @@ CacheVC::scanOpenWrite(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
     vector.clear(false);
     // check that the directory entry was not overwritten
     // if so return failure
-    Debug("cache_scan", "got writer lock");
+    Dbg(dbg_ctl_cache_scan, "got writer lock");
     Dir *l = nullptr;
     Dir d;
     Doc *doc = reinterpret_cast<Doc *>(buf->data() + offset);
@@ -467,7 +476,7 @@ CacheVC::scanOpenWrite(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
         return handleEvent(EVENT_IMMEDIATE, nullptr);
       }
       if (memcmp(&dir, &d, SIZEOF_DIR)) {
-        Debug("cache_scan", "dir entry has changed");
+        Dbg(dbg_ctl_cache_scan, "dir entry has changed");
         continue;
       }
       break;
@@ -491,7 +500,7 @@ CacheVC::scanOpenWrite(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
 int
 CacheVC::scanUpdateDone(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
 {
-  Debug("cache_scan_truss", "inside %p:scanUpdateDone", this);
+  Dbg(dbg_ctl_cache_scan_truss, "inside %p:scanUpdateDone", this);
   cancel_trigger();
   // get volume lock
   CACHE_TRY_LOCK(lock, vol->mutex, mutex->thread_holding);

@@ -31,7 +31,7 @@ class ProxyMutex;
 
 #define MAX_CONFIGS 100
 
-typedef RefCountObj ConfigInfo;
+using ConfigInfo = RefCountObj;
 
 class ConfigProcessor
 {
@@ -105,11 +105,13 @@ private:
   {
     ConfigUpdateHandler *self = static_cast<ConfigUpdateHandler *>(cookie);
 
-    Debug("config", "%s(%s)", __PRETTY_FUNCTION__, name);
+    Dbg(_dbg_ctl, "%s(%s)", __PRETTY_FUNCTION__, name);
     return ConfigScheduleUpdate<UpdateClass>(self->mutex);
   }
 
   Ptr<ProxyMutex> mutex;
+
+  inline static DbgCtl _dbg_ctl{"config"};
 };
 
 extern ConfigProcessor configProcessor;
