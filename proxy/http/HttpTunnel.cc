@@ -992,8 +992,6 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
       ink_assert(c_write > 0);
       if (c->write_vio == nullptr) {
         consumer_handler(VC_EVENT_ERROR, c);
-      } else if (c->write_vio->ntodo() == 0 && c->alive) {
-        consumer_handler(VC_EVENT_WRITE_COMPLETE, c);
       }
     }
   }

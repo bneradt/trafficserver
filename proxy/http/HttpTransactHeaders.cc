@@ -206,7 +206,6 @@ void
 HttpTransactHeaders::copy_header_fields(HTTPHdr *src_hdr, HTTPHdr *new_hdr, bool retain_proxy_auth_hdrs, ink_time_t date)
 {
   ink_assert(src_hdr->valid());
-  ink_assert(!new_hdr->valid());
 
   bool date_hdr = false;
 
