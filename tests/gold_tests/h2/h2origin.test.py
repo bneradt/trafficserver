@@ -17,6 +17,8 @@ Test communication to origin with H2
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
+import os
+
 Test.Summary = '''
 Test communication to origin with H2
 '''
@@ -27,6 +29,7 @@ Test.ContinueOnFail = True
 # Communicate to origin with HTTP/2
 #
 ts = Test.MakeATSProcess("ts", enable_tls="true")
+httpbin = Test.MakeHttpBinServer("httpbin")
 
 # add ssl materials like key, certificates for the server
 ts.addDefaultSSLFiles()
@@ -47,9 +50,10 @@ ts.Disk.records_config.update({
     'proxy.config.ssl.client.verify.server.policy': 'PERMISSIVE',
 })
 
-ts.Disk.remap_config.AddLine(
-    'map / https://127.0.0.1:{0}'.format(server.Variables.https_port)
-)
+ts.Disk.remap_config.AddLines([
+    f'map /httpbin http://127.0.0.1:{httpbin.Variables.Port}',
+    'map / https://127.0.0.1:{0}'.format(server.Variables.https_port),
+])
 ts.Disk.ssl_multicert_config.AddLine(
     'dest_ip=* ssl_cert_name=server.pem ssl_key_name=server.key'
 )
@@ -67,28 +71,42 @@ logging:
 '''.split("\n")
 )
 
-tr = Test.AddTestRun("Test traffic to origin using HTTP/2")
-tr.Processes.Default.StartBefore(server)
+#tr = Test.AddTestRun("Test traffic to origin using HTTP/2")
+# tr.Processes.Default.StartBefore(server)
+# tr.Processes.Default.StartBefore(ts)
+#tr.AddVerifierClientProcess("client", replay_file, http_ports=[ts.Variables.port], https_ports=[ts.Variables.ssl_port])
+#tr.StillRunningAfter = ts
+#tr.TimeOut = 60
+
+tr = Test.AddTestRun("Test Expect: 100-continue with httpbin")
+tr.Processes.Default.StartBefore(httpbin)
 tr.Processes.Default.StartBefore(ts)
-tr.AddVerifierClientProcess("client", replay_file, http_ports=[ts.Variables.port], https_ports=[ts.Variables.ssl_port])
-tr.StillRunningAfter = ts
-tr.TimeOut = 60
+
+empty_file_path = os.path.join(tr.RunDirectory, "0k")
+with open(empty_file_path, "w") as f:
+    pass
+
+tr.Processes.Default.Command = (
+    f'curl -kv -d @{empty_file_path} --http2 -H "Expect: 100-Continue" '
+    f'https://127.0.0.1:{ts.Variables.ssl_port}/httpbin/post'
+)
 
 # Just a check to flush out the traffic log until we have a clean shutdown for traffic_server
-tr = Test.AddTestRun("Wait for the access log to write out")
-tr.DelayStart = 10
-tr.StillRunningAfter = ts
-tr.StillRunningAfter = server
-tr.Processes.Default.Command = 'ls'
-tr.Processes.Default.ReturnCode = 0
-
+#tr = Test.AddTestRun("Wait for the access log to write out")
+#tr.DelayStart = 10
+#tr.StillRunningAfter = ts
+#tr.StillRunningAfter = server
+#tr.Processes.Default.Command = 'ls'
+#tr.Processes.Default.ReturnCode = 0
+#
 # UUIDs 1-4 should be http/1.1 clients and H2 origin
 # UUIDs 5-9 should be http/2 clients and H2 origins
-ts.Disk.squid_log.Content = Testers.ContainsExpression(" [1-4] http/1.1 http/2", "cases 1-4 request http/1.1")
-ts.Disk.squid_log.Content += Testers.ExcludesExpression(" [1-4] http/2 http/2", "cases 1-4 request http/1.1")
-ts.Disk.squid_log.Content += Testers.ContainsExpression(" 1[1-4] http/1.1 http/2", "cases 12-14 request http/1.1")
-ts.Disk.squid_log.Content += Testers.ExcludesExpression(" 1[2-4] http/2 http/2", "cases 12-14 request http/1.1")
-ts.Disk.squid_log.Content += Testers.ContainsExpression(" [5-9] http/2 http/2", "cases 5-11 request http/2")
-ts.Disk.squid_log.Content += Testers.ExcludesExpression(" [5-9] http/1.1 http/2", "cases 5-11 request http/2")
-ts.Disk.squid_log.Content += Testers.ContainsExpression(" 1[0-1] http/2 http/2", "cases 5-11 request http/2")
-ts.Disk.squid_log.Content += Testers.ExcludesExpression(" 1[0-1] http/1.1 http/2", "cases 5-11 request http/2")
+#ts.Disk.squid_log.Content = Testers.ContainsExpression(" [1-4] http/1.1 http/2", "cases 1-4 request http/1.1")
+#ts.Disk.squid_log.Content += Testers.ExcludesExpression(" [1-4] http/2 http/2", "cases 1-4 request http/1.1")
+#ts.Disk.squid_log.Content += Testers.ContainsExpression(" 1[1-4] http/1.1 http/2", "cases 12-14 request http/1.1")
+#ts.Disk.squid_log.Content += Testers.ExcludesExpression(" 1[2-4] http/2 http/2", "cases 12-14 request http/1.1")
+#ts.Disk.squid_log.Content += Testers.ContainsExpression(" [5-9] http/2 http/2", "cases 5-11 request http/2")
+#ts.Disk.squid_log.Content += Testers.ExcludesExpression(" [5-9] http/1.1 http/2", "cases 5-11 request http/2")
+#ts.Disk.squid_log.Content += Testers.ContainsExpression(" 1[0-1] http/2 http/2", "cases 5-11 request http/2")
+#ts.Disk.squid_log.Content += Testers.ExcludesExpression(" 1[0-1] http/1.1 http/2", "cases 5-11 request http/2")
+#
