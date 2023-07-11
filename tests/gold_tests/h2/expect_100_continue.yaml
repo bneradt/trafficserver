@@ -20,23 +20,28 @@ meta:
 sessions:
   - protocol:
       - name: http
-        version: '1'
+        version: '2'
+      - name: tls
+        version: TLSv1.3
+        sni: data.brian.example.com
       - name: tcp
       - name: ip
         version: '4'
 
     transactions:
       - client-request:
-          method: POST
-          url: /expect/post
           headers:
             encoding: esc_json
             fields:
+              - [ :method, POST ]
+              - [ :scheme, https ]
+              - [ :authority, data.brian.example.com ]
+              - [ :path, /expect/post ]
               - [ uuid, 100-continue ]
               - [ Expect, 100-continue ]
           content:
             encoding: plain
-            size: 8192
+            size: 0
 
         proxy-request:
           headers:

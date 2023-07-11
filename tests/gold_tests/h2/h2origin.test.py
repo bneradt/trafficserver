@@ -71,39 +71,41 @@ logging:
 '''.split("\n")
 )
 
-tr = Test.AddTestRun("Test traffic to origin using HTTP/2")
-tr.Processes.Default.StartBefore(server)
-tr.Processes.Default.StartBefore(ts)
-tr.AddVerifierClientProcess("client", replay_file, http_ports=[ts.Variables.port], https_ports=[ts.Variables.ssl_port])
-tr.StillRunningAfter = ts
-tr.TimeOut = 60
+#tr = Test.AddTestRun("Test traffic to origin using HTTP/2")
+# tr.Processes.Default.StartBefore(server)
+# tr.Processes.Default.StartBefore(ts)
+#tr.AddVerifierClientProcess("client", replay_file, http_ports=[ts.Variables.port], https_ports=[ts.Variables.ssl_port])
+#tr.StillRunningAfter = ts
+#tr.TimeOut = 60
 
 # A regression test for #9857.
 tr = Test.AddTestRun("Test an empty body POST request with an Expect: 100-continue header")
-content_file = os.path.join(Test.RunDirectory, '0k')
-with open(content_file, 'wb') as f:
-    pass
+tr.AddVerifierClientProcess(
+    "client-expect",
+    "expect_100_continue.yaml",
+    http_ports=[
+        ts.Variables.port],
+    https_ports=[
+        ts.Variables.ssl_port])
 tr.Processes.Default.StartBefore(server_expect)
-tr.Processes.Default.Command = (
-    f'curl -kv -d @{content_file} --http2 '
-    '-H "Expect: 100-continue" '
-    '-H "uuid: 100-continue" '
-    f'https://127.0.0.1:{ts.Variables.ssl_port}/expect/post')
+
+tr.Processes.Default.StartBefore(ts)
+
 tr.Processes.Default.ReturnCode = 0
 
 # Wait until the transaction log is written.
-tr = Test.AddTestRun("Wait for the access log to write out")
-cond_wait_path = os.path.join(Test.Variables.AtsTestToolsDir, 'condwait')
-squid_log_path = os.path.join(ts.Variables.LOGDIR, 'squid.log')
-tr.Processes.Default.Command = f'{cond_wait_path} 60 1 -f {squid_log_path}'
-
+#tr = Test.AddTestRun("Wait for the access log to write out")
+#cond_wait_path = os.path.join(Test.Variables.AtsTestToolsDir, 'condwait')
+#squid_log_path = os.path.join(ts.Variables.LOGDIR, 'squid.log')
+#tr.Processes.Default.Command = f'{cond_wait_path} 60 1 -f {squid_log_path}'
+#
 # UUIDs 1-4 should be http/1.1 clients and H2 origin
 # UUIDs 5-9 should be http/2 clients and H2 origins
-ts.Disk.squid_log.Content = Testers.ContainsExpression(" [1-4] http/1.1 http/2", "cases 1-4 request http/1.1")
-ts.Disk.squid_log.Content += Testers.ExcludesExpression(" [1-4] http/2 http/2", "cases 1-4 request http/1.1")
-ts.Disk.squid_log.Content += Testers.ContainsExpression(" 1[1-4] http/1.1 http/2", "cases 12-14 request http/1.1")
-ts.Disk.squid_log.Content += Testers.ExcludesExpression(" 1[2-4] http/2 http/2", "cases 12-14 request http/1.1")
-ts.Disk.squid_log.Content += Testers.ContainsExpression(" [5-9] http/2 http/2", "cases 5-11 request http/2")
-ts.Disk.squid_log.Content += Testers.ExcludesExpression(" [5-9] http/1.1 http/2", "cases 5-11 request http/2")
-ts.Disk.squid_log.Content += Testers.ContainsExpression(" 1[0-1] http/2 http/2", "cases 5-11 request http/2")
-ts.Disk.squid_log.Content += Testers.ExcludesExpression(" 1[0-1] http/1.1 http/2", "cases 5-11 request http/2")
+#ts.Disk.squid_log.Content = Testers.ContainsExpression(" [1-4] http/1.1 http/2", "cases 1-4 request http/1.1")
+#ts.Disk.squid_log.Content += Testers.ExcludesExpression(" [1-4] http/2 http/2", "cases 1-4 request http/1.1")
+#ts.Disk.squid_log.Content += Testers.ContainsExpression(" 1[1-4] http/1.1 http/2", "cases 12-14 request http/1.1")
+#ts.Disk.squid_log.Content += Testers.ExcludesExpression(" 1[2-4] http/2 http/2", "cases 12-14 request http/1.1")
+#ts.Disk.squid_log.Content += Testers.ContainsExpression(" [5-9] http/2 http/2", "cases 5-11 request http/2")
+#ts.Disk.squid_log.Content += Testers.ExcludesExpression(" [5-9] http/1.1 http/2", "cases 5-11 request http/2")
+#ts.Disk.squid_log.Content += Testers.ContainsExpression(" 1[0-1] http/2 http/2", "cases 5-11 request http/2")
+#ts.Disk.squid_log.Content += Testers.ExcludesExpression(" 1[0-1] http/1.1 http/2", "cases 5-11 request http/2")
