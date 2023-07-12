@@ -6728,12 +6728,13 @@ HttpSM::setup_server_read_response_header()
 
   ink_assert(server_txn != nullptr && server_txn->get_remote_reader() != nullptr);
 
-  SMDebug("http", "Setting up the header read");
+  SMDebug("http", "Setting up the header read: server_entry->vc: %p", server_entry->vc);
 
   // Now that we've got the ability to read from the
   //  server, setup to read the response header
   server_entry->vc_read_handler = &HttpSM::state_read_server_response_header;
   server_entry->vc              = server_txn;
+  SMDebug("http", "After configuring server_entry->vc: %p", server_entry->vc);
 
   t_state.current.state         = HttpTransact::STATE_UNDEFINED;
   t_state.current.server->state = HttpTransact::STATE_UNDEFINED;
@@ -6746,15 +6747,19 @@ HttpSM::setup_server_read_response_header()
   server_response_hdr_bytes                        = 0;
   milestones[TS_MILESTONE_SERVER_READ_HEADER_DONE] = 0;
 
+  SMDebug("http", "Before do_io_read server_entry->vc: %p", server_entry->vc);
   // The tunnel from OS to UA is now setup.  Ready to read the response
   server_entry->read_vio = server_txn->do_io_read(this, INT64_MAX, server_txn->get_remote_reader()->mbuf);
+  SMDebug("http", "After do_io_read server_entry->vc: %p", server_entry->vc);
 
   // If there is anything in the buffer call the parsing routines
   //  since if the response is finished, we won't get any
   //  additional callbacks
 
   if (server_txn->get_remote_reader()->read_avail() > 0) {
+    SMDebug("http", "Before state_read_server_response_header server_entry->vc: %p", server_entry->vc);
     state_read_server_response_header((server_entry->eos) ? VC_EVENT_EOS : VC_EVENT_READ_READY, server_entry->read_vio);
+    SMDebug("http", "After state_read_server_response_header server_entry->vc: %p", server_entry->vc);
   }
   ink_assert(server_entry->vc != nullptr);
 }
