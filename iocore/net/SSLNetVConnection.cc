@@ -2488,8 +2488,8 @@ SSLNetVConnection::update_early_data_config(uint32_t max_early_data, uint32_t re
   // We are now also disabling this when using OpenSSL's internal cache, since we
   // are calling "ssl_accept" non-blocking, it seems to be confusing the anti-replay
   // mechanism and causing session resumption to fail.
-  if (SSL_version(ssl) >= TLS1_3_VERSION) {
 #ifdef HAVE_SSL_SET_MAX_EARLY_DATA
+  if (SSL_version(ssl) >= TLS1_3_VERSION) {
     bool ret1 = false;
     bool ret2 = false;
     if ((ret1 = SSL_set_max_early_data(ssl, max_early_data)) == 1) {
@@ -2508,12 +2508,12 @@ SSLNetVConnection::update_early_data_config(uint32_t max_early_data, uint32_t re
       Debug("ssl_early_data", "Must disable anti-replay if 0-rtt is enabled.");
       SSL_set_options(ssl, SSL_OP_NO_ANTI_REPLAY);
     }
-#else
-    // If SSL_set_max_early_data is unavailable, it's probably BoringSSL,
-    // and SSL_set_early_data_enabled should be available.
-    SSL_set_early_data_enabled(ssl, max_early_data > 0 ? 1 : 0);
-    Warning("max_early_data is not used due to library limitations");
-#endif
   }
-#endif
+#else  /* HAVE_SSL_SET_MAX_EARLY_DATA */
+  // If SSL_set_max_early_data is unavailable, it's probably BoringSSL,
+  // and SSL_set_early_data_enabled should be available.
+  SSL_set_early_data_enabled(ssl, max_early_data > 0 ? 1 : 0);
+  Warning("max_early_data is not used due to library limitations");
+#endif /* HAVE_SSL_SET_MAX_EARLY_DATA */
+#endif /* TS_HAS_TLS_EARLY_DATA */
 }
