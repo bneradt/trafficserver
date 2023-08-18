@@ -281,7 +281,7 @@ http_insert_forwarded_cb(const char *name, RecDataT dtype, RecData data, void *c
 
   if (0 == strcasecmp("proxy.config.http.insert_forwarded", name)) {
     if (RECD_STRING == dtype) {
-      ts::LocalBufferWriter<1024> error;
+      swoc::LocalBufferWriter<1024> error;
       HttpForwarded::OptionBitSet bs = HttpForwarded::optStrToBitset(std::string_view(data.rec_string), error);
       if (!error.size()) {
         c->oride.insert_forwarded = bs;
@@ -1077,8 +1077,8 @@ register_stat_callbacks()
   RecRegisterRawStat(http_rsb, RECT_PROCESS, "proxy.process.http.milestone.sm_finish", RECD_COUNTER, RECP_PERSISTENT,
                      (int)http_sm_finish_time_stat, RecRawStatSyncSum);
 
-  RecRegisterRawStat(http_rsb, RECT_PROCESS, "proxy.process.http.dead_server.no_requests", RECD_COUNTER, RECP_PERSISTENT,
-                     (int)http_dead_server_no_requests, RecRawStatSyncSum);
+  RecRegisterRawStat(http_rsb, RECT_PROCESS, "proxy.process.http.down_server.no_requests", RECD_COUNTER, RECP_PERSISTENT,
+                     (int)http_down_server_no_requests, RecRawStatSyncSum);
 
   // Current transaction stats parent counter
   RecRegisterRawStat(http_rsb, RECT_PROCESS, "proxy.process.http_parent_count", RECD_COUNTER, RECP_PERSISTENT,
@@ -1093,11 +1093,11 @@ set_negative_caching_list(const char *name, RecDataT dtype, RecData data, HttpCo
   // values from proxy.config.http.negative_caching_list
   if (0 == strcasecmp("proxy.config.http.negative_caching_list", name) && RECD_STRING == dtype && data.rec_string) {
     // parse the list of status codes
-    ts::TextView status_list(data.rec_string, strlen(data.rec_string));
+    swoc::TextView status_list(data.rec_string, strlen(data.rec_string));
     auto is_sep{[](char c) { return isspace(c) || ',' == c || ';' == c; }};
     while (!status_list.ltrim_if(is_sep).empty()) {
-      ts::TextView span, token{status_list.take_prefix_if(is_sep)};
-      auto n = ts::svtoi(token, &span);
+      swoc::TextView span, token{status_list.take_prefix_if(is_sep)};
+      auto n = swoc::svtoi(token, &span);
       if (span.size() != token.size()) {
         Error("Invalid status code '%.*s' for negative caching: not a number", static_cast<int>(token.size()), token.data());
       } else if (n <= 0 || n >= HTTP_STATUS_NUMBER) {
@@ -1159,8 +1159,8 @@ HttpConfig::startup()
     c.proxy_hostname[0] = '\0';
   }
 
-  c.inbound  += RecHttpLoadIp("proxy.local.incoming_ip_to_bind");
-  c.outbound += RecHttpLoadIp("proxy.local.outgoing_ip_to_bind");
+  c.inbound  += RecHttpLoadIp("proxy.config.incoming_ip_to_bind");
+  c.outbound += RecHttpLoadIp("proxy.config.outgoing_ip_to_bind");
   RecHttpLoadIpAddrsFromConfVar("proxy.config.http.proxy_protocol_allowlist", c.config_proxy_protocol_ip_addrs);
   SSLConfigInit(&c.config_proxy_protocol_ip_addrs);
 
@@ -1176,10 +1176,10 @@ HttpConfig::startup()
   HttpEstablishStaticConfigLongLong(c.http_request_line_max_size, "proxy.config.http.request_line_max_size");
   HttpEstablishStaticConfigLongLong(c.http_hdr_field_max_size, "proxy.config.http.header_field_max_size");
 
-  HttpEstablishStaticConfigByte(c.disable_ssl_parenting, "proxy.local.http.parent_proxy.disable_connect_tunneling");
+  HttpEstablishStaticConfigByte(c.disable_ssl_parenting, "proxy.config.http.parent_proxy.disable_connect_tunneling");
   HttpEstablishStaticConfigByte(c.oride.forward_connect_method, "proxy.config.http.forward_connect_method");
 
-  HttpEstablishStaticConfigByte(c.no_dns_forward_to_parent, "proxy.config.http.no_dns_just_forward_to_parent");
+  HttpEstablishStaticConfigByte(c.oride.no_dns_forward_to_parent, "proxy.config.http.no_dns_just_forward_to_parent");
   HttpEstablishStaticConfigByte(c.oride.uncacheable_requests_bypass_parent, "proxy.config.http.uncacheable_requests_bypass_parent");
   HttpEstablishStaticConfigByte(c.oride.doc_in_cache_skip_dns, "proxy.config.http.doc_in_cache_skip_dns");
 
@@ -1221,7 +1221,7 @@ HttpConfig::startup()
     char str[512];
 
     if (REC_ERR_OKAY == RecGetRecordString("proxy.config.http.insert_forwarded", str, sizeof(str))) {
-      ts::LocalBufferWriter<1024> error;
+      swoc::LocalBufferWriter<1024> error;
       HttpForwarded::OptionBitSet bs = HttpForwarded::optStrToBitset(std::string_view(str), error);
       if (!error.size()) {
         c.oride.insert_forwarded = bs;
@@ -1254,10 +1254,10 @@ HttpConfig::startup()
   HttpEstablishStaticConfigFloat(c.oride.background_fill_threshold, "proxy.config.http.background_fill_completed_threshold");
 
   HttpEstablishStaticConfigLongLong(c.oride.connect_attempts_max_retries, "proxy.config.http.connect_attempts_max_retries");
-  HttpEstablishStaticConfigLongLong(c.oride.connect_attempts_max_retries_dead_server,
-                                    "proxy.config.http.connect_attempts_max_retries_dead_server");
+  HttpEstablishStaticConfigLongLong(c.oride.connect_attempts_max_retries_down_server,
+                                    "proxy.config.http.connect_attempts_max_retries_down_server");
 
-  HttpEstablishStaticConfigLongLong(c.oride.connect_dead_policy, "proxy.config.http.connect.dead.policy");
+  HttpEstablishStaticConfigLongLong(c.oride.connect_down_policy, "proxy.config.http.connect.down.policy");
 
   HttpEstablishStaticConfigLongLong(c.oride.connect_attempts_rr_retries, "proxy.config.http.connect_attempts_rr_retries");
   HttpEstablishStaticConfigLongLong(c.oride.connect_attempts_timeout, "proxy.config.http.connect_attempts_timeout");
@@ -1312,6 +1312,7 @@ HttpConfig::startup()
   HttpEstablishStaticConfigLongLong(c.oride.cache_guaranteed_max_lifetime, "proxy.config.http.cache.guaranteed_max_lifetime");
 
   HttpEstablishStaticConfigLongLong(c.oride.cache_max_stale_age, "proxy.config.http.cache.max_stale_age");
+
   HttpEstablishStaticConfigByte(c.oride.srv_enabled, "proxy.config.srv_enabled");
 
   HttpEstablishStaticConfigByte(c.oride.allow_half_open, "proxy.config.http.allow_half_open");
@@ -1338,6 +1339,7 @@ HttpConfig::startup()
 
   HttpEstablishStaticConfigByte(c.oride.cache_ignore_auth, "proxy.config.http.cache.ignore_authentication");
   HttpEstablishStaticConfigByte(c.oride.cache_urls_that_look_dynamic, "proxy.config.http.cache.cache_urls_that_look_dynamic");
+  HttpEstablishStaticConfigByte(c.oride.cache_ignore_query, "proxy.config.http.cache.ignore_query");
   HttpEstablishStaticConfigByte(c.cache_post_method, "proxy.config.http.cache.post_method");
 
   HttpEstablishStaticConfigByte(c.oride.ignore_accept_mismatch, "proxy.config.http.cache.ignore_accept_mismatch");
@@ -1456,7 +1458,7 @@ HttpConfig::reconfigure()
 
   params->proxy_hostname                           = ats_strdup(m_master.proxy_hostname);
   params->proxy_hostname_len                       = (params->proxy_hostname) ? strlen(params->proxy_hostname) : 0;
-  params->no_dns_forward_to_parent                 = INT_TO_BOOL(m_master.no_dns_forward_to_parent);
+  params->oride.no_dns_forward_to_parent           = INT_TO_BOOL(m_master.oride.no_dns_forward_to_parent);
   params->oride.uncacheable_requests_bypass_parent = INT_TO_BOOL(m_master.oride.uncacheable_requests_bypass_parent);
   params->no_origin_server_dns                     = INT_TO_BOOL(m_master.no_origin_server_dns);
   params->use_client_target_addr                   = m_master.use_client_target_addr;
@@ -1541,7 +1543,7 @@ HttpConfig::reconfigure()
   params->oride.background_fill_threshold           = m_master.oride.background_fill_threshold;
 
   params->oride.connect_attempts_max_retries             = m_master.oride.connect_attempts_max_retries;
-  params->oride.connect_attempts_max_retries_dead_server = m_master.oride.connect_attempts_max_retries_dead_server;
+  params->oride.connect_attempts_max_retries_down_server = m_master.oride.connect_attempts_max_retries_down_server;
   if (m_master.oride.connect_attempts_rr_retries > params->oride.connect_attempts_max_retries) {
     Warning("connect_attempts_rr_retries (%" PRIu64 ") is greater than "
             "connect_attempts_max_retries (%" PRIu64 "), this means requests "
@@ -1550,12 +1552,13 @@ HttpConfig::reconfigure()
   }
   params->oride.connect_attempts_rr_retries     = m_master.oride.connect_attempts_rr_retries;
   params->oride.connect_attempts_timeout        = m_master.oride.connect_attempts_timeout;
-  params->oride.connect_dead_policy             = m_master.oride.connect_dead_policy;
+  params->oride.connect_down_policy             = m_master.oride.connect_down_policy;
   params->oride.parent_connect_attempts         = m_master.oride.parent_connect_attempts;
   params->oride.parent_retry_time               = m_master.oride.parent_retry_time;
   params->oride.parent_fail_threshold           = m_master.oride.parent_fail_threshold;
   params->oride.per_parent_connect_attempts     = m_master.oride.per_parent_connect_attempts;
   params->oride.parent_failures_update_hostdb   = m_master.oride.parent_failures_update_hostdb;
+  params->oride.no_dns_forward_to_parent        = m_master.oride.no_dns_forward_to_parent;
   params->oride.enable_parent_timeout_markdowns = m_master.oride.enable_parent_timeout_markdowns;
   params->oride.disable_parent_markdowns        = m_master.oride.disable_parent_markdowns;
 
@@ -1629,6 +1632,7 @@ HttpConfig::reconfigure()
   params->oride.cache_responses_to_cookies     = m_master.oride.cache_responses_to_cookies;
   params->oride.cache_ignore_auth              = INT_TO_BOOL(m_master.oride.cache_ignore_auth);
   params->oride.cache_urls_that_look_dynamic   = INT_TO_BOOL(m_master.oride.cache_urls_that_look_dynamic);
+  params->oride.cache_ignore_query             = INT_TO_BOOL(m_master.oride.cache_ignore_query);
   params->cache_post_method                    = INT_TO_BOOL(m_master.cache_post_method);
 
   params->oride.ignore_accept_mismatch          = m_master.oride.ignore_accept_mismatch;

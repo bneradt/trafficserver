@@ -65,7 +65,7 @@ extern "C" int plock(int);
 #include <mcheck.h>
 #endif
 
-#include "Main.h"
+#include "Crash.h"
 #include "tscore/signals.h"
 #include "P_EventSystem.h"
 #include "P_Net.h"
@@ -89,7 +89,6 @@ extern "C" int plock(int);
 #include "IPAllow.h"
 #include "ParentSelection.h"
 #include "HostStatus.h"
-#include "MgmtUtils.h"
 #include "StatPages.h"
 #include "HTTP.h"
 #include "HuffmanCodec.h"
@@ -136,22 +135,22 @@ static char diags_log_filename[PATH_NAME_MAX] = DEFAULT_DIAGS_LOG_FILENAME;
 static const long MAX_LOGIN = ink_login_name_max();
 
 static void init_ssl_ctx_callback(void *ctx, bool server);
+// This isn't static as its also called from InkAPI.cc
+void load_config_file_callback(const char *parent_file, const char *remap_file);
 static void load_ssl_file_callback(const char *ssl_file);
 static void task_threads_started_callback();
 
-// We need these two to be accessible somewhere else now
-int num_of_net_threads = ink_number_of_processors();
-int num_accept_threads = 0;
+static int num_of_net_threads = ink_number_of_processors();
+static int num_accept_threads = 0;
 
 static int num_of_udp_threads = 0;
 static int num_task_threads   = 0;
 
 static char *http_accept_port_descriptor;
-int http_accept_file_descriptor = NO_FD;
-static bool enable_core_file_p  = false; // Enable core file dump?
-int command_flag                = DEFAULT_COMMAND_FLAG;
-int command_index               = -1;
-bool command_valid              = false;
+static bool enable_core_file_p = false; // Enable core file dump?
+static int command_flag        = DEFAULT_COMMAND_FLAG;
+static int command_index       = -1;
+static bool command_valid      = false;
 // Commands that have special processing / requirements.
 static const char *CMD_VERIFY_CONFIG = "verify_config";
 #if TS_HAS_TESTS
@@ -159,7 +158,7 @@ static char regression_test[1024] = "";
 static int regression_list        = 0;
 static int regression_level       = REGRESSION_TEST_NONE;
 #endif
-int auto_clear_hostdb_flag = 0;
+static int auto_clear_hostdb_flag = 0;
 extern int fds_limit;
 
 static char command_string[512] = "";
@@ -178,9 +177,9 @@ static int poll_timeout         = -1; // No value set.
 static int cmd_disable_freelist = 0;
 static bool signal_received[NSIG];
 
-std::mutex pluginInitMutex;
-std::condition_variable pluginInitCheck;
-bool plugin_init_done = false;
+static std::mutex pluginInitMutex;
+static std::condition_variable pluginInitCheck;
+static bool plugin_init_done = false;
 
 /*
 To be able to attach with a debugger to traffic_server running in an Au test case, temporarily add the
@@ -203,13 +202,11 @@ static ArgumentDescription argument_descriptions[] = {
   {"net_threads",       'n', "Number of Net Threads",                                                                               "I",     &num_of_net_threads,             "PROXY_NET_THREADS",       nullptr},
   {"udp_threads",       'U', "Number of UDP Threads",                                                                               "I",     &num_of_udp_threads,             "PROXY_UDP_THREADS",       nullptr},
   {"accept_thread",     'a', "Use an Accept Thread",                                                                                "T",     &num_accept_threads,             "PROXY_ACCEPT_THREAD",     nullptr},
-  {"accept_till_done",  'b', "Accept Till Done",                                                                                    "T",     &accept_till_done,               "PROXY_ACCEPT_TILL_DONE",  nullptr},
+  {"accept_till_done",  'b', "Accept Till Done",                                                                                    "T",     &NetAccept::accept_till_done,    "PROXY_ACCEPT_TILL_DONE",  nullptr},
   {"httpport",          'p', "Port descriptor for HTTP Accept",                                                                     "S*",    &http_accept_port_descriptor,    "PROXY_HTTP_ACCEPT_PORT",  nullptr},
   {"disable_freelist",  'f', "Disable the freelist memory allocator",                                                               "T",     &cmd_disable_freelist,           "PROXY_DPRINTF_LEVEL",     nullptr},
   {"disable_pfreelist", 'F', "Disable the freelist memory allocator in ProxyAllocator",                                             "T",     &cmd_disable_pfreelist,
    "PROXY_DPRINTF_LEVEL",                                                                                                                                                                                nullptr},
-  {"maxRecords",        'm', "Max number of librecords metrics and configurations (default & minimum: 1600)",                       "I",     &max_records_entries,
-   "PROXY_MAX_RECORDS",                                                                                                                                                                                  nullptr},
 
 #if TS_HAS_TESTS
   {"regression",        'R', "Regression Level (quick:1..long:3)",                                                                  "I",     &regression_level,               "PROXY_REGRESSION",        nullptr},
@@ -668,8 +665,6 @@ check_config_directories()
 static void
 initialize_process_manager()
 {
-  mgmt_use_syslog();
-
   RecProcessInit(diags());
   LibRecordsConfigInit();
 
@@ -719,7 +714,7 @@ initialize_jsonrpc_server()
     // jsonrpcServer object.
     ink_assert(jsonrpcServer == nullptr);
     std::string msg;
-    return {false, ts::bwprint(msg, "Server failed: '{}'", ex.what())};
+    return {false, swoc::bwprint(msg, "Server failed: '{}'", ex.what())};
   }
   // Register admin handlers.
   rpc::admin::register_admin_jsonrpc_handlers();
@@ -1948,6 +1943,10 @@ main(int /* argc ATS_UNUSED */, const char **argv)
   }
 #endif
 
+  // Pick the system clock to choose, likely only on Linux. See <linux/time.h>.
+  extern int gSystemClock; // 0 == CLOCK_REALTIME, the default
+  REC_ReadConfigInteger(gSystemClock, "proxy.config.system_clock");
+
   // JSONRPC server and handlers
   if (auto &&[ok, msg] = initialize_jsonrpc_server(); !ok) {
     Warning("JSONRPC server could not be started.\n  Why?: '%s' ... Continuing without it.", msg.c_str());
@@ -2050,8 +2049,6 @@ main(int /* argc ATS_UNUSED */, const char **argv)
     ts::ModuleVersion(HOSTDB_MODULE_INTERNAL_VERSION._major, HOSTDB_MODULE_INTERNAL_VERSION._minor, ts::ModuleVersion::PRIVATE));
   ink_split_dns_init(ts::ModuleVersion(1, 0, ts::ModuleVersion::PRIVATE));
 
-  naVecMutex = new_ProxyMutex();
-
   // Do the inits for NetProcessors that use ET_NET threads. MUST be before starting those threads.
   netProcessor.init();
   prep_HttpProxyServer();
@@ -2074,9 +2071,13 @@ main(int /* argc ATS_UNUSED */, const char **argv)
 
 #if TS_USE_LINUX_IO_URING == 1
   IOUringContext *ur = IOUringContext::local_context();
-  IOUringContext::set_main_queue(ur);
-  auto [bounded, unbounded] = ur->get_wq_max_workers();
-  Note("io_uring: WQ workers - bounded = %d, unbounded = %d", bounded, unbounded);
+  if (ur->valid()) {
+    IOUringContext::set_main_queue(ur);
+    auto [bounded, unbounded] = ur->get_wq_max_workers();
+    Note("io_uring: WQ workers - bounded = %d, unbounded = %d", bounded, unbounded);
+  } else {
+    Note("io_uring: Not supported");
+  }
 #endif
 
   // !! ET_NET threads start here !!
@@ -2111,9 +2112,9 @@ main(int /* argc ATS_UNUSED */, const char **argv)
       {
         std::unique_lock<std::mutex> lock(pluginInitMutex);
         plugin_init_done = true;
-        lock.unlock();
-        pluginInitCheck.notify_one();
       }
+
+      pluginInitCheck.notify_one();
 
       if (cmd_ret >= 0) {
         ::exit(0); // everything is OK
@@ -2149,8 +2150,10 @@ main(int /* argc ATS_UNUSED */, const char **argv)
     HttpProxyPort::loadDefaultIfEmpty();
 
     dnsProcessor.start(0, stacksize);
-    if (hostDBProcessor.start() < 0)
+
+    if ((auto_clear_hostdb_flag ? hostDBProcessor.clear_and_start() : hostDBProcessor.start()) < 0) {
       Warning("bad hostdb or storage configuration, hostdb disabled");
+    }
 
     // initialize logging (after event and net processor)
     Log::init(Log::NO_REMOTE_MANAGEMENT);
@@ -2280,7 +2283,11 @@ main(int /* argc ATS_UNUSED */, const char **argv)
 
   while (!TSSystemState::is_event_system_shut_down()) {
 #if TS_USE_LINUX_IO_URING == 1
-    ur->submit_and_wait(1 * HRTIME_SECOND);
+    if (ur->valid()) {
+      ur->submit_and_wait(1 * HRTIME_SECOND);
+    } else {
+      sleep(1);
+    }
 #else
     sleep(1);
 #endif

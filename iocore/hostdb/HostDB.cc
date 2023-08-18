@@ -22,15 +22,14 @@
  */
 
 #include "swoc/swoc_file.h"
+#include "tscpp/util/ts_bw_format.h"
 
-#include "Main.h"
 #include "P_HostDB.h"
 #include "P_RefCountCacheSerializer.h"
 #include "tscore/I_Layout.h"
 #include "Show.h"
 #include "tscore/ink_apidefs.h"
-#include "tscore/bwf_std_format.h"
-#include "MgmtDefs.h" // MgmtInt, MgmtFloat, etc
+#include "tscore/MgmtDefs.h" // MgmtInt, MgmtFloat, etc
 #include "HostFile.h"
 
 #include <utility>
@@ -41,7 +40,7 @@
 #include <shared_mutex>
 #include <http/HttpConfig.h>
 
-using ts::TextView;
+using swoc::TextView;
 using std::chrono::duration_cast;
 using swoc::round_down;
 using swoc::round_up;
@@ -487,6 +486,17 @@ HostDBCache::start(int flags)
   return 0;
 }
 
+int
+HostDBProcessor::clear_and_start(int, size_t)
+{
+  if (hostDB.start(0) < 0) {
+    return -1;
+  }
+
+  hostDB.refcountcache->clear();
+  return init();
+}
+
 // Start up the Host Database processor.
 // Load configuration, register configuration and statistics and
 // open the cache. This doesn't create any threads, so those
@@ -499,10 +509,12 @@ HostDBProcessor::start(int, size_t)
     return -1;
   }
 
-  if (auto_clear_hostdb_flag) {
-    hostDB.refcountcache->clear();
-  }
+  return init();
+}
 
+int
+HostDBProcessor::init()
+{
   statPagesManager.register_http("hostdb", register_ShowHostDB);
 
   //
@@ -670,14 +682,14 @@ probe(HostDBHash const &hash, bool ignore_timeout)
     HOSTDB_INCREMENT_DYN_STAT_THREAD(hostdb_total_serve_stale_stat, this_ethread());
     if (hostDB.is_pending_dns_for_hash(hash.hash)) {
       Dbg(dbg_ctl_hostdb, "%s",
-          ts::bwprint(ts::bw_dbg, "stale {} {} {}, using with pending refresh", record->ip_age(),
-                      record->ip_timestamp.time_since_epoch(), record->ip_timeout_interval)
+          swoc::bwprint(ts::bw_dbg, "stale {} {} {}, using with pending refresh", record->ip_age(),
+                        record->ip_timestamp.time_since_epoch(), record->ip_timeout_interval)
             .c_str());
       return record;
     }
     Dbg(dbg_ctl_hostdb, "%s",
-        ts::bwprint(ts::bw_dbg, "stale {} {} {}, using while refresh", record->ip_age(), record->ip_timestamp.time_since_epoch(),
-                    record->ip_timeout_interval)
+        swoc::bwprint(ts::bw_dbg, "stale {} {} {}, using while refresh", record->ip_age(), record->ip_timestamp.time_since_epoch(),
+                      record->ip_timeout_interval)
           .c_str());
     HostDBContinuation *c = hostDBContAllocator.alloc();
     HostDBContinuation::Options copt;
@@ -1262,7 +1274,7 @@ HostDBContinuation::iterateEvent(int event, Event *e)
     ts::shared_mutex &bucket_lock = hostDB.refcountcache->get_partition(current_iterate_pos).lock;
     std::shared_lock<ts::shared_mutex> lock{bucket_lock};
 
-    IntrusiveHashMap<RefCountCacheLinkage> &partMap = hostDB.refcountcache->get_partition(current_iterate_pos).get_map();
+    auto &partMap = hostDB.refcountcache->get_partition(current_iterate_pos).get_map();
     for (const auto &it : partMap) {
       auto *r = static_cast<HostDBRecord *>(it.item.get());
       if (r && !r->is_failed()) {
@@ -1394,7 +1406,9 @@ HostDBContinuation::remove_and_trigger_pending_dns()
       if (hash.hash == c->hash.hash) {
         Dbg(dbg_ctl_hostdb, "dequeuing additional request");
         q.remove(c);
-        qq.enqueue(c);
+        if (!c->action.cancelled) {
+          qq.enqueue(c);
+        }
       }
       c = n;
     }
@@ -1517,7 +1531,7 @@ HostDBContinuation::backgroundEvent(int /* event ATS_UNUSED */, Event * /* e ATS
     REC_ReadConfigString(path, "proxy.config.hostdb.host_file.path", sizeof(path));
     if (0 != strcasecmp(hostdb_hostfile_path.string(), path)) {
       Dbg(dbg_ctl_hostdb, "%s",
-          ts::bwprint(dbg, R"(Updating hosts file from "{}" to "{}")", hostdb_hostfile_path.view(), ts::bwf::FirstOf(path, ""))
+          swoc::bwprint(dbg, R"(Updating hosts file from "{}" to "{}")", hostdb_hostfile_path.view(), swoc::bwf::FirstOf(path, ""))
             .c_str());
       // path to hostfile changed
       hostdb_hostfile_update_timestamp = TS_TIME_ZERO; // never updated from this file
@@ -1533,11 +1547,11 @@ HostDBContinuation::backgroundEvent(int /* event ATS_UNUSED */, Event * /* e ATS
         }
       } else {
         Dbg(dbg_ctl_hostdb, "%s",
-            ts::bwprint(dbg, R"(Failed to stat host file "{}" - {})", hostdb_hostfile_path.view(), ec).c_str());
+            swoc::bwprint(dbg, R"(Failed to stat host file "{}" - {})", hostdb_hostfile_path.view(), ec).c_str());
       }
     }
     if (update_p) {
-      Dbg(dbg_ctl_hostdb, "%s", ts::bwprint(dbg, R"(Updating from host file "{}")", hostdb_hostfile_path.view()).c_str());
+      Dbg(dbg_ctl_hostdb, "%s", swoc::bwprint(dbg, R"(Updating from host file "{}")", hostdb_hostfile_path.view()).c_str());
       UpdateHostsFile(hostdb_hostfile_path, hostdb_hostfile_check_interval);
     }
   }
@@ -1550,7 +1564,7 @@ HostDBRecord::select_best_http(ts_time now, ts_seconds fail_window, sockaddr con
 {
   ink_assert(0 < rr_count && rr_count <= hostdb_round_robin_max_count);
 
-  // @a best_any is set to a base candidate, which may be dead.
+  // @a best_any is set to a base candidate, which may be down.
   HostDBInfo *best_any = nullptr;
   // @a best_alive is set when a valid target has been selected and should be used.
   HostDBInfo *best_alive = nullptr;
@@ -1567,8 +1581,8 @@ HostDBRecord::select_best_http(ts_time now, ts_seconds fail_window, sockaddr con
     // Check and update RR if it's time - this always yields a valid target if there is one.
     if (now > ntime && rr_ctime.compare_exchange_strong(ctime, ntime)) {
       best_alive = best_any = this->select_next_rr(now, fail_window);
-      Dbg(dbg_ctl_hostdb, "Round robin timed interval expired - index %d", this->index_of(best_alive));
-    } else { // pick the current index, which may be dead.
+      Debug("hostdb", "Round robin timed interval expired - index %d", this->index_of(best_alive));
+    } else { // pick the current index, which may be down.
       best_any = &info[this->rr_idx()];
     }
     Dbg(dbg_ctl_hostdb, "Using timed round robin - index %d", this->index_of(best_any));
@@ -1917,7 +1931,7 @@ struct HostDBTestReverse : public Continuation {
 #if TS_HAS_TESTS
 REGRESSION_TEST(HostDBTests)(RegressionTest *t, int atype, int *pstatus)
 {
-  eventProcessor.schedule_imm(new HostDBTestReverse(t, atype, pstatus), ET_CACHE);
+  eventProcessor.schedule_imm(new HostDBTestReverse(t, atype, pstatus), ET_CALL);
 }
 #endif
 
@@ -2201,8 +2215,8 @@ HostDBRecord::select_best_srv(char *target, InkRand *rand, ts_time now, ts_secon
   // Array of live targets, sized by @a live_n
   HostDBInfo *live[rr.count()];
   for (auto &target : rr) {
-    // skip dead upstreams.
-    if (rr[i].is_dead(now, fail_window)) {
+    // skip down targets.
+    if (rr[i].is_down(now, fail_window)) {
       continue;
     }
 
@@ -2275,7 +2289,7 @@ ResolveInfo::resolve_immediate()
   if (resolved_p) {
     // nothing - already resolved.
   } else if (IpAddr tmp; TS_SUCCESS == tmp.load(lookup_name)) {
-    ts::bwprint(ts::bw_dbg, "[resolve_immediate] success - FQDN '{}' is a valid IP address.", lookup_name);
+    swoc::bwprint(ts::bw_dbg, "[resolve_immediate] success - FQDN '{}' is a valid IP address.", lookup_name);
     Dbg(dbg_ctl_hostdb, "%s", ts::bw_dbg.c_str());
     addr.assign(tmp);
     resolved_p = true;

@@ -1,9 +1,5 @@
 ts:
   accept_threads: 1
-  alarm:
-    abs_path: nullpt
-    bin: example_alarm_bin.sh
-    script_runtime: 5
   allocator:
     dontdump_iobuffers: 1
     hugepages: 0
@@ -181,10 +177,10 @@ ts:
       size: 4096
     chunking_enabled: 1
     connect:
-      dead:
+      down:
         policy: 2
     connect_attempts_max_retries: 3
-    connect_attempts_max_retries_dead_server: 1
+    connect_attempts_max_retries_down_server: 1
     connect_attempts_rr_retries: 3
     connect_attempts_timeout: 30
     connect_ports: '443'
@@ -328,7 +324,7 @@ ts:
     zombie_debug_timeout_in: 0
   http3:
     header_table_size: 0
-    max_header_list_size: 4096
+    max_field_section_size: 4096
     max_settings: 10
     num_placeholders: 100
     qpack_blocked_streams: 0
@@ -575,8 +571,6 @@ ts:
       skip_cache_on_bucket_contention: 0
       timeout: 0
       value: 2
-  stat_api:
-    max_stats_allowed: 256
   stop:
     shutdown_timeout: 0
   system:

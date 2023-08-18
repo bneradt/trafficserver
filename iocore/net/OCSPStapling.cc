@@ -309,9 +309,9 @@ public:
 
     this->_fsm = FetchSMAllocator.alloc();
     if (use_post) {
-      this->_fsm->ext_init(this, "POST", uri, "HTTP/1.1", reinterpret_cast<sockaddr *>(&sin), 0);
+      this->_fsm->ext_init(this, "POST", uri, "HTTP/1.1", reinterpret_cast<sockaddr *>(&sin), TS_FETCH_FLAGS_SKIP_REMAP);
     } else {
-      this->_fsm->ext_init(this, "GET", uri, "HTTP/1.1", reinterpret_cast<sockaddr *>(&sin), 0);
+      this->_fsm->ext_init(this, "GET", uri, "HTTP/1.1", reinterpret_cast<sockaddr *>(&sin), TS_FETCH_FLAGS_SKIP_REMAP);
     }
   }
 
@@ -845,16 +845,20 @@ ssl_stapling_init_cert(SSL_CTX *ctx, X509 *cert, const char *certname, const cha
     if (fp) {
       fseek(fp, 0, SEEK_END);
       long rsp_buf_len = ftell(fp);
-      rewind(fp);
-      unsigned char *rsp_buf = static_cast<unsigned char *>(malloc(rsp_buf_len));
-      auto read_len          = fread(rsp_buf, 1, rsp_buf_len, fp);
-      if (read_len == static_cast<size_t>(rsp_buf_len)) {
-        const unsigned char *p = rsp_buf;
-        rsp                    = d2i_TS_OCSP_RESPONSE(nullptr, &p, rsp_buf_len);
+      if (rsp_buf_len >= 0) {
+        rewind(fp);
+        unsigned char *rsp_buf = static_cast<unsigned char *>(malloc(rsp_buf_len));
+        auto read_len          = fread(rsp_buf, 1, rsp_buf_len, fp);
+        if (read_len == static_cast<size_t>(rsp_buf_len)) {
+          const unsigned char *p = rsp_buf;
+          rsp                    = d2i_TS_OCSP_RESPONSE(nullptr, &p, rsp_buf_len);
+        } else {
+          Error("stapling_refresh_response: failed to read prefetched response file: %s", rsp_file);
+        }
+        free(rsp_buf);
       } else {
-        Error("stapling_refresh_response: failed to read prefetched response file: %s", rsp_file);
+        Error("stapling_refresh_response: failed to check the size of prefetched response file: %s", rsp_file);
       }
-      free(rsp_buf);
       fclose(fp);
     }
 
@@ -997,7 +1001,7 @@ query_responder(const char *uri, const char *user_agent, TS_OCSP_REQUEST *req, i
   ink_hrtime start, end;
   TS_OCSP_RESPONSE *resp = nullptr;
 
-  start = Thread::get_hrtime();
+  start = ink_get_hrtime();
   end   = ink_hrtime_add(start, ink_hrtime_from_sec(req_timeout));
 
   HTTPRequest httpreq;
@@ -1033,7 +1037,7 @@ query_responder(const char *uri, const char *user_agent, TS_OCSP_REQUEST *req, i
   // Wait until the request completes
   do {
     ink_hrtime_sleep(HRTIME_MSECONDS(1));
-  } while (!httpreq.is_done() && (Thread::get_hrtime() < end));
+  } while (!httpreq.is_done() && (ink_get_hrtime() < end));
 
   if (!httpreq.is_done()) {
     Error("OCSP request was timed out; uri=%s", uri);

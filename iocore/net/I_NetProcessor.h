@@ -27,6 +27,7 @@
 #include "I_EventSystem.h"
 #include "I_Socks.h"
 #include "I_NetVConnection.h"
+#include "AcceptOptions.h"
 struct socks_conf_struct;
 #define NET_CONNECT_TIMEOUT 30
 
@@ -43,75 +44,7 @@ class NetProcessor : public Processor
 public:
   /** Options for @c accept.
    */
-  struct AcceptOptions {
-    using self = AcceptOptions; ///< Self reference type.
-
-    /// Port on which to listen.
-    /// 0 => don't care, which is useful if the socket is already bound.
-    int local_port;
-    /// Local address to bind for accept.
-    /// If not set -> any address.
-    IpAddr local_ip;
-    /// IP address family.
-    /// @note Ignored if an explicit incoming address is set in the
-    /// the configuration (@c local_ip). If neither is set IPv4 is used.
-    int ip_family;
-    /// Should we use accept threads? If so, how many?
-    int accept_threads;
-    /// Event type to generate on accept.
-    EventType etype;
-    /** If @c true, the continuation is called back with
-        @c NET_EVENT_ACCEPT_SUCCEED
-        or @c NET_EVENT_ACCEPT_FAILED on success and failure resp.
-    */
-
-    bool localhost_only;
-    /// Are frequent accepts expected?
-    /// Default: @c false.
-    bool frequent_accept;
-
-    /// Socket receive buffer size.
-    /// 0 => OS default.
-    int recv_bufsize;
-    /// Socket transmit buffer size.
-    /// 0 => OS default.
-    int send_bufsize;
-    /// defer accept for @c sockopt.
-    /// 0 => OS default.
-    int defer_accept;
-    /// Socket options for @c sockopt.
-    /// 0 => do not set options.
-    uint32_t sockopt_flags;
-    uint32_t packet_mark;
-    uint32_t packet_tos;
-    uint32_t packet_notsent_lowat;
-
-    int tfo_queue_length;
-
-    /** Transparency on client (user agent) connection.
-        @internal This is irrelevant at a socket level (since inbound
-        transparency must be set up when the listen socket is created)
-        but it's critical that the connection handling logic knows
-        whether the inbound (client / user agent) connection is
-        transparent.
-    */
-    bool f_inbound_transparent;
-
-    /** MPTCP enabled on listener.
-        @internal For logging and metrics purposes to know whether the
-        listener enabled MPTCP or not.
-    */
-    bool f_mptcp;
-
-    /// Proxy Protocol enabled
-    bool f_proxy_protocol;
-
-    /// Default constructor.
-    /// Instance is constructed with default values.
-    AcceptOptions() { this->reset(); }
-    /// Reset all values to defaults.
-    self &reset();
-  };
+  using AcceptOptions = ::AcceptOptions;
 
   /**
     Accept connections on a port.
@@ -134,7 +67,7 @@ public:
     @return Action, that can be cancelled to cancel the accept. The
       port becomes free immediately.
    */
-  virtual Action *accept(Continuation *cont, AcceptOptions const &opt = DEFAULT_ACCEPT_OPTIONS);
+  virtual Action *accept(Continuation *cont, AcceptOptions const &opt = DEFAULT_ACCEPT_OPTIONS) = 0;
 
   /**
     Accepts incoming connections on port. Accept connections on port.
@@ -160,8 +93,9 @@ public:
       port becomes free immediately.
 
   */
-  virtual Action *main_accept(Continuation *cont, SOCKET listen_socket_in, AcceptOptions const &opt = DEFAULT_ACCEPT_OPTIONS);
-  virtual void stop_accept();
+  virtual Action *main_accept(Continuation *cont, SOCKET listen_socket_in, AcceptOptions const &opt = DEFAULT_ACCEPT_OPTIONS) = 0;
+
+  virtual void stop_accept() = 0;
 
   /**
     Open a NetVConnection for connection oriented I/O. Connects
@@ -181,8 +115,7 @@ public:
     @param options @see NetVCOptions.
 
   */
-
-  Action *connect_re(Continuation *cont, sockaddr const *addr, NetVCOptions *options = nullptr);
+  virtual Action *connect_re(Continuation *cont, sockaddr const *addr, NetVCOptions const &options) = 0;
 
   /**
     Initializes the net processor. This must be called before the event threads are started.
@@ -225,15 +158,6 @@ public:
   // noncopyable
   NetProcessor(const NetProcessor &)            = delete;
   NetProcessor &operator=(const NetProcessor &) = delete;
-
-private:
-  /** @note Not implemented. */
-  virtual int
-  stop()
-  {
-    ink_release_assert(!"NetProcessor::stop not implemented");
-    return 1;
-  }
 };
 
 /**

@@ -36,6 +36,7 @@ github:
     - c-taylor
     - etapia
     - lzx404243
+    - JosiahWI
   protected_branches:
     master:
       required_status_checks:
@@ -47,6 +48,7 @@ github:
           - AuTest 2of4
           - AuTest 3of4
           - Rocky
+          - CentOS
           - Clang-Analyzer
           - Clang-Format
           - CMake

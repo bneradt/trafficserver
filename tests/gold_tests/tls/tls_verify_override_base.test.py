@@ -115,7 +115,7 @@ ts.Disk.records_config.update({
     'proxy.config.dns.nameservers': '127.0.0.1:{0}'.format(dns.Variables.Port),
     'proxy.config.dns.resolv_conf': 'NULL',
     'proxy.config.ssl.client.verify.server.policy': 'PERMISSIVE',
-    'proxy.config.http.connect.dead.policy': 1,  # Don't count TLS failures for dead upstream.
+    'proxy.config.http.connect.down.policy': 1,  # Don't count TLS failures when deciding whehter the server is down.
 })
 
 dns.addRecords(records={"foo.com.": ["127.0.0.1"]})
@@ -241,7 +241,7 @@ tr.Processes.Default.Streams.stdout = Testers.ExcludesExpression("Could not conn
 
 # checks on random.com should fail with message only
 ts.Disk.diags_log.Content = Testers.ContainsExpression(
-    r"WARNING: Core server certificate verification failed for \(random.com\). Action=Continue Error=self signed certificate server=127.0.0.1\(127.0.0.1\) depth=0",
+    r"WARNING: Core server certificate verification failed for \(random.com\). Action=Continue Error=self.signed certificate server=127.0.0.1\(127.0.0.1\) depth=0",
     "Warning for self signed certificate")
 # permissive failure for bar.com
 ts.Disk.diags_log.Content += Testers.ContainsExpression(

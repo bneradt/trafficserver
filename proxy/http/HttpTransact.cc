@@ -21,6 +21,9 @@
   limitations under the License.
  */
 
+#include "tscore/ink_inet.h"
+#include "tscpp/util/ts_bw_format.h"
+
 #include "ts/parentselectdefs.h"
 #include "tscore/ink_inet.h"
 #include "tscore/ink_platform.h"
@@ -36,7 +39,6 @@
 #include <ctime>
 #include "tscore/ParseRules.h"
 #include "tscore/Filenames.h"
-#include "tscore/bwf_std_format.h"
 #include "HTTP.h"
 #include "HdrUtils.h"
 #include "logging/Log.h"
@@ -586,7 +588,7 @@ find_server_and_update_current_info(HttpTransact::State *s)
       TxnDebug("http_trans", "request not cacheable, so bypass parent");
       s->parent_result.result = PARENT_DIRECT;
     }
-  } else if (s->txn_conf->uncacheable_requests_bypass_parent && s->http_config_param->no_dns_forward_to_parent == 0 &&
+  } else if (s->txn_conf->uncacheable_requests_bypass_parent && s->txn_conf->no_dns_forward_to_parent == 0 &&
              !HttpTransact::is_request_cache_lookupable(s)) {
     // request not lookupable and cacheable, so bypass parent if the parent is not an origin server.
     // Note that the configuration of the proxy as well as the request
@@ -615,7 +617,7 @@ find_server_and_update_current_info(HttpTransact::State *s)
       // We already have a parent that failed, if we are now told
       //  to go the origin server, we can only obey this if we
       //  dns'ed the origin server
-      if (s->parent_result.result == PARENT_DIRECT && s->http_config_param->no_dns_forward_to_parent != 0) {
+      if (s->parent_result.result == PARENT_DIRECT && s->txn_conf->no_dns_forward_to_parent != 0) {
         ink_assert(!s->server_info.dst_addr.isValid());
         s->parent_result.result = PARENT_FAIL;
       }
@@ -626,7 +628,7 @@ find_server_and_update_current_info(HttpTransact::State *s)
       //   1) the config permitted us to dns the origin server
       //   2) the config permits us
       //   3) the parent was not set from API
-      if (s->http_config_param->no_dns_forward_to_parent == 0 && bypass_ok(s) && parent_is_proxy(s) &&
+      if (s->txn_conf->no_dns_forward_to_parent == 0 && bypass_ok(s) && parent_is_proxy(s) &&
           !s->parent_params->apiParentExists(&s->request_data)) {
         s->parent_result.result = PARENT_DIRECT;
       }
@@ -659,7 +661,7 @@ find_server_and_update_current_info(HttpTransact::State *s)
   case PARENT_DIRECT:
     // if the configuration does not allow the origin to be dns'd
     // we're unable to go direct to the origin.
-    if (s->http_config_param->no_dns_forward_to_parent) {
+    if (s->txn_conf->no_dns_forward_to_parent) {
       Warning("no available parents and the config proxy.config.http.no_dns_just_forward_to_parent, prevents origin lookups.");
       s->parent_result.result = PARENT_FAIL;
       return ResolveInfo::HOST_NONE;
@@ -904,18 +906,18 @@ HttpTransact::TooEarly(State *s)
 }
 
 void
-HttpTransact::OriginDead(State *s)
+HttpTransact::OriginDown(State *s)
 {
   TxnDebug("http_trans", "origin server is marked down");
   bootstrap_state_variables_from_request(s, &s->hdr_info.client_request);
   build_error_response(s, HTTP_STATUS_BAD_GATEWAY, "Origin Server Marked Down", "connect#failed_connect");
-  HTTP_INCREMENT_DYN_STAT(http_dead_server_no_requests);
+  HTTP_INCREMENT_DYN_STAT(http_down_server_no_requests);
   char *url_str = s->hdr_info.client_request.url_string_get(&s->arena);
   int host_len;
   const char *host_name_ptr = s->unmapped_url.host_get(&host_len);
   std::string_view host_name{host_name_ptr, size_t(host_len)};
-  ts::bwprint(error_bw_buffer, "CONNECT: dead server no request to {} for host='{}' url='{}'", s->current.server->dst_addr,
-              host_name, ts::bwf::FirstOf(url_str, "<none>"));
+  swoc::bwprint(error_bw_buffer, "CONNECT: down server no request to {} for host='{}' url='{}'", s->current.server->dst_addr,
+                host_name, swoc::bwf::FirstOf(url_str, "<none>"));
   Log::error("%s", error_bw_buffer.c_str());
   s->arena.str_free(url_str);
 
@@ -1035,8 +1037,8 @@ HttpTransact::EndRemapRequest(State *s)
   int host_len;
   const char *host = incoming_request->host_get(&host_len);
   TxnDebug("http_trans", "EndRemapRequest host is %.*s", host_len, host);
-  if (s->state_machine->ua_txn) {
-    s->state_machine->ua_txn->set_default_inactivity_timeout(HRTIME_SECONDS(s->txn_conf->default_inactivity_timeout));
+  if (s->state_machine->get_ua_txn()) {
+    s->state_machine->get_ua_txn()->set_default_inactivity_timeout(HRTIME_SECONDS(s->txn_conf->default_inactivity_timeout));
   }
 
   // Setting enable_redirection according to HttpConfig (master or overridable). We
@@ -1165,13 +1167,14 @@ HttpTransact::EndRemapRequest(State *s)
       s->req_flavor = REQ_FLAVOR_REVPROXY;
     }
   }
-  s->reverse_proxy              = true;
-  s->server_info.is_transparent = s->state_machine->ua_txn ? s->state_machine->ua_txn->is_outbound_transparent() : false;
+  s->reverse_proxy = true;
+  s->server_info.is_transparent =
+    s->state_machine->get_ua_txn() ? s->state_machine->get_ua_txn()->is_outbound_transparent() : false;
 
 done:
   // We now set the active-timeout again, since it might have been changed as part of the remap rules.
-  if (s->state_machine->ua_txn) {
-    s->state_machine->ua_txn->set_active_timeout(HRTIME_SECONDS(s->txn_conf->transaction_active_timeout_in));
+  if (s->state_machine->get_ua_txn()) {
+    s->state_machine->get_ua_txn()->set_active_timeout(HRTIME_SECONDS(s->txn_conf->transaction_active_timeout_in));
   }
 
   if (is_debug_tag_set("http_chdr_describe") || is_debug_tag_set("http_trans") || is_debug_tag_set("url_rewrite")) {
@@ -1553,8 +1556,8 @@ HttpTransact::HandleRequest(State *s)
       }
     }
     if (s->txn_conf->request_buffer_enabled &&
-        s->state_machine->ua_txn->has_request_body(s->hdr_info.request_content_length,
-                                                   s->client_info.transfer_encoding == CHUNKED_ENCODING)) {
+        s->state_machine->get_ua_txn()->has_request_body(s->hdr_info.request_content_length,
+                                                         s->client_info.transfer_encoding == CHUNKED_ENCODING)) {
       TRANSACT_RETURN(SM_ACTION_WAIT_FOR_FULL_BODY, nullptr);
     }
   }
@@ -1601,8 +1604,7 @@ HttpTransact::HandleRequest(State *s)
     TRANSACT_RETURN(SM_ACTION_INTERNAL_CACHE_NOOP, nullptr);
   }
 
-  if (s->http_config_param->no_dns_forward_to_parent && s->scheme != URL_WKSIDX_HTTPS &&
-      strcmp(s->server_info.name, "127.0.0.1") != 0) {
+  if (s->txn_conf->no_dns_forward_to_parent && s->scheme != URL_WKSIDX_HTTPS && strcmp(s->server_info.name, "127.0.0.1") != 0) {
     // for HTTPS requests, we must go directly to the
     // origin server. Ignore the no_dns_just_forward_to_parent setting.
     // we need to see if the hostname is an
@@ -1805,21 +1807,21 @@ HttpTransact::PPDNSLookup(State *s)
         return;
       }
       ink_assert(s->current.request_to == ResolveInfo::HOST_NONE);
-      handle_parent_died(s);
+      handle_parent_down(s);
       return;
     }
 
     if (!s->current.server->dst_addr.isValid()) {
       if (s->current.request_to == ResolveInfo::PARENT_PROXY) {
         TRANSACT_RETURN(SM_ACTION_DNS_LOOKUP, PPDNSLookupAPICall);
-      } else if (s->parent_result.result == PARENT_DIRECT && s->http_config_param->no_dns_forward_to_parent != 1) {
+      } else if (s->parent_result.result == PARENT_DIRECT && s->txn_conf->no_dns_forward_to_parent != 1) {
         // We ran out of parents but parent configuration allows us to go to Origin Server directly
         CallOSDNSLookup(s);
         return;
       } else {
         // We could be out of parents here if all the parents failed DNS lookup
         ink_assert(s->current.request_to == ResolveInfo::HOST_NONE);
-        handle_parent_died(s);
+        handle_parent_down(s);
       }
       return;
     }
@@ -1888,7 +1890,7 @@ HttpTransact::OSDNSLookup(State *s)
       /* Transparent case: We tried to connect to client target address, failed and tried to use a different addr
        * but that failed to resolve therefore keep on with the CTA.
        */
-      s->dns_info.addr.assign(s->state_machine->ua_txn->get_netvc()->get_local_addr()); // fetch CTA
+      s->dns_info.addr.assign(s->state_machine->get_ua_txn()->get_netvc()->get_local_addr()); // fetch CTA
       s->dns_info.resolved_p    = true;
       s->dns_info.os_addr_style = ResolveInfo::OS_Addr::USE_CLIENT;
       TxnDebug("http_seq", "DNS lookup unsuccessful, using client target address");
@@ -1910,11 +1912,11 @@ HttpTransact::OSDNSLookup(State *s)
         build_error_response(s, HTTP_STATUS_INTERNAL_SERVER_ERROR, "Cannot find server.", "connect#dns_failed");
         log_msg = "looking up";
       } else {
-        build_error_response(s, HTTP_STATUS_INTERNAL_SERVER_ERROR, "No valid server.", "connect#all_dead");
+        build_error_response(s, HTTP_STATUS_INTERNAL_SERVER_ERROR, "No valid server.", "connect#all_down");
         log_msg = "no valid server";
       }
       char *url_str = s->hdr_info.client_request.url_string_get(&s->arena, nullptr);
-      ts::bwprint(error_bw_buffer, "DNS Error: {} {}", log_msg, ts::bwf::FirstOf(url_str, "<none>"));
+      swoc::bwprint(error_bw_buffer, "DNS Error: {} {}", log_msg, swoc::bwf::FirstOf(url_str, "<none>"));
       Log::error("%s", error_bw_buffer.c_str());
       // s->cache_info.action = CACHE_DO_NO_ACTION;
       TRANSACT_RETURN(SM_ACTION_SEND_ERROR_CACHE_NOOP, nullptr);
@@ -2020,7 +2022,7 @@ HttpTransact::OSDNSLookup(State *s)
     // therefore no more backtracking - return to trying the server.
     TRANSACT_RETURN(how_to_open_connection(s), HttpTransact::HandleResponse);
   } else if (s->dns_info.lookup_name[0] <= '9' && s->dns_info.lookup_name[0] >= '0' && s->parent_params->parent_table->hostMatch &&
-             !s->http_config_param->no_dns_forward_to_parent) {
+             !s->txn_conf->no_dns_forward_to_parent) {
     // note, broken logic: ACC fudges the OR stmt to always be true,
     // 'AuthHttpAdapter' should do the rev-dns if needed, not here .
     TRANSACT_RETURN(SM_ACTION_DNS_REVERSE_LOOKUP, HttpTransact::StartAccessControl);
@@ -2195,7 +2197,7 @@ HttpTransact::LookupSkipOpenServer(State *s)
   if (s->current.request_to == ResolveInfo::PARENT_PROXY) {
     TRANSACT_RETURN(SM_ACTION_DNS_LOOKUP, PPDNSLookupAPICall);
   } else if (s->parent_result.result == PARENT_FAIL) {
-    handle_parent_died(s);
+    handle_parent_down(s);
     return;
   }
 
@@ -2865,7 +2867,7 @@ HttpTransact::HandleCacheOpenReadHit(State *s)
         update_current_info(&s->current, nullptr, ResolveInfo::UNDEFINED_LOOKUP, true);
         TxnDebug("http_trans", "CacheOpenReadHit - server_down, returning stale document");
       } else {
-        handle_parent_died(s);
+        handle_parent_down(s);
         return;
       }
     }
@@ -2895,7 +2897,7 @@ HttpTransact::HandleCacheOpenReadHit(State *s)
           } else if (s->current.request_to == ResolveInfo::ORIGIN_SERVER) {
             return CallOSDNSLookup(s);
           } else {
-            handle_parent_died(s);
+            handle_parent_down(s);
             return;
           }
         }
@@ -3064,7 +3066,7 @@ HttpTransact::build_response_from_cache(State *s, HTTPWarningCode warning_code)
           // this late.
           TxnDebug("http_seq", "Out-of-order Range request - tunneling");
           s->cache_info.action = CACHE_DO_NO_ACTION;
-          if (s->force_dns) {
+          if (s->force_dns || s->dns_info.resolved_p) {
             HandleCacheOpenReadMiss(s); // DNS is already completed no need of doing DNS
           } else {
             CallOSDNSLookup(s);
@@ -3307,19 +3309,19 @@ HttpTransact::HandleCacheOpenReadMiss(State *s)
     // a parent lookup could come back as PARENT_FAIL if in parent.config go_direct == false and
     // there are no available parents (all down).
     if (s->parent_result.result == PARENT_FAIL) {
-      handle_parent_died(s);
+      handle_parent_down(s);
       return;
     }
     if (!s->current.server->dst_addr.isValid()) {
       ink_release_assert(s->parent_result.result == PARENT_DIRECT || s->current.request_to == ResolveInfo::PARENT_PROXY ||
-                         s->http_config_param->no_dns_forward_to_parent != 0);
-      if (s->parent_result.result == PARENT_DIRECT && s->http_config_param->no_dns_forward_to_parent != 1) {
+                         s->txn_conf->no_dns_forward_to_parent != 0);
+      if (s->parent_result.result == PARENT_DIRECT && s->txn_conf->no_dns_forward_to_parent != 1) {
         return CallOSDNSLookup(s);
       }
       if (s->current.request_to == ResolveInfo::PARENT_PROXY) {
         TRANSACT_RETURN(SM_ACTION_DNS_LOOKUP, HttpTransact::PPDNSLookupAPICall);
       } else {
-        handle_parent_died(s);
+        handle_parent_down(s);
         return;
       }
     }
@@ -3369,7 +3371,7 @@ HttpTransact::OriginServerRawOpen(State *s)
     /* fall through */
   case OUTBOUND_CONGESTION:
     /* fall through */
-    handle_server_died(s);
+    handle_server_down(s);
 
     ink_assert(s->cache_info.action == CACHE_DO_NO_ACTION);
     s->next_action = SM_ACTION_INTERNAL_CACHE_NOOP;
@@ -3638,7 +3640,7 @@ HttpTransact::handle_response_from_parent(State *s)
         markParentDown(s);
       }
       s->parent_result.result = PARENT_FAIL;
-      handle_parent_died(s);
+      handle_parent_down(s);
       return;
     }
 
@@ -3758,7 +3760,7 @@ HttpTransact::handle_response_from_server(State *s)
   case BAD_INCOMING_RESPONSE:
 
     if (is_server_negative_cached(s)) {
-      max_connect_retries = s->txn_conf->connect_attempts_max_retries_dead_server - 1;
+      max_connect_retries = s->txn_conf->connect_attempts_max_retries_down_server - 1;
     } else {
       // server not yet negative cached - use default number of retries
       max_connect_retries = s->txn_conf->connect_attempts_max_retries;
@@ -3827,12 +3829,12 @@ HttpTransact::error_log_connection_failure(State *s, ServerState_t conn_state)
       host_name_ptr = s->unmapped_url.host_get(&host_len);
     }
     std::string_view host_name{host_name_ptr, size_t(host_len)};
-    ts::bwprint(error_bw_buffer,
-                "CONNECT: attempt fail [{}] to {} for host='{}' "
-                "connection_result={::s} error={::s} retry_attempts={} url='{}'",
-                HttpDebugNames::get_server_state_name(conn_state), s->current.server->dst_addr, host_name,
-                ts::bwf::Errno(s->current.server->connect_result), ts::bwf::Errno(s->cause_of_death_errno),
-                s->current.retry_attempts.get(), ts::bwf::FirstOf(url_str, "<none>"));
+    swoc::bwprint(error_bw_buffer,
+                  "CONNECT: attempt fail [{}] to {} for host='{}' "
+                  "connection_result={::s} error={::s} retry_attempts={} url='{}'",
+                  HttpDebugNames::get_server_state_name(conn_state), s->current.server->dst_addr, host_name,
+                  swoc::bwf::Errno(s->current.server->connect_result), swoc::bwf::Errno(s->cause_of_death_errno),
+                  s->current.retry_attempts.get(), swoc::bwf::FirstOf(url_str, "<none>"));
     Log::error("%s", error_bw_buffer.c_str());
 
     s->arena.str_free(url_str);
@@ -3943,10 +3945,10 @@ HttpTransact::handle_server_connection_not_open(State *s)
   } else {
     switch (s->current.request_to) {
     case ResolveInfo::PARENT_PROXY:
-      handle_parent_died(s);
+      handle_parent_down(s);
       break;
     case ResolveInfo::ORIGIN_SERVER:
-      handle_server_died(s);
+      handle_server_down(s);
       break;
     default:
       ink_assert(!("s->current.request_to is not P.P. or O.S. - hmmm."));
@@ -4622,7 +4624,7 @@ HttpTransact::handle_cache_operation_on_forward_server_response(State *s)
     MIMEField *resp_via = s->hdr_info.server_response.field_find(MIME_FIELD_VIA, MIME_LEN_VIA);
     if (resp_via) {
       int saved_via_len = 0;
-      ts::LocalBufferWriter<HTTP_OUR_VIA_MAX_LENGTH> saved_via_w;
+      swoc::LocalBufferWriter<HTTP_OUR_VIA_MAX_LENGTH> saved_via_w;
       MIMEField *our_via;
       our_via = s->hdr_info.client_response.field_find(MIME_FIELD_VIA, MIME_LEN_VIA);
       if (our_via == nullptr) {
@@ -5390,9 +5392,9 @@ HttpTransact::check_request_validity(State *s, HTTPHdr *incoming_hdr)
     if ((scheme == URL_WKSIDX_HTTP || scheme == URL_WKSIDX_HTTPS) &&
         (method == HTTP_WKSIDX_POST || method == HTTP_WKSIDX_PUSH || method == HTTP_WKSIDX_PUT) &&
         s->client_info.transfer_encoding != CHUNKED_ENCODING) {
-      // In normal operation there will always be a ua_txn at this point, but in one of the -R1  regression tests a request is
+      // In normal operation there will always be a get_ua_txn() at this point, but in one of the -R1  regression tests a request is
       // createdindependent of a transaction and this method is called, so we must null check
-      if (!s->state_machine->ua_txn || s->state_machine->ua_txn->is_chunked_encoding_supported()) {
+      if (!s->state_machine->get_ua_txn() || s->state_machine->get_ua_txn()->is_chunked_encoding_supported()) {
         // See if we need to insert a chunked header
         if (!incoming_hdr->presence(MIME_PRESENCE_CONTENT_LENGTH)) {
           if (s->txn_conf->post_check_content_length_enabled) {
@@ -5687,8 +5689,8 @@ HttpTransact::initialize_state_variables_from_request(State *s, HTTPHdr *obsolet
   }
 
   NetVConnection *vc = nullptr;
-  if (s->state_machine->ua_txn) {
-    vc = s->state_machine->ua_txn->get_netvc();
+  if (s->state_machine->get_ua_txn()) {
+    vc = s->state_machine->get_ua_txn()->get_netvc();
   }
 
   if (vc) {
@@ -5733,9 +5735,18 @@ HttpTransact::initialize_state_variables_from_request(State *s, HTTPHdr *obsolet
     s->cache_info.action = CACHE_DO_NO_ACTION;
   }
 
+  // This function, HttpTransact::initialize_state_variables_from_request(), may be called multiple times for the same
+  // HTTP request.  But we only want to increment the per-method request count the first time this function is called
+  // for each request.  0 is the value that the State class constructor initializes 'method' to, it means unset, so
+  // method should only be 0 if it's the first call to this function.
+  //
+  bool do_increment_stat = (0 == s->method);
+
   s->method = incoming_request->method_get_wksidx();
 
-  if (s->method == HTTP_WKSIDX_GET) {
+  if (!do_increment_stat) {
+    ;
+  } else if (s->method == HTTP_WKSIDX_GET) {
     HTTP_INCREMENT_DYN_STAT(http_get_requests_stat);
   } else if (s->method == HTTP_WKSIDX_HEAD) {
     HTTP_INCREMENT_DYN_STAT(http_head_requests_stat);
@@ -5815,7 +5826,7 @@ HttpTransact::initialize_state_variables_from_response(State *s, HTTPHdr *incomi
 
   if (s->current.server->keep_alive == HTTP_KEEPALIVE) {
     TxnDebug("http_hdrs", "Server is keep-alive.");
-  } else if (s->state_machine->ua_txn && s->state_machine->ua_txn->is_outbound_transparent() &&
+  } else if (s->state_machine->get_ua_txn() && s->state_machine->get_ua_txn()->is_outbound_transparent() &&
              s->state_machine->t_state.http_config_param->use_client_source_port) {
     /* If we are reusing the client<->ATS 4-tuple for ATS<->server then if the server side is closed, we can't
        re-open it because the 4-tuple may still be in the processing of shutting down. So if the server isn't
@@ -6496,7 +6507,7 @@ HttpTransact::is_request_valid(State *s, HTTPHdr *incoming_request)
 // and the first set of bytes is relatively small. This distinction is more apparent in the
 // case where the origin connection is a KA session. In this case, the session may not have
 // been used for a long time. In that case, we'll immediately queue up session to send to the
-// origin, without any idea of the state of the connection. If the origin is dead (or the connection
+// origin, without any idea of the state of the connection. If the origin is down (or the connection
 // is broken for some other reason) we'll immediately get a RST back. In that case-- since no
 // bytes where ACKd by the remote end, we can retry/redispatch the request.
 //
@@ -6544,8 +6555,8 @@ HttpTransact::process_quick_http_filter(State *s, int method)
     return;
   }
 
-  if (s->state_machine->ua_txn) {
-    auto &acl              = s->state_machine->ua_txn->get_acl();
+  if (s->state_machine->get_ua_txn()) {
+    auto &acl              = s->state_machine->get_ua_txn()->get_acl();
     bool deny_request      = !acl.isValid();
     int method_str_len     = 0;
     const char *method_str = nullptr;
@@ -6750,7 +6761,9 @@ HttpTransact::handle_content_length_header(State *s, HTTPHdr *header, HTTPHdr *b
         change_response_header_because_of_range_request(s, header);
         s->hdr_info.trust_response_cl = true;
       } else {
-        header->set_content_length(cl);
+        if (header->status_get() != HTTP_STATUS_NO_CONTENT) {
+          header->set_content_length(cl);
+        }
         s->hdr_info.trust_response_cl = true;
       }
     } else {
@@ -6950,9 +6963,9 @@ HttpTransact::handle_response_keep_alive_headers(State *s, HTTPVersion ver, HTTP
 
     // check that the client protocol is HTTP/1.1 and the conf allows chunking or
     // the client protocol doesn't support chunked transfer coding (i.e. HTTP/1.0, HTTP/2, and HTTP/3)
-    if (s->state_machine->ua_txn && s->state_machine->ua_txn->is_chunked_encoding_supported() &&
+    if (s->state_machine->get_ua_txn() && s->state_machine->get_ua_txn()->is_chunked_encoding_supported() &&
         s->client_info.http_version == HTTP_1_1 && s->txn_conf->chunking_enabled == 1 &&
-        s->state_machine->ua_txn->is_chunked_encoding_supported() &&
+        s->state_machine->get_ua_txn()->is_chunked_encoding_supported() &&
         // if we're not sending a body, don't set a chunked header regardless of server response
         !is_response_body_precluded(s->hdr_info.client_response.status_get(), s->method) &&
         // we do not need chunked encoding for internal error messages
@@ -6988,8 +7001,8 @@ HttpTransact::handle_response_keep_alive_headers(State *s, HTTPVersion ver, HTTP
     // unless we are going to use chunked encoding on HTTP/1.1 or the client issued a PUSH request
     if (s->client_info.keep_alive != HTTP_KEEPALIVE) {
       ka_action = KA_DISABLED;
-    } else if (s->hdr_info.trust_response_cl == false && s->state_machine->ua_txn &&
-               s->state_machine->ua_txn->is_chunked_encoding_supported() &&
+    } else if (s->hdr_info.trust_response_cl == false && s->state_machine->get_ua_txn() &&
+               s->state_machine->get_ua_txn()->is_chunked_encoding_supported() &&
                !(s->client_info.receive_chunked_response == true ||
                  (s->method == HTTP_WKSIDX_PUSH && s->client_info.keep_alive == HTTP_KEEPALIVE))) {
       ka_action = KA_CLOSE;
@@ -7015,8 +7028,8 @@ HttpTransact::handle_response_keep_alive_headers(State *s, HTTPVersion ver, HTTP
     if (s->client_info.keep_alive != HTTP_NO_KEEPALIVE || (ver == HTTP_1_1)) {
       if (s->client_info.proxy_connect_hdr) {
         heads->value_set(c_hdr_field_str, c_hdr_field_len, "close", 5);
-      } else if (s->state_machine->ua_txn != nullptr) {
-        s->state_machine->ua_txn->set_close_connection(*heads);
+      } else if (s->state_machine->get_ua_txn() != nullptr) {
+        s->state_machine->get_ua_txn()->set_close_connection(*heads);
       }
       s->client_info.keep_alive = HTTP_NO_KEEPALIVE;
     }
@@ -7527,7 +7540,7 @@ HttpTransact::AuthenticationNeeded(const OverridableHttpConfigParams *p, HTTPHdr
 }
 
 void
-HttpTransact::handle_parent_died(State *s)
+HttpTransact::handle_parent_down(State *s)
 {
   ink_assert(s->parent_result.result == PARENT_FAIL);
 
@@ -7548,7 +7561,7 @@ HttpTransact::handle_parent_died(State *s)
 }
 
 void
-HttpTransact::handle_server_died(State *s)
+HttpTransact::handle_server_down(State *s)
 {
   const char *reason    = nullptr;
   const char *body_type = "UNKNOWN";
@@ -7559,7 +7572,7 @@ HttpTransact::handle_server_died(State *s)
   ////////////////////////////////////////////////////////
 
   switch (s->current.state) {
-  case CONNECTION_ALIVE: /* died while alive for unknown reason */
+  case CONNECTION_ALIVE: /* down while alive for unknown reason */
     ink_release_assert(s->hdr_info.response_error != NO_RESPONSE_HEADER_ERROR);
     status    = HTTP_STATUS_BAD_GATEWAY;
     reason    = "Unknown Error";
@@ -7611,7 +7624,7 @@ HttpTransact::handle_server_died(State *s)
   case STATE_UNDEFINED:
   case TRANSACTION_COMPLETE:
   default: /* unknown death */
-    ink_release_assert(!"[handle_server_died] Unreasonable state - not dead, shouldn't be here");
+    ink_release_assert(!"[handle_server_down] Unreasonable state - not down, shouldn't be here");
     status    = HTTP_STATUS_BAD_GATEWAY;
     reason    = nullptr;
     body_type = "response#bad_response";
@@ -7977,7 +7990,7 @@ HttpTransact::build_response(State *s, HTTPHdr *base_response, HTTPHdr *outgoing
 
   HttpTransactHeaders::add_server_header_to_response(s->txn_conf, outgoing_response);
 
-  if (s->state_machine->ua_txn && s->state_machine->ua_txn->get_proxy_ssn()->is_draining()) {
+  if (s->state_machine->get_ua_txn() && s->state_machine->get_ua_txn()->get_proxy_ssn()->is_draining()) {
     HttpTransactHeaders::add_connection_close(outgoing_response);
   }
 
@@ -8048,7 +8061,7 @@ HttpTransact::build_error_response(State *s, HTTPStatus status_code, const char 
   }
   // If transparent and the forward server connection looks unhappy don't
   // keep alive the ua connection.
-  if ((s->state_machine->ua_txn && s->state_machine->ua_txn->is_outbound_transparent()) &&
+  if ((s->state_machine->get_ua_txn() && s->state_machine->get_ua_txn()->is_outbound_transparent()) &&
       (status_code == HTTP_STATUS_INTERNAL_SERVER_ERROR || status_code == HTTP_STATUS_GATEWAY_TIMEOUT ||
        status_code == HTTP_STATUS_BAD_GATEWAY || status_code == HTTP_STATUS_SERVICE_UNAVAILABLE)) {
     s->client_info.keep_alive = HTTP_NO_KEEPALIVE;
@@ -8271,7 +8284,7 @@ HttpTransact::get_error_string(int erno)
 ink_time_t
 ink_local_time()
 {
-  return Thread::get_hrtime() / HRTIME_SECOND;
+  return ink_get_hrtime() / HRTIME_SECOND;
 }
 
 //
@@ -8281,7 +8294,7 @@ ink_local_time()
 void
 HttpTransact::milestone_start_api_time(State *s)
 {
-  s->state_machine->api_timer = Thread::get_hrtime_updated();
+  s->state_machine->api_timer = ink_get_hrtime();
 }
 
 void
@@ -8840,37 +8853,40 @@ HttpTransact::update_size_and_time_stats(State *s, ink_hrtime total_time, ink_hr
   }
 
   // update milestones stats
-  HTTP_SUM_DYN_STAT(http_ua_begin_time_stat, milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_UA_BEGIN));
-  HTTP_SUM_DYN_STAT(http_ua_first_read_time_stat, milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_UA_FIRST_READ));
+  HTTP_SUM_DYN_STAT(http_ua_begin_time_stat, milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_UA_BEGIN, 0));
+  HTTP_SUM_DYN_STAT(http_ua_first_read_time_stat, milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_UA_FIRST_READ, 0));
   HTTP_SUM_DYN_STAT(http_ua_read_header_done_time_stat,
-                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_UA_READ_HEADER_DONE));
-  HTTP_SUM_DYN_STAT(http_ua_begin_write_time_stat, milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_UA_BEGIN_WRITE));
-  HTTP_SUM_DYN_STAT(http_ua_close_time_stat, milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_UA_CLOSE));
+                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_UA_READ_HEADER_DONE, 0));
+  HTTP_SUM_DYN_STAT(http_ua_begin_write_time_stat,
+                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_UA_BEGIN_WRITE, 0));
+  HTTP_SUM_DYN_STAT(http_ua_close_time_stat, milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_UA_CLOSE, 0));
   HTTP_SUM_DYN_STAT(http_server_first_connect_time_stat,
-                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_SERVER_FIRST_CONNECT));
-  HTTP_SUM_DYN_STAT(http_server_connect_time_stat, milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_SERVER_CONNECT));
+                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_SERVER_FIRST_CONNECT, 0));
+  HTTP_SUM_DYN_STAT(http_server_connect_time_stat,
+                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_SERVER_CONNECT, 0));
   HTTP_SUM_DYN_STAT(http_server_connect_end_time_stat,
-                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_SERVER_CONNECT_END));
+                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_SERVER_CONNECT_END, 0));
   HTTP_SUM_DYN_STAT(http_server_begin_write_time_stat,
-                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_SERVER_BEGIN_WRITE));
+                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_SERVER_BEGIN_WRITE, 0));
   HTTP_SUM_DYN_STAT(http_server_first_read_time_stat,
-                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_SERVER_FIRST_READ));
+                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_SERVER_FIRST_READ, 0));
   HTTP_SUM_DYN_STAT(http_server_read_header_done_time_stat,
-                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_SERVER_READ_HEADER_DONE));
-  HTTP_SUM_DYN_STAT(http_server_close_time_stat, milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_SERVER_CLOSE));
+                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_SERVER_READ_HEADER_DONE, 0));
+  HTTP_SUM_DYN_STAT(http_server_close_time_stat, milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_SERVER_CLOSE, 0));
   HTTP_SUM_DYN_STAT(http_cache_open_read_begin_time_stat,
-                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_CACHE_OPEN_READ_BEGIN));
+                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_CACHE_OPEN_READ_BEGIN, 0));
   HTTP_SUM_DYN_STAT(http_cache_open_read_end_time_stat,
-                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_CACHE_OPEN_READ_END));
+                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_CACHE_OPEN_READ_END, 0));
   HTTP_SUM_DYN_STAT(http_cache_open_write_begin_time_stat,
-                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_CACHE_OPEN_WRITE_BEGIN));
+                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_CACHE_OPEN_WRITE_BEGIN, 0));
   HTTP_SUM_DYN_STAT(http_cache_open_write_end_time_stat,
-                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_CACHE_OPEN_WRITE_END));
+                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_CACHE_OPEN_WRITE_END, 0));
   HTTP_SUM_DYN_STAT(http_dns_lookup_begin_time_stat,
-                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_DNS_LOOKUP_BEGIN));
-  HTTP_SUM_DYN_STAT(http_dns_lookup_end_time_stat, milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_DNS_LOOKUP_END));
-  HTTP_SUM_DYN_STAT(http_sm_start_time_stat, milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_SM_START));
-  HTTP_SUM_DYN_STAT(http_sm_finish_time_stat, milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_SM_FINISH));
+                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_DNS_LOOKUP_BEGIN, 0));
+  HTTP_SUM_DYN_STAT(http_dns_lookup_end_time_stat,
+                    milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_DNS_LOOKUP_END, 0));
+  HTTP_SUM_DYN_STAT(http_sm_start_time_stat, milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_SM_START, 0));
+  HTTP_SUM_DYN_STAT(http_sm_finish_time_stat, milestones.difference_msec(TS_MILESTONE_SM_START, TS_MILESTONE_SM_FINISH, 0));
 }
 
 void

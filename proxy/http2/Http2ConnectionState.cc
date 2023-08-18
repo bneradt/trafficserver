@@ -30,6 +30,9 @@
 #include "Http2Frame.h"
 #include "Http2DebugNames.h"
 #include "HttpDebugNames.h"
+#include "HttpSM.h"
+
+#include "TLSSNISupport.h"
 
 #include "tscore/ink_assert.h"
 #include "tscpp/util/PostScript.h"
@@ -304,7 +307,8 @@ Http2ConnectionState::rcv_headers_frame(const Http2Frame &frame)
     if (reset_header_after_decoding) {
       free_stream_after_decoding                 = true;
       uint32_t const initial_local_stream_window = this->acknowledged_local_settings.get(HTTP2_SETTINGS_INITIAL_WINDOW_SIZE);
-      ink_assert(dynamic_cast<Http2CommonSession *>(this->session->get_proxy_session())->is_outbound() == true);
+      ink_assert(dynamic_cast<Http2CommonSession *>(this->session->get_proxy_session()));
+      ink_assert(this->session->is_outbound() == true);
       stream = THREAD_ALLOC_INIT(http2StreamAllocator, this_ethread(), this->session->get_proxy_session(), stream_id,
                                  this->peer_settings.get(HTTP2_SETTINGS_INITIAL_WINDOW_SIZE), initial_local_stream_window,
                                  !STREAM_IS_REGISTERED);
@@ -633,9 +637,7 @@ Http2ConnectionState::rcv_rst_stream_frame(const Http2Frame &frame)
 
   if (stream != nullptr) {
     Http2StreamDebug(this->session, stream_id, "Parsed RST_STREAM: Error Code: %u", rst_stream.error_code);
-
     stream->set_rx_error_code({ProxyErrorClass::TXN, static_cast<uint32_t>(rst_stream.error_code)});
-    stream->signal_read_event(VC_EVENT_EOS);
     stream->initiating_close();
   }
 
@@ -1098,7 +1100,15 @@ Http2ConnectionState::_get_configured_initial_window_size() const
   if (this->session->is_outbound()) {
     return Http2::initial_window_size_out;
   } else {
-    return Http2::initial_window_size_in;
+    uint32_t initial_window_size_in = Http2::initial_window_size_in;
+    if (this->session) {
+      if (auto snis = session->get_netvc()->get_service<TLSSNISupport>();
+          snis && snis->hints_from_sni.http2_initial_window_size_in.has_value()) {
+        initial_window_size_in = snis->hints_from_sni.http2_initial_window_size_in.value();
+      }
+    }
+
+    return initial_window_size_in;
   }
 }
 
@@ -1200,6 +1210,7 @@ Http2ConnectionState::init(Http2CommonSession *ssn)
     this->_local_rwnd              = configured_session_window;
     this->_local_rwnd_is_shrinking = false;
   }
+  Http2ConDebug(session, "initial _local_rwnd: %zd", this->_local_rwnd);
 
   local_hpack_handle = new HpackHandle(HTTP2_HEADER_TABLE_SIZE);
   peer_hpack_handle  = new HpackHandle(HTTP2_HEADER_TABLE_SIZE);
@@ -1719,7 +1730,7 @@ Http2ConnectionState::restart_streams()
     // Call send_response_body() for each streams
     while (s != end) {
       Http2Stream *next = static_cast<Http2Stream *>(s->link.next ? s->link.next : stream_list.head);
-      if (std::min(this->get_peer_rwnd(), s->get_peer_rwnd()) > 0) {
+      if (this->get_peer_rwnd() > 0 && s->get_peer_rwnd() > 0) {
         SCOPED_MUTEX_LOCK(lock, s->mutex, this_ethread());
         s->restart_sending();
       }
@@ -1729,7 +1740,7 @@ Http2ConnectionState::restart_streams()
 
     // The above stopped at end, so we need to call send_response_body() one
     // last time for the stream pointed to by end.
-    if (std::min(this->get_peer_rwnd(), s->get_peer_rwnd()) > 0) {
+    if (this->get_peer_rwnd() > 0 && s->get_peer_rwnd() > 0) {
       SCOPED_MUTEX_LOCK(lock, s->mutex, this_ethread());
       s->restart_sending();
     }
@@ -2199,16 +2210,21 @@ Http2ConnectionState::send_headers_frame(Http2Stream *stream)
       // Set END_STREAM on request headers for POST, etc. methods combined with
       // an explicit length 0. Some origins RST on request headers with
       // explicit zero length and no end stream flag, causing the request to
-      // fail. We emulate chromium behaviour here prevent such RSTs.
+      // fail. We emulate chromium behaviour here prevent such RSTs. Transfer-encoding
+      // implies there’s a body, regardless of whether it is chunked or not.
       bool content_method       = method == HTTP_WKSIDX_POST || method == HTTP_WKSIDX_PUSH || method == HTTP_WKSIDX_PUT;
       bool is_transfer_encoded  = send_hdr->presence(MIME_PRESENCE_TRANSFER_ENCODING);
       bool has_content_header   = send_hdr->presence(MIME_PRESENCE_CONTENT_LENGTH);
       bool explicit_zero_length = has_content_header && send_hdr->get_content_length() == 0;
+      int64_t content_length    = has_content_header ? send_hdr->get_content_length() : 0L;
+      bool is_chunked =
+        is_transfer_encoded && send_hdr->value_get(MIME_FIELD_TRANSFER_ENCODING) == std::string_view(HTTP_VALUE_CHUNKED);
 
       bool expect_content_stream =
-        is_transfer_encoded ||                                              // transfer encoded content length is unknown
-        (!content_method && has_content_header && !explicit_zero_length) || // non zero content with GET,etc
-        (content_method && !explicit_zero_length);                          // content-length >0 or empty with POST etc
+        is_transfer_encoded ||                                                        // transfer encoded content length is unknown
+        (!content_method && has_content_header && !explicit_zero_length) ||           // nonzero content with GET,etc
+        (content_method && !explicit_zero_length) ||                                  // content-length >0 or empty with POST etc
+        stream->get_sm()->get_ua_txn()->has_request_body(content_length, is_chunked); // request has a body
 
       // send END_STREAM if we don't expect any content
       if (!expect_content_stream) {

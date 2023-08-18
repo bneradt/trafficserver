@@ -43,7 +43,7 @@
 #include "UrlMapping.h"
 #include "records/I_RecHttp.h"
 #include "ProxySession.h"
-#include "MgmtDefs.h"
+#include "tscore/MgmtDefs.h"
 
 #define HTTP_OUR_VIA_MAX_LENGTH 1024 // 512-bytes for hostname+via string, 512-bytes for the debug info
 
@@ -977,7 +977,7 @@ public:
   static void Forbidden(State *s);
   static void SelfLoop(State *s);
   static void TooEarly(State *s);
-  static void OriginDead(State *s);
+  static void OriginDown(State *s);
   static void PostActiveTimeoutResponse(State *s);
   static void PostInactiveTimeoutResponse(State *s);
   static void DecideCacheLookup(State *s);
@@ -1049,7 +1049,11 @@ public:
   static bool handle_internal_request(State *s, HTTPHdr *incoming_hdr);
   static bool handle_trace_and_options_requests(State *s, HTTPHdr *incoming_hdr);
   static void bootstrap_state_variables_from_request(State *s, HTTPHdr *incoming_request);
+
+  // WARNING:  this function may be called multiple times for the same transaction.
+  //
   static void initialize_state_variables_from_request(State *s, HTTPHdr *obsolete_incoming_request);
+
   static void initialize_state_variables_from_response(State *s, HTTPHdr *incoming_response);
   static bool is_server_negative_cached(State *s);
   static bool is_cache_response_returnable(State *s);
@@ -1087,8 +1091,8 @@ public:
   static Freshness_t what_is_document_freshness(State *s, HTTPHdr *client_request, HTTPHdr *cached_obj_response);
   static Authentication_t AuthenticationNeeded(const OverridableHttpConfigParams *p, HTTPHdr *client_request,
                                                HTTPHdr *obj_response);
-  static void handle_parent_died(State *s);
-  static void handle_server_died(State *s);
+  static void handle_parent_down(State *s);
+  static void handle_server_down(State *s);
   static void build_error_response(State *s, HTTPStatus status_code, const char *reason_phrase_or_null,
                                    const char *error_body_type);
   static void build_redirect_response(State *s);

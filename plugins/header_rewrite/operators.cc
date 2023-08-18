@@ -51,16 +51,22 @@ OperatorSetConfig::exec(const Resources &res) const
     case TS_RECORDDATATYPE_INT:
       if (TS_SUCCESS == TSHttpTxnConfigIntSet(res.txnp, _key, _value.get_int_value())) {
         TSDebug(PLUGIN_NAME, "OperatorSetConfig::exec() invoked on %s=%d", _config.c_str(), _value.get_int_value());
+      } else {
+        TSDebug(PLUGIN_NAME, "OperatorSetConfig::exec() invocation failed on %s=%d", _config.c_str(), _value.get_int_value());
       }
       break;
     case TS_RECORDDATATYPE_FLOAT:
       if (TS_SUCCESS == TSHttpTxnConfigFloatSet(res.txnp, _key, _value.get_float_value())) {
         TSDebug(PLUGIN_NAME, "OperatorSetConfig::exec() invoked on %s=%f", _config.c_str(), _value.get_float_value());
+      } else {
+        TSDebug(PLUGIN_NAME, "OperatorSetConfig::exec() invocation failed on %s=%f", _config.c_str(), _value.get_float_value());
       }
       break;
     case TS_RECORDDATATYPE_STRING:
       if (TS_SUCCESS == TSHttpTxnConfigStringSet(res.txnp, _key, _value.get_value().c_str(), _value.size())) {
         TSDebug(PLUGIN_NAME, "OperatorSetConfig::exec() invoked on %s=%s", _config.c_str(), _value.get_value().c_str());
+      } else {
+        TSDebug(PLUGIN_NAME, "OperatorSetConfig::exec() invocation failed on %s=%s", _config.c_str(), _value.get_value().c_str());
       }
       break;
     default:
@@ -645,7 +651,7 @@ OperatorSetHeader::exec(const Resources &res) const
   }
 
   if (res.bufp && res.hdr_loc) {
-    TSMLoc field_loc = TSMimeHdrFieldFind(res.bufp, res.hdr_loc, _header.c_str(), _header.size());
+    TSMLoc field_loc = TSMimeHdrFieldFind(res.bufp, res.hdr_loc, _header_wks ? _header_wks : _header.c_str(), _header.size());
 
     TSDebug(PLUGIN_NAME, "OperatorSetHeader::exec() invoked on %s: %s", _header.c_str(), value.c_str());
 
@@ -1083,8 +1089,9 @@ OperatorSetHttpCntl::initialize_hooks()
 }
 
 // This is only for the debug statement, and must be in sync with TSHttpCntlType in apidefs.h.in
-static const char *const HttpCntls[] = {"LOGGING",         "INTERCEPT_RETRY", "RESP_CACHEABLE", "REQ_CACHEABLE",
-                                        "SERVER_NO_STORE", "TXN_DEBUG",       "SKIP_REMAP"};
+static const char *const HttpCntls[] = {
+  "LOGGING", "INTERCEPT_RETRY", "RESP_CACHEABLE", "REQ_CACHEABLE", "SERVER_NO_STORE", "TXN_DEBUG", "SKIP_REMAP",
+};
 void
 OperatorSetHttpCntl::exec(const Resources &res) const
 {

@@ -17,14 +17,14 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-include $(top_srcdir)/build/tidy.mk
+include $(top_srcdir)/mk/tidy.mk
 
 AM_CPPFLAGS += \
 	-I$(abs_top_srcdir)/include \
 	-I$(abs_top_srcdir)/lib \
 	-I$(abs_top_srcdir)/proxy \
 	$(TS_INCLUDES) \
-	@YAMLCPP_INCLUDES@
+	@SWOC_INCLUDES@ @YAMLCPP_INCLUDES@
 
 noinst_LIBRARIES = libwccp.a
 

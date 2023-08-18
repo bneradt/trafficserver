@@ -25,7 +25,7 @@
 #include <openssl/crypto.h>
 #include "tscore/I_Layout.h"
 #include "tscore/Filenames.h"
-#include "tscore/BufferWriter.h"
+#include "tscpp/util/ts_bw.h"
 #include "records/I_RecProcess.h"
 #include "records/I_RecordsConfig.h"
 #include "info.h"
@@ -35,9 +35,7 @@
 #include <hwloc.h>
 #endif
 
-#if HAVE_ZLIB_H
 #include <zlib.h>
-#endif
 
 #if HAVE_LZMA_H
 #include <lzma.h>
@@ -79,11 +77,6 @@ produce_features(bool json)
   print_feature("BUILD_PERSON", BUILD_PERSON, json);
   print_feature("BUILD_GROUP", BUILD_GROUP, json);
   print_feature("BUILD_NUMBER", BUILD_NUMBER, json);
-#if HAVE_ZLIB_H
-  print_feature("TS_HAS_LIBZ", 1, json);
-#else
-  print_feature("TS_HAS_LIBZ", 0, json);
-#endif
 #if HAVE_LZMA_H
   print_feature("TS_HAS_LZMA", 1, json);
 #else
@@ -100,7 +93,6 @@ produce_features(bool json)
   print_feature("TS_HAS_PIPE_BUFFER_SIZE_CONFIG", 0, json);
 #endif /* F_GETPIPE_SZ */
   print_feature("TS_HAS_JEMALLOC", TS_HAS_JEMALLOC, json);
-  print_feature("TS_HAS_TCMALLOC", TS_HAS_TCMALLOC, json);
   print_feature("TS_HAS_IN6_IS_ADDR_UNSPECIFIED", TS_HAS_IN6_IS_ADDR_UNSPECIFIED, json);
   print_feature("TS_HAS_BACKTRACE", TS_HAS_BACKTRACE, json);
   print_feature("TS_HAS_PROFILER", TS_HAS_PROFILER, json);
@@ -180,13 +172,14 @@ produce_layout(bool json)
 void
 produce_versions(bool json)
 {
-  using LBW = ts::LocalBufferWriter<128>;
+  using LBW = swoc::LocalBufferWriter<128>;
   [[maybe_unused]] static const std::string_view undef{"undef"};
 
   if (json) {
     printf("{\n");
   }
 
+  print_var("libz", LBW().print("{}", ZLIB_VERSION).view(), json);
   print_var("openssl", LBW().print("{:#x}", OPENSSL_VERSION_NUMBER).view(), json);
   print_var("openssl_str", LBW().print(OPENSSL_VERSION_TEXT).view(), json);
   print_var("pcre", LBW().print("{}.{}", PCRE_MAJOR, PCRE_MINOR).view(), json);
@@ -196,11 +189,6 @@ produce_versions(bool json)
   print_var("hwloc.run", LBW().print("{:#x}", hwloc_get_api_version()).view(), json);
 #else
   print_var("hwloc", undef, json);
-#endif
-#if HAVE_ZLIB_H
-  print_var("libz", LBW().print("{}", ZLIB_VERSION).view(), json);
-#else
-  print_var("libz", undef, json);
 #endif
 #if HAVE_LZMA_H
   print_var("lzma", LBW().print("{}", LZMA_VERSION_STRING).view(), json);

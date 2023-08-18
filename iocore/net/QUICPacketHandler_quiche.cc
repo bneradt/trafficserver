@@ -184,16 +184,14 @@ QUICPacketHandlerIn::init_accept(EThread *t = nullptr)
 Continuation *
 QUICPacketHandlerIn::_get_continuation()
 {
-  return static_cast<NetAccept *>(this);
+  return this;
 }
 
 void
 QUICPacketHandlerIn::_recv_packet(int event, UDPPacket *udp_packet)
 {
-  // Assumption: udp_packet has only one IOBufferBlock
-  IOBufferBlock *block = udp_packet->getIOBlockChain();
-  const uint8_t *buf   = reinterpret_cast<uint8_t *>(block->buf());
-  uint64_t buf_len     = block->size();
+  size_t buf_len{0};
+  uint8_t *buf = udp_packet->get_entire_chain_buffer(&buf_len);
 
   constexpr int MAX_TOKEN_LEN             = 1200;
   constexpr int DEFAULT_MAX_DATAGRAM_SIZE = 1350;
@@ -209,7 +207,7 @@ QUICPacketHandlerIn::_recv_packet(int event, UDPPacket *udp_packet)
   int rc = quiche_header_info(buf, buf_len, QUICConnectionId::SCID_LEN, &version, &type, scid, &scid_len, dcid, &dcid_len, token,
                               &token_len);
   if (rc < 0) {
-    QUICDebug("Ignore packet - failed to parse header");
+    QUICDebug("Ignore packet - failed to parse header: '%d'", rc);
     udp_packet->free();
     return;
   }
@@ -307,7 +305,7 @@ QUICPacketHandlerIn::_recv_packet(int event, UDPPacket *udp_packet)
              quiche_con, this, &this->_ctable, ssl);
     vc->id = net_next_connection_number();
     vc->con.move(con);
-    vc->submit_time = Thread::get_hrtime();
+    vc->submit_time = ink_get_hrtime();
     vc->thread      = eth;
     vc->mutex       = new_ProxyMutex();
     vc->action_     = *this->action_;

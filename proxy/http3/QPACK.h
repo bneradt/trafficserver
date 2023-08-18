@@ -25,11 +25,12 @@
 
 #include <map>
 
+#include "swoc/IntrusiveDList.h"
+
 #include "I_EventSystem.h"
 #include "I_Event.h"
 #include "I_IOBuffer.h"
 #include "tscore/Arena.h"
-#include "tscpp/util/IntrusiveDList.h"
 #include "MIME.h"
 #include "HTTP.h"
 #include "QUICApplication.h"
@@ -46,7 +47,7 @@ enum {
 class QPACK : public QUICApplication
 {
 public:
-  QPACK(QUICConnection *qc, uint32_t max_header_list_size, uint16_t max_table_size, uint16_t max_blocking_streams);
+  QPACK(QUICConnection *qc, uint32_t max_field_section_size, uint16_t max_table_size, uint16_t max_blocking_streams);
   virtual ~QPACK();
 
   void on_new_stream(QUICStream &stream) override;
@@ -72,7 +73,7 @@ public:
   void set_encoder_stream(QUICStreamId id);
   void set_decoder_stream(QUICStreamId id);
 
-  void update_max_header_list_size(uint32_t max_header_list_size);
+  void update_max_field_section_size(uint32_t max_field_section_size);
   void update_max_table_size(uint16_t max_table_size);
   void update_max_blocking_streams(uint16_t max_blocking_streams);
 
@@ -249,9 +250,9 @@ private:
 
   DynamicTable _dynamic_table;
   std::map<uint64_t, struct EntryReference> _references;
-  uint32_t _max_header_list_size = 0;
-  uint16_t _max_table_size       = 0;
-  uint16_t _max_blocking_streams = 0;
+  uint32_t _max_field_section_size = 0;
+  uint16_t _max_table_size         = 0;
+  uint16_t _max_blocking_streams   = 0;
 
   Continuation *_event_handler = nullptr;
   void _resume_decode();
@@ -259,7 +260,7 @@ private:
 
   bool _invalid = false;
 
-  ts::IntrusiveDList<DecodeRequest::Linkage> _blocked_list;
+  swoc::IntrusiveDList<DecodeRequest::Linkage> _blocked_list;
   bool _add_to_blocked_list(DecodeRequest *decode_request);
 
   uint16_t _largest_known_received_index = 0;

@@ -34,7 +34,7 @@ Traffic Server uses the :file:`strategies.yaml` file only when one or more
 remap lines in remap.config specifies the use of a strategy with the @strategy tag.
 remap.config Example::
 
-  map http://www.foo.com http://www.bar.com @strategy='mid-tier-north'
+  map http://www.foo.com http://www.bar.com @strategy=mid-tier-north
 
 After you modify the :file:`strategies.yaml` file, run the :option:`traffic_ctl config reload`
 command to apply your changes.
@@ -230,6 +230,8 @@ Each **strategy** in the list may using the following parameters:
     (**self** should only be necessary when the local hostname can only be translated to an IP address
     with a DNS lookup.)
 
+- **host_override**: A boolean value that will set the host header to the selected parent rather than the original host. **true** sets host header to selected parent. **false** (default) leaves the host header untouched.
+
 Example:
 ::
 
@@ -254,6 +256,7 @@ Example:
           - passive
     - strategy: 'strategy-2'
       policy: rr_strict
+      host_override: true
       hash_url: cache
       hash_key: path+query
       go_direct: true

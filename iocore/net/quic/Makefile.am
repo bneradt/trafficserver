@@ -27,8 +27,6 @@ AM_CPPFLAGS += \
   -I$(abs_top_srcdir)/proxy/logging \
   -I$(abs_top_srcdir)/proxy/http \
   -I$(abs_top_srcdir)/proxy/http3 \
-  -I$(abs_top_srcdir)/mgmt \
-  -I$(abs_top_srcdir)/mgmt/utils \
   $(TS_INCLUDES) @SWOC_INCLUDES@ \
   @OPENSSL_INCLUDES@ @YAMLCPP_INCLUDES@
 
@@ -54,12 +52,28 @@ libquic_a_SOURCES = \
 # Check Programs
 #
 
+check_PROGRAMS := test_MTHashTable
+
+test_MTHashTable_CPPFLAGS = \
+	$(AM_CPPFLAGS) \
+	-I$(abs_top_srcdir)/lib/catch2
+
+test_MTHashTable_LDADD = \
+	$(top_builddir)/iocore/eventsystem/libinkevent.a \
+	$(top_builddir)/src/tscore/libtscore.a \
+	$(top_builddir)/src/tscpp/util/libtscpputil.la \
+	$(LIBPCRE) \
+	$(LIBCAP) \
+	@SWOC_LIBS@ @OPENSSL_LIBS@
+
+test_MTHashTable_SOURCES = test_MTHashTable.cc
+
 TESTS = $(check_PROGRAMS)
 
 #
 # clang-tidy
 #
-include $(top_srcdir)/build/tidy.mk
+include $(top_srcdir)/mk/tidy.mk
 
 clang-tidy-local: $(DIST_SOURCES)
 	$(CXX_Clang_Tidy)
