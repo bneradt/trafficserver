@@ -189,6 +189,7 @@ Http2ServerSession::main_event_handler(int event, void *edata)
   case VC_EVENT_INACTIVITY_TIMEOUT:
   case VC_EVENT_ERROR:
   case VC_EVENT_EOS:
+    Http2SsnDebug("Closing event: %s", HttpDebugNames::get_event_name(event));
     this->set_dying_event(event);
     this->do_io_close();
     retval = 0;
@@ -197,7 +198,7 @@ Http2ServerSession::main_event_handler(int event, void *edata)
   case VC_EVENT_WRITE_READY:
   case VC_EVENT_WRITE_COMPLETE:
     this->connection_state.restart_streams();
-    if ((Thread::get_hrtime() >= this->_write_buffer_last_flush + HRTIME_MSECONDS(this->_write_time_threshold))) {
+    if ((ink_get_hrtime() >= this->_write_buffer_last_flush + HRTIME_MSECONDS(this->_write_time_threshold))) {
       this->flush();
     }
 

@@ -43,6 +43,24 @@
 
 #include <vector>
 
+class ControlQUIC : public ActionItem
+{
+public:
+#if TS_USE_QUIC == 1
+  ControlQUIC(bool turn_on) : enable_quic(turn_on) {}
+#else
+  ControlQUIC(bool turn_on) {}
+#endif
+  ~ControlQUIC() override {}
+
+  int SNIAction(TLSSNISupport *snis, const Context &ctx) const override;
+
+private:
+#if TS_USE_QUIC == 1
+  bool enable_quic = false;
+#endif
+};
+
 class ControlH2 : public ActionItem
 {
 public:
@@ -82,6 +100,26 @@ public:
     auto ssl_vc = dynamic_cast<SSLNetVConnection *>(snis);
     if (ssl_vc) {
       ssl_vc->hints_from_sni.http2_buffer_water_mark = value;
+    }
+    return SSL_TLSEXT_ERR_OK;
+  }
+
+private:
+  int value = -1;
+};
+
+class HTTP2InitialWindowSizeIn : public ActionItem
+{
+public:
+  HTTP2InitialWindowSizeIn(int value) : value(value) {}
+  ~HTTP2InitialWindowSizeIn() override {}
+
+  int
+  SNIAction(TLSSNISupport *snis, const Context &ctx) const override
+  {
+    auto ssl_vc = dynamic_cast<SSLNetVConnection *>(snis);
+    if (ssl_vc) {
+      ssl_vc->hints_from_sni.http2_initial_window_size_in = value;
     }
     return SSL_TLSEXT_ERR_OK;
   }
@@ -410,4 +448,38 @@ public:
 
 private:
   std::string_view policy{};
+};
+
+class ServerMaxEarlyData : public ActionItem
+{
+public:
+  ServerMaxEarlyData(uint32_t value)
+#if TS_HAS_TLS_EARLY_DATA
+    : server_max_early_data(value)
+#endif
+  {
+  }
+  ~ServerMaxEarlyData() override {}
+
+  int
+  SNIAction(TLSSNISupport *snis, const Context &ctx) const override
+  {
+#if TS_HAS_TLS_EARLY_DATA
+    auto ssl_vc = dynamic_cast<SSLNetVConnection *>(snis);
+    if (ssl_vc) {
+      Debug("ssl_sni", "Setting server_max_early_data to %u", server_max_early_data);
+      ssl_vc->hints_from_sni.server_max_early_data = server_max_early_data;
+      const uint32_t EARLY_DATA_DEFAULT_SIZE       = 16384;
+      const uint32_t server_recv_max_early_data =
+        server_max_early_data > 0 ? std::max(server_max_early_data, EARLY_DATA_DEFAULT_SIZE) : 0;
+      ssl_vc->update_early_data_config(server_max_early_data, server_recv_max_early_data);
+    }
+#endif
+    return SSL_TLSEXT_ERR_OK;
+  }
+
+#if TS_HAS_TLS_EARLY_DATA
+private:
+  uint32_t server_max_early_data = 0;
+#endif
 };

@@ -47,7 +47,7 @@
 #include "tscore/ink_inet.h"
 #include "tscore/ink_resolver.h"
 #include "tscore/Regex.h"
-#include "tscore/BufferWriter.h"
+#include "tscpp/util/ts_bw.h"
 #include "HttpProxyAPIEnums.h"
 #include "ConfigProcessor.h"
 #include "records/I_RecProcess.h"
@@ -356,7 +356,7 @@ enum {
   http_origin_shutdown_cleanup_entry,
   http_origin_shutdown_tunnel_abort,
 
-  http_dead_server_no_requests,
+  http_down_server_no_requests,
 
   http_origin_reuse,
   http_origin_not_found,
@@ -444,7 +444,7 @@ using OptionBitSet = std::bitset<NUM_OPTIONS>;
 // Converts string specifier for Forwarded options to bitset of options, and return the result.  If there are errors, an error
 // message will be inserted into 'error'.
 //
-OptionBitSet optStrToBitset(std::string_view optConfigStr, ts::FixedBufferWriter &error);
+OptionBitSet optStrToBitset(std::string_view optConfigStr, swoc::FixedBufferWriter &error);
 
 } // namespace HttpForwarded
 
@@ -566,6 +566,7 @@ struct OverridableHttpConfigParams {
   MgmtByte cache_responses_to_cookies     = 1;
   MgmtByte cache_ignore_auth              = 0;
   MgmtByte cache_urls_that_look_dynamic   = 1;
+  MgmtByte cache_ignore_query             = 0;
   MgmtByte cache_required_headers         = 2;
   MgmtByte cache_range_lookup             = 1;
   MgmtByte cache_range_write              = 0;
@@ -579,9 +580,9 @@ struct OverridableHttpConfigParams {
   MgmtByte insert_request_via_string  = 1;
   MgmtByte insert_response_via_string = 0;
 
-  //////////////////////
-  //  DOC IN CACHE NO DNS//
-  //////////////////////
+  /////////////////////////
+  // DOC IN CACHE NO DNS //
+  /////////////////////////
   MgmtByte doc_in_cache_skip_dns = 1;
   MgmtByte flow_control_enabled  = 0;
 
@@ -595,6 +596,7 @@ struct OverridableHttpConfigParams {
   //////////////////////////
   MgmtByte srv_enabled                   = 0;
   MgmtByte parent_failures_update_hostdb = 0;
+  MgmtByte no_dns_forward_to_parent      = 0;
 
   MgmtByte cache_open_write_fail_action = 0;
 
@@ -618,18 +620,18 @@ struct OverridableHttpConfigParams {
   /////////////////////////////////////////////////
   MgmtByte response_suppression_mode = 0; // proxy.config.body_factory.response_suppression_mode
 
+  //////////////////
+  // Redirection  //
+  //////////////////
+  MgmtByte redirect_use_orig_cache_key = 0;
+  MgmtInt number_of_redirections       = 0;
+
   //////////////////////////////
   // server verification mode //
   //////////////////////////////
   char *ssl_client_verify_server_policy     = nullptr;
   char *ssl_client_verify_server_properties = nullptr;
   char *ssl_client_sni_policy               = nullptr;
-
-  //////////////////
-  // Redirection  //
-  //////////////////
-  MgmtByte redirect_use_orig_cache_key = 0;
-  MgmtInt number_of_redirections       = 0;
 
   MgmtInt proxy_response_hsts_max_age = -1;
 
@@ -680,11 +682,11 @@ struct OverridableHttpConfigParams {
   // origin server connect attempts //
   ////////////////////////////////////
   MgmtInt connect_attempts_max_retries             = 0;
-  MgmtInt connect_attempts_max_retries_dead_server = 3;
+  MgmtInt connect_attempts_max_retries_down_server = 3;
   MgmtInt connect_attempts_rr_retries              = 3;
   MgmtInt connect_attempts_timeout                 = 30;
 
-  MgmtInt connect_dead_policy = 2;
+  MgmtInt connect_down_policy = 2;
 
   ////////////////////////////////////
   // parent proxy connect attempts //
@@ -822,10 +824,9 @@ public:
   ///////////////////////////////////////////////////////////////////
   MgmtByte disable_ssl_parenting = 0;
 
-  MgmtByte no_dns_forward_to_parent = 0;
-  MgmtByte no_origin_server_dns     = 0;
-  MgmtByte use_client_target_addr   = 0;
-  MgmtByte use_client_source_port   = 0;
+  MgmtByte no_origin_server_dns   = 0;
+  MgmtByte use_client_target_addr = 0;
+  MgmtByte use_client_source_port = 0;
 
   MgmtByte enable_http_stats = 1; // Can be "slow"
 

@@ -16,8 +16,8 @@
 
 # Add new plugins in alphabetic order, but keep experimental always at the bottom.
 
-include $(top_srcdir)/build/plugins.mk
-include $(top_srcdir)/build/tidy.mk
+include $(top_srcdir)/mk/plugins.mk
+include $(top_srcdir)/mk/tidy.mk
 
 check_PROGRAMS =
 noinst_LTLIBRARIES =
@@ -60,7 +60,6 @@ include xdebug/Makefile.inc
 if BUILD_EXPERIMENTAL_PLUGINS
 
 include experimental/access_control/Makefile.inc
-include experimental/acme/Makefile.inc
 include experimental/cache_fill/Makefile.inc
 include experimental/cert_reporting_tool/Makefile.inc
 include experimental/collapsed_forwarding/Makefile.inc

@@ -535,7 +535,7 @@ Network
    with a lot of concurrent connections, increasing this setting can reduce
    pressure on the system.
 
-.. ts:cv:: LOCAL proxy.local.incoming_ip_to_bind STRING 0.0.0.0 [::]
+.. ts:cv:: CONFIG proxy.config.incoming_ip_to_bind STRING 0.0.0.0 [::]
 
    Controls the global default IP addresses to which to bind proxy server
    ports. The value is a space separated list of IP addresses, one per
@@ -555,18 +555,24 @@ Network
 .. topic:: Example
 
    Set the global default for IPv4 to ``192.168.101.18`` and leave the global
-   default for IPv6 as any address::
+   default for IPv6 as any address
 
-      LOCAL proxy.local.incoming_ip_to_bind STRING 192.168.101.18
+   .. code-block:: yaml
+
+      ts:
+        incoming_ip_to_bind: 192.168.101.18
 
 .. topic:: Example
 
    Set the global default for IPv4 to ``191.68.101.18`` and the global default
-   for IPv6 to ``fc07:192:168:101::17``::
+   for IPv6 to ``fc07:192:168:101::17``
 
-      LOCAL proxy.local.incoming_ip_to_bind STRING 192.168.101.18 [fc07:192:168:101::17]
+   .. code-block:: yaml
 
-.. ts:cv:: LOCAL proxy.local.outgoing_ip_to_bind STRING 0.0.0.0 [::]
+      ts:
+        incoming_ip_to_bind: "192.168.101.18 [fc07:192:168:101::17]"
+
+.. ts:cv:: CONFIG proxy.config.outgoing_ip_to_bind STRING 0.0.0.0 [::]
 
    This controls the global default for the local IP address for outbound
    connections to origin servers. The value is a list of space separated IP
@@ -583,15 +589,21 @@ Network
 
 .. topic:: Example
 
-   Set the default local outbound IP address for IPv4 connections to ``192.168.101.18``.::
+   Set the default local outbound IP address for IPv4 connections to ``192.168.101.18``.
 
-      LOCAL proxy.local.outgoing_ip_to_bind STRING 192.168.101.18
+   .. code-block:: yaml
+
+      ts:
+        outgoing_ip_to_bind: 192.168.101.18
 
 .. topic:: Example
 
-   Set the default local outbound IP address to ``192.168.101.17`` for IPv4 and ``fc07:192:168:101::17`` for IPv6.::
+   Set the default local outbound IP address to ``192.168.101.17`` for IPv4 and ``fc07:192:168:101::17`` for IPv6.
 
-      LOCAL proxy.local.outgoing_ip_to_bind STRING 192.168.101.17 [fc07:192:168:101::17]
+   .. code-block:: yaml
+
+      ts:
+        outgoing_ip_to_bind: "192.168.101.17 [fc07:192:168:101::17]"
 
 .. ts:cv:: CONFIG proxy.config.net.event_period INT 10
 
@@ -646,22 +658,6 @@ Management
 
    This is now deprecated, please refer to :ref:`admin-jsonrpc-configuration` to find
    out about the new admin API mechanism.
-
-Alarm Configuration
-===================
-
-.. ts:cv:: CONFIG proxy.config.alarm.abs_path STRING NULL
-   :reloadable:
-
-   The absolute path to the directory containing the alarm script.
-   If this is not set, the script will be located relative to
-   :ts:cv:`proxy.config.bin_path`.
-
-.. ts:cv:: CONFIG proxy.config.alarm.script_runtime INT 5
-   :reloadable:
-
-   The number of seconds that |TS| allows the alarm script
-   to run before aborting it.
 
 HTTP Engine
 ===========
@@ -749,12 +745,12 @@ tr-full
    Not compatible with: Any option not compatible with ``tr-in`` or ``tr-out``.
 
 tr-in
-   Inbound transparent. The proxy port will accept connections to any IP address on the port. To have IPv6 inbound transparent you must use this and the ``ipv6`` option. This overrides :ts:cv:`proxy.local.incoming_ip_to_bind` for this port.
+   Inbound transparent. The proxy port will accept connections to any IP address on the port. To have IPv6 inbound transparent you must use this and the ``ipv6`` option. This overrides :ts:cv:`proxy.config.incoming_ip_to_bind` for this port.
 
    Not compatible with: ``ip-in``, ``blind``
 
 tr-out
-   Outbound transparent. If ATS connects to an origin server for a transaction on this port, it will use the client's address as its local address. This overrides :ts:cv:`proxy.local.outgoing_ip_to_bind` for this port.
+   Outbound transparent. If ATS connects to an origin server for a transaction on this port, it will use the client's address as its local address. This overrides :ts:cv:`proxy.config.outgoing_ip_to_bind` for this port.
 
    Not compatible with: ``ip-out``, ``ip-resolve``
 
@@ -762,12 +758,12 @@ tr-pass
    Transparent pass through. This option is useful only for inbound transparent proxy ports. If the parsing of the expected HTTP header fails, then the transaction is switched to a blind tunnel instead of generating an error response to the client. It effectively enables :ts:cv:`proxy.config.http.use_client_target_addr` for the transaction as there is no other place to obtain the origin server address.
 
 ip-in
-   Set the local IP address for the port. This is the address to which clients will connect. This forces the IP address family for the port. The ``ipv4`` or ``ipv6`` can be used but it is optional and is an error for it to disagree with the IP address family of this value. An IPv6 address **must** be enclosed in square brackets. If this option is omitted :ts:cv:`proxy.local.incoming_ip_to_bind` is used.
+   Set the local IP address for the port. This is the address to which clients will connect. This forces the IP address family for the port. The ``ipv4`` or ``ipv6`` can be used but it is optional and is an error for it to disagree with the IP address family of this value. An IPv6 address **must** be enclosed in square brackets. If this option is omitted :ts:cv:`proxy.config.incoming_ip_to_bind` is used.
 
    Not compatible with: ``tr-in``.
 
 ip-out
-   Set the local IP address for outbound connections. This is the address used by ATS locally when it connects to an origin server for transactions on this port. If this is omitted :ts:cv:`proxy.local.outgoing_ip_to_bind` is used.
+   Set the local IP address for outbound connections. This is the address used by ATS locally when it connects to an origin server for transactions on this port. If this is omitted :ts:cv:`proxy.config.outgoing_ip_to_bind` is used.
 
    This option can used multiple times, once for each IP address family. The address used is selected by the IP address family of the origin server address.
 
@@ -799,7 +795,7 @@ mptcp
 
 .. topic:: Example
 
-   Listen on port 8080 for IPv6, fully transparent. Set up an SSL port on 443. These ports will use the IP address from :ts:cv:`proxy.local.incoming_ip_to_bind`.  Listen on IP address ``192.168.17.1``, port 80, IPv4, and connect to origin servers using the local address ``10.10.10.1`` for IPv4 and ``fc01:10:10:1::1`` for IPv6.::
+   Listen on port 8080 for IPv6, fully transparent. Set up an SSL port on 443. These ports will use the IP address from :ts:cv:`proxy.config.incoming_ip_to_bind`.  Listen on IP address ``192.168.17.1``, port 80, IPv4, and connect to origin servers using the local address ``10.10.10.1`` for IPv4 and ``fc01:10:10:1::1`` for IPv6.::
 
       8080:ipv6:tr-full 443:ssl ip-in=192.168.17.1:80:ip-out=[fc01:10:10:1::1]:ip-out=10.10.10.1
 
@@ -825,8 +821,8 @@ mptcp
 
    The range of origin server ports that can be used for tunneling via ``CONNECT``.
 
-   |TS| allows tunnels only to the specified ports. Supports both wildcards
-   (``*``) and ranges (e.g. ``0-1023``).
+   |TS| allows tunnels only to the specified ports. Values are space separated. Wildcards
+   (``*``), ranges (``0-1023``), and mixes of each (e.g. ``80 443 666-999``) are supported.
 
 .. note::
 
@@ -843,7 +839,7 @@ mptcp
    CONNECT method to the next hop, and establishes the tunnel after
    receiving a positive response. This behavior is useful in a proxy
    hierarchy, and is equivalent to setting
-   :ts:cv:`proxy.local.http.parent_proxy.disable_connect_tunneling` to
+   :ts:cv:`proxy.config.http.parent_proxy.disable_connect_tunneling` to
    `0` when parent proxying is enabled.
 
 .. ts:cv:: CONFIG proxy.config.http.insert_request_via_str INT 1
@@ -1355,10 +1351,11 @@ Parent Proxy Configuration
 
 .. ts:cv:: CONFIG proxy.config.http.no_dns_just_forward_to_parent INT 0
    :reloadable:
+   :overridable:
 
    Don't try to resolve DNS, forward all DNS requests to the parent. This is off (``0``) by default.
 
-.. ts:cv:: CONFIG proxy.local.http.parent_proxy.disable_connect_tunneling INT 0
+.. ts:cv:: CONFIG proxy.config.http.parent_proxy.disable_connect_tunneling INT 0
 
 .. ts:cv:: CONFIG proxy.config.http.parent_proxy.self_detect INT 2
 
@@ -1598,23 +1595,23 @@ Origin Server Connect Attempts
 
    The maximum number of connection retries |TS| can make when the origin server is not responding.
    Each retry attempt lasts for `proxy.config.http.connect_attempts_timeout`_ seconds.  Once the maximum number of retries is
-   reached, the origin is marked dead (as controlled by `proxy.config.http.connect.dead.policy`_.  After this, the setting
-   `proxy.config.http.connect_attempts_max_retries_dead_server`_ is used to limit the number of retry attempts to the known dead origin.
+   reached, the origin is marked down (as controlled by `proxy.config.http.connect.down.policy`_.  After this, the setting
+   `proxy.config.http.connect_attempts_max_retries_down_server`_ is used to limit the number of retry attempts to the known down origin.
 
-.. ts:cv:: CONFIG proxy.config.http.connect_attempts_max_retries_dead_server INT 1
+.. ts:cv:: CONFIG proxy.config.http.connect_attempts_max_retries_down_server INT 1
    :reloadable:
    :overridable:
 
-   Maximum number of connection attempts |TS| can make while an origin is marked dead per request.  Typically this value is smaller than
-   `proxy.config.http.connect_attempts_max_retries`_ so an error is returned to the client faster and also to reduce the load on the dead origin.
+   Maximum number of connection attempts |TS| can make while an origin is marked down per request.  Typically this value is smaller than
+   `proxy.config.http.connect_attempts_max_retries`_ so an error is returned to the client faster and also to reduce the load on the down origin.
    The timeout interval `proxy.config.http.connect_attempts_timeout`_ in seconds is used with this setting.
 
-.. ts:cv:: CONFIG proxy.config.http.connect.dead.policy INT 2
+.. ts:cv:: CONFIG proxy.config.http.connect.down.policy INT 2
    :overridable:
 
-   Controls what origin server connection failures contribute to marking a server dead. When set to 2, any connection failure during the TCP and TLS
-   handshakes will contribute to marking the server dead. When set to 1, only TCP handshake failures will contribute to marking a server dead.
-   When set to 0, no connection failures will be used towards marking a server dead.
+   Controls what origin server connection failures contribute to marking a server down. When set to 2, any connection failure during the TCP and TLS
+   handshakes will contribute to marking the server down. When set to 1, only TCP handshake failures will contribute to marking a server down.
+   When set to 0, no connection failures will be used towards marking a server down.
 
 .. ts:cv:: CONFIG proxy.config.http.server_max_connections INT 0
    :reloadable:
@@ -2132,6 +2129,14 @@ Cache Control
    change. Since this is an overridable configuration, it can be
    used to purge the entire cache, or just a specific :file:`remap.config`
    rule.
+
+.. ts:cv:: CONFIG proxy.config.http.cache.ignore_query INT 0
+   :reloadable:
+   :overridable:
+
+   If this value is set to ``1``, then the query string is ignored when
+   calculating the cach key for the request. This can be noticeably faster
+   than using e.g. the ``cachekey`` plugin to just remove the query parameters.
 
 .. ts:cv:: CONFIG proxy.config.http.doc_in_cache_skip_dns INT 1
    :reloadable:
@@ -4168,7 +4173,7 @@ Client-Related Configuration
    Can be useful if using a crypto engine that communicates off chip.  The
    thread will be rescheduled for other work until the crypto engine operation
    completes. A test crypto engine that inserts a 5 second delay on private key
-   operations can be found at :ts:git:`contrib/openssl/async_engine.c`.
+   operations can be found at :ts:git:`contrib/openssl/async_engine.cc`.
 
 .. ts:cv:: CONFIG proxy.config.ssl.engine.conf_file STRING NULL
 
@@ -4833,9 +4838,21 @@ removed in the future without prior notice.
 
    Specified the maximum outgoing UDP payload size.
 
+.. ts:cv:: CONFIG proxy.config.quic.disable_http_0_9 INT 1
+
+   Disables HTTP/0.9 over QUIC by default.
+
 
 UDP Configuration
 =====================
+
+.. ts:cv:: CONFIG proxy.config.udp.poll_timeout INT 100
+   :units: milliseconds
+
+   This is the timeout for listening UDP connections to ``epoll_wait()`` on
+   Linux platforms, and to ``kevent()`` on BSD type OSs. The default value is
+   100. See :ts:cv:`proxy.config.net.poll_timeout` for general information on
+   poll_timeout.
 
 .. ts:cv:: CONFIG proxy.config.udp.threads INT 0
 
@@ -4847,6 +4864,11 @@ UDP Configuration
    Enables (``1``) or disables (``0``) UDP GSO. When enabled, |TS| tries to use UDP GSO,
    and disables it automatically if it causes send errors.
 
+
+.. ts:cv:: CONFIG proxy.config.udp.enable_gro INT 1
+
+   Enables (``1``) or disables (``0``) UDP GRO. When enabled, |TS| will try to use it
+   when reading the UDP socket.
 
 Plug-in Configuration
 =====================
@@ -5181,6 +5203,13 @@ Sockets
    ``1`` Tracks IO Buffer Memory allocations and releases
    ``2`` Tracks IO Buffer Memory and OpenSSL Memory allocations and releases
    ===== ======================================================================
+
+.. ts:cv:: CONFIG proxy.config.system_clock INT 0
+
+   *For advanced users only*. This allows to specify the underlying system clock
+   used by ATS. The default is ``CLOCK_REALTIME`` (``0``), but a higher performance
+   option could be ``CLOCK_REALTIME_COARSE`` (``5``). See ``clock_gettime(2)`` for
+   more details. On Linux, these definitions can be found in ``<linux/time.h>``.
 
 .. ts:cv:: CONFIG proxy.config.allocator.dontdump_iobuffers INT 1
 

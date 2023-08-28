@@ -73,6 +73,7 @@ public:
   UDPConnection *getConnection();
   IOBufferBlock *getIOBlockChain();
   int64_t getPktLength();
+  uint8_t *get_entire_chain_buffer(size_t *buf_len);
 
   /**
      Add IOBufferBlock (chain) to end of packet.
@@ -99,7 +100,7 @@ public:
      copies data from a buffer.
 
      @param to  address of where to send packet
-     @param when ink_hrtime relative to ink_get_hrtime_internal()
+     @param when ink_hrtime relative to ink_get_hrtime()
      @param buf IOBufferBlock chain of data to use
      @param segment_size Segment size
   */
@@ -109,11 +110,12 @@ public:
      Create a new packet to be delivered to application.
      Internal function only
   */
-  static UDPPacket *new_incoming_UDPPacket(struct sockaddr *from, struct sockaddr *to, Ptr<IOBufferBlock> &block);
+  static UDPPacket *new_incoming_UDPPacket(struct sockaddr *from, struct sockaddr *to, Ptr<IOBufferBlock> block);
 
 private:
   SLINK(UDPPacket, alink); // atomic link
   UDPPacketInternal p;
+  ats_unique_buf _payload{nullptr};
 };
 
 // Inline definitions

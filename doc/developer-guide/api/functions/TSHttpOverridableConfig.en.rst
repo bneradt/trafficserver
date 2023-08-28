@@ -84,6 +84,7 @@ TSOverridableConfigKey Value                                              Config
 :c:enumerator:`TS_CONFIG_HTTP_BACKGROUND_FILL_COMPLETED_THRESHOLD`        :ts:cv:`proxy.config.http.background_fill_completed_threshold`
 :c:enumerator:`TS_CONFIG_HTTP_CACHE_CACHE_RESPONSES_TO_COOKIES`           :ts:cv:`proxy.config.http.cache.cache_responses_to_cookies`
 :c:enumerator:`TS_CONFIG_HTTP_CACHE_CACHE_URLS_THAT_LOOK_DYNAMIC`         :ts:cv:`proxy.config.http.cache.cache_urls_that_look_dynamic`
+:c:enumerator:`TS_CONFIG_HTTP_CACHE_IGNORE_QUERY`                         :ts:cv:`proxy.config.http.cache.ignore_query`
 :c:enumerator:`TS_CONFIG_HTTP_CACHE_GENERATION`                           :ts:cv:`proxy.config.http.cache.generation`
 :c:enumerator:`TS_CONFIG_HTTP_CACHE_GUARANTEED_MAX_LIFETIME`              :ts:cv:`proxy.config.http.cache.guaranteed_max_lifetime`
 :c:enumerator:`TS_CONFIG_HTTP_CACHE_GUARANTEED_MIN_LIFETIME`              :ts:cv:`proxy.config.http.cache.guaranteed_min_lifetime`
@@ -111,7 +112,7 @@ TSOverridableConfigKey Value                                              Config
 :c:enumerator:`TS_CONFIG_HTTP_CACHE_WHEN_TO_REVALIDATE`                   :ts:cv:`proxy.config.http.cache.when_to_revalidate`
 :c:enumerator:`TS_CONFIG_HTTP_CHUNKING_ENABLED`                           :ts:cv:`proxy.config.http.chunking_enabled`
 :c:enumerator:`TS_CONFIG_HTTP_CHUNKING_SIZE`                              :ts:cv:`proxy.config.http.chunking.size`
-:c:enumerator:`TS_CONFIG_HTTP_CONNECT_ATTEMPTS_MAX_RETRIES_DEAD_SERVER`   :ts:cv:`proxy.config.http.connect_attempts_max_retries_dead_server`
+:c:enumerator:`TS_CONFIG_HTTP_CONNECT_ATTEMPTS_MAX_RETRIES_DOWN_SERVER`   :ts:cv:`proxy.config.http.connect_attempts_max_retries_down_server`
 :c:enumerator:`TS_CONFIG_HTTP_CONNECT_ATTEMPTS_MAX_RETRIES`               :ts:cv:`proxy.config.http.connect_attempts_max_retries`
 :c:enumerator:`TS_CONFIG_HTTP_CONNECT_ATTEMPTS_RR_RETRIES`                :ts:cv:`proxy.config.http.connect_attempts_rr_retries`
 :c:enumerator:`TS_CONFIG_HTTP_CONNECT_ATTEMPTS_TIMEOUT`                   :ts:cv:`proxy.config.http.connect_attempts_timeout`
@@ -139,6 +140,7 @@ TSOverridableConfigKey Value                                              Config
 :c:enumerator:`TS_CONFIG_HTTP_NEGATIVE_CACHING_LIFETIME`                  :ts:cv:`proxy.config.http.negative_caching_lifetime`
 :c:enumerator:`TS_CONFIG_HTTP_NEGATIVE_REVALIDATING_ENABLED`              :ts:cv:`proxy.config.http.negative_revalidating_enabled`
 :c:enumerator:`TS_CONFIG_HTTP_NEGATIVE_REVALIDATING_LIFETIME`             :ts:cv:`proxy.config.http.negative_revalidating_lifetime`
+:c:enumerator:`TS_CONFIG_HTTP_NO_DNS_JUST_FORWARD_TO_PARENT`              :ts:cv:`proxy.config.http.no_dns_just_forward_to_parent`
 :c:enumerator:`TS_CONFIG_HTTP_NORMALIZE_AE`                               :ts:cv:`proxy.config.http.normalize_ae`
 :c:enumerator:`TS_CONFIG_HTTP_NUMBER_OF_REDIRECTIONS`                     :ts:cv:`proxy.config.http.number_of_redirections`
 :c:enumerator:`TS_CONFIG_HTTP_PARENT_PROXY_FAIL_THRESHOLD`                :ts:cv:`proxy.config.http.parent_proxy.fail_threshold`

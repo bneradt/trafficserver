@@ -15,7 +15,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-include $(top_srcdir)/build/tidy.mk
+include $(top_srcdir)/mk/tidy.mk
 
 bin_PROGRAMS =
 check_PROGRAMS =
@@ -23,7 +23,7 @@ TESTS =
 lib_LTLIBRARIES =
 noinst_PROGRAMS =
 
-SUBDIRS = tscpp/api
+SUBDIRS = tscpp/api api
 
 if BUILD_WCCP
 SUBDIRS += wccp
@@ -39,12 +39,6 @@ include traffic_crashlog/Makefile.inc
 include traffic_layout/Makefile.inc
 include traffic_logcat/Makefile.inc
 include traffic_ctl/Makefile.inc
-
-
-
-if ENABLE_QUIC
-include traffic_quic/Makefile.inc
-endif
 
 clang-tidy-local: $(DIST_SOURCES)
 	$(CXX_Clang_Tidy)

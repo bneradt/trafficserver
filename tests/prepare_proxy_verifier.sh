@@ -1,4 +1,4 @@
-#!/bin/bash
+#! /usr/bin/env bash
 # vim: sw=4:ts=4:softtabstop=4:ai:et
 
 #  Licensed to the Apache Software Foundation (ASF) under one
@@ -40,7 +40,7 @@ pv_dir="${pv_name}-${pv_version}"
 pv_tar_filename="${pv_dir}.tar.gz"
 pv_tar="${pv_top_dir}/${pv_tar_filename}"
 pv_tar_url="https://ci.trafficserver.apache.org/bintray/${pv_tar_filename}"
-expected_sha1="c3f732b80a8dec6fed48531c76eaa3d2f856f29a"
+expected_sha1="ea413a7189c801c2da311d93cbc625c0e7390a67"
 pv_client="${bin_dir}/verifier-client"
 pv_server="${bin_dir}/verifier-server"
 TAR=${TAR:-tar}

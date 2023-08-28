@@ -1524,8 +1524,13 @@ done:
       // correcting this behavior, therefore, we maintain the current
       // functionality but add state to determine whether the path was
       // absolutely empty so we can reconstruct such URLs.
-      ++path_start;
+      //
+      // Remove all preceding slashes
+      while (path_start < path_end && *path_start == '/') {
+        ++path_start;
+      }
     }
+
     url->set_path(heap, path_start, path_end - path_start, copy_strings);
   } else if (!nothing_after_host) {
     // There was no path set via '/': it is absolutely empty. However, if there
@@ -1577,7 +1582,10 @@ url_parse_http_regex(HdrHeap *heap, URLImpl *url, const char **start, const char
   cur              = static_cast<const char *>(memchr(cur, '/', end - cur));
   if (cur) {
     host_end = cur;
-    ++cur;
+    // Remove all preceding slashes
+    while (cur < end && *cur == '/') {
+      cur++;
+    }
   } else {
     host_end = cur = end;
   }
@@ -1756,7 +1764,7 @@ memcpy_tolower(char *d, const char *s, int n)
   }
 }
 
-#define BUFSIZE 512
+#define BUFSIZE 4096
 
 // fast path for CryptoHash, HTTP, no user/password/params/query,
 // no buffer overflow, no unescaping needed
@@ -1801,7 +1809,8 @@ url_CryptoHash_get_fast(const URLImpl *url, CryptoContext &ctx, CryptoHash *hash
 }
 
 static inline void
-url_CryptoHash_get_general(const URLImpl *url, CryptoContext &ctx, CryptoHash &hash, cache_generation_t generation)
+url_CryptoHash_get_general(const URLImpl *url, CryptoContext &ctx, CryptoHash &hash, bool ignore_query,
+                           cache_generation_t generation)
 {
   char buffer[BUFSIZE];
   char *p, *e;
@@ -1833,11 +1842,19 @@ url_CryptoHash_get_general(const URLImpl *url, CryptoContext &ctx, CryptoHash &h
   strs[9]  = ";";
   strs[10] = url->m_ptr_params;
   strs[11] = "?";
-  strs[12] = url->m_ptr_query;
+
+  // Special case for the query paramters, allowing us to ignore them if requested
+  if (!ignore_query) {
+    strs[12] = url->m_ptr_query;
+    ends[12] = strs[12] + url->m_len_query;
+  } else {
+    strs[12] = nullptr;
+    ends[12] = nullptr;
+  }
+
   ends[9]  = strs[9] + 1;
   ends[10] = strs[10] + url->m_len_params;
   ends[11] = strs[11] + 1;
-  ends[12] = strs[12] + url->m_len_query;
 
   p = buffer;
   e = buffer + BUFSIZE;
@@ -1850,6 +1867,16 @@ url_CryptoHash_get_general(const URLImpl *url, CryptoContext &ctx, CryptoHash &h
       while (t < ends[i]) {
         if ((i == 0) || (i == 6)) { // scheme and host
           unescape_str_tolower(p, e, t, ends[i], s);
+        } else if (i == 8 || i == 10 || i == 12) { // path, params, query
+          // Don't unescape the parts of the URI that are processed by the
+          // origin since it may behave differently based upon whether these are
+          // escaped or not. Therefore differently encoded strings should be
+          // cached separately via differentiated hashes.
+          int path_len = ends[i] - t;
+          int min_len  = std::min(path_len, static_cast<int>(e - p));
+          memcpy(p, t, min_len);
+          p += min_len;
+          t += min_len;
         } else {
           unescape_str(p, e, t, ends[i], s);
         }
@@ -1879,21 +1906,21 @@ url_CryptoHash_get_general(const URLImpl *url, CryptoContext &ctx, CryptoHash &h
 }
 
 void
-url_CryptoHash_get(const URLImpl *url, CryptoHash *hash, cache_generation_t generation)
+url_CryptoHash_get(const URLImpl *url, CryptoHash *hash, bool ignore_query, cache_generation_t generation)
 {
   URLHashContext ctx;
   if ((url_hash_method != 0) && (url->m_url_type == URL_TYPE_HTTP) &&
-      ((url->m_len_user + url->m_len_password + url->m_len_params + url->m_len_query) == 0) &&
+      ((url->m_len_user + url->m_len_password + url->m_len_params + (ignore_query ? 0 : url->m_len_query)) == 0) &&
       (3 + 1 + 1 + 1 + 1 + 1 + 2 + url->m_len_scheme + url->m_len_host + url->m_len_path < BUFSIZE) &&
       (memchr(url->m_ptr_host, '%', url->m_len_host) == nullptr) && (memchr(url->m_ptr_path, '%', url->m_len_path) == nullptr)) {
     url_CryptoHash_get_fast(url, ctx, hash, generation);
 #ifdef DEBUG
     CryptoHash hash_general;
-    url_CryptoHash_get_general(url, ctx, hash_general, generation);
+    url_CryptoHash_get_general(url, ctx, hash_general, ignore_query, generation);
     ink_assert(*hash == hash_general);
 #endif
   } else {
-    url_CryptoHash_get_general(url, ctx, *hash, generation);
+    url_CryptoHash_get_general(url, ctx, *hash, ignore_query, generation);
   }
 }
 

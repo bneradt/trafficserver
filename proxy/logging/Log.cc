@@ -53,7 +53,7 @@
 
 #include "tscore/ink_apidefs.h"
 
-#include "MgmtDefs.h"
+#include "tscore/MgmtDefs.h"
 
 #define PERIODIC_TASKS_INTERVAL_FALLBACK 5
 
@@ -387,11 +387,6 @@ Log::init_fields()
                        &LogAccess::unmarshal_int_to_time_str);
   global_field_list.add(field, false);
   field_symbol_hash.emplace("cqtt", field);
-
-  field =
-    new LogField("client_req_text", "cqtx", LogField::STRING, &LogAccess::marshal_client_req_text, &LogAccess::unmarshal_http_text);
-  global_field_list.add(field, false);
-  field_symbol_hash.emplace("cqtx", field);
 
   field = new LogField("client_req_http_method", "cqhm", LogField::STRING, &LogAccess::marshal_client_req_http_method,
                        &LogAccess::unmarshal_str);
@@ -831,6 +826,16 @@ Log::init_fields()
   global_field_list.add(field, false);
   field_symbol_hash.emplace("sstc", field);
 
+  field = new LogField("server_unavailable_retry_count", "surc", LogField::sINT, &LogAccess::marshal_server_unavailable_retry_count,
+                       &LogAccess::unmarshal_int_to_str);
+  global_field_list.add(field, false);
+  field_symbol_hash.emplace("surc", field);
+
+  field = new LogField("server_simple_retry_count", "ssrc", LogField::sINT, &LogAccess::marshal_server_simple_retry_count,
+                       &LogAccess::unmarshal_int_to_str);
+  global_field_list.add(field, false);
+  field_symbol_hash.emplace("ssrc", field);
+
   field = new LogField("server_connect_attempts", "sca", LogField::sINT, &LogAccess::marshal_server_connect_attempts,
                        &LogAccess::unmarshal_int_to_str);
   global_field_list.add(field, false);
@@ -898,10 +903,10 @@ Log::init_fields()
   global_field_list.add(field, false);
   field_symbol_hash.emplace("ttms", field);
 
-  field = new LogField("transfer_time_ms_hex", "ttmh", LogField::sINT, &LogAccess::marshal_transfer_time_ms,
+  field = new LogField("transfer_time_ms_hex", "ttmsh", LogField::sINT, &LogAccess::marshal_transfer_time_ms,
                        &LogAccess::unmarshal_int_to_str_hex);
   global_field_list.add(field, false);
-  field_symbol_hash.emplace("ttmh", field);
+  field_symbol_hash.emplace("ttmsh", field);
 
   field = new LogField("transfer_time_ms_fractional", "ttmsf", LogField::sINT, &LogAccess::marshal_transfer_time_ms,
                        &LogAccess::unmarshal_ttmsf);
@@ -1399,11 +1404,11 @@ Log::flush_thread_main(void * /* args ATS_UNUSED */)
 
     // Time to work on periodic events??
     //
-    now = Thread::get_hrtime_updated() / HRTIME_SECOND;
+    now = ink_get_hrtime() / HRTIME_SECOND;
     if (now >= last_time + periodic_tasks_interval) {
       Debug("log-preproc", "periodic tasks for %" PRId64, (int64_t)now);
       periodic_tasks(now);
-      last_time = Thread::get_hrtime() / HRTIME_SECOND;
+      last_time = ink_get_hrtime() / HRTIME_SECOND;
     }
 
     // wait for more work; a spurious wake-up is ok since we'll just

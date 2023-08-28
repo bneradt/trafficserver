@@ -43,6 +43,7 @@ ts_child.Disk.remap_config.AddLine(
 
 # Configure parent proxy
 ts_parent.Disk.records_config.update({
+    'proxy.config.http.push_method_enabled': 1,
     'proxy.config.url_remap.pristine_host_hdr': 1,
     'proxy.config.http.cache.max_stale_age': 10,
     'proxy.config.dns.nameservers': f"127.0.0.1:{nameserver.Variables.Port}",

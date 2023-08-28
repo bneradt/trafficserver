@@ -27,12 +27,9 @@
 #include "P_Net.h"
 
 using NetAcceptHandler = int (NetAccept::*)(int, void *);
-int accept_till_done   = 1;
 
-// we need to protect naVec since it might be accessed
-// in different threads at the same time
-Ptr<ProxyMutex> naVecMutex;
-std::vector<NetAccept *> naVec;
+int NetAccept::accept_till_done = 1;
+
 static void
 safe_delay(int msec)
 {
@@ -48,7 +45,7 @@ net_accept(NetAccept *na, void *ep, bool blockable)
   Event *e               = static_cast<Event *>(ep);
   int res                = 0;
   int count              = 0;
-  int loop               = accept_till_done;
+  const int loop         = NetAccept::accept_till_done;
   UnixNetVConnection *vc = nullptr;
   Connection con;
 
@@ -88,7 +85,7 @@ net_accept(NetAccept *na, void *ep, bool blockable)
     vc->id = net_next_connection_number();
     vc->con.move(con);
     vc->set_remote_addr(con.addr);
-    vc->submit_time = Thread::get_hrtime();
+    vc->submit_time = ink_get_hrtime();
     vc->action_     = *na->action_;
     vc->set_is_transparent(na->opt.f_inbound_transparent);
     vc->set_is_proxy_protocol(na->opt.f_proxy_protocol);
@@ -285,7 +282,7 @@ int
 NetAccept::do_blocking_accept(EThread *t)
 {
   int res                = 0;
-  int loop               = accept_till_done;
+  const int loop         = NetAccept::accept_till_done;
   UnixNetVConnection *vc = nullptr;
   Connection con;
   con.sock_type = SOCK_STREAM;
@@ -344,7 +341,7 @@ NetAccept::do_blocking_accept(EThread *t)
     vc->id = net_next_connection_number();
     vc->con.move(con);
     vc->set_remote_addr(con.addr);
-    vc->submit_time = Thread::get_hrtime();
+    vc->submit_time = ink_get_hrtime();
     vc->action_     = *action_;
     vc->set_is_transparent(opt.f_inbound_transparent);
     vc->set_is_proxy_protocol(opt.f_proxy_protocol);
@@ -428,7 +425,7 @@ NetAccept::acceptFastEvent(int event, void *ep)
   con.sock_type = SOCK_STREAM;
 
   UnixNetVConnection *vc = nullptr;
-  int loop               = accept_till_done;
+  const int loop         = NetAccept::accept_till_done;
 
   do {
     socklen_t sz = sizeof(con.addr);
@@ -497,7 +494,7 @@ NetAccept::acceptFastEvent(int event, void *ep)
     vc->id = net_next_connection_number();
     vc->con.move(con);
     vc->set_remote_addr(con.addr);
-    vc->submit_time = Thread::get_hrtime();
+    vc->submit_time = ink_get_hrtime();
     vc->action_     = *action_;
     vc->set_is_transparent(opt.f_inbound_transparent);
     vc->set_is_proxy_protocol(opt.f_proxy_protocol);

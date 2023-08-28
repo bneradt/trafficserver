@@ -26,6 +26,8 @@
 #include "QUICMultiCertConfigLoader.h"
 #include "quic/QUICStream_quiche.h"
 #include "quic/QUICGlobals.h"
+
+#include <netinet/in.h>
 #include <quiche.h>
 
 static constexpr ink_hrtime WRITE_READY_INTERVAL = HRTIME_MSECONDS(2);
@@ -35,7 +37,14 @@ static constexpr ink_hrtime WRITE_READY_INTERVAL = HRTIME_MSECONDS(2);
 
 ClassAllocator<QUICNetVConnection> quicNetVCAllocator("quicNetVCAllocator");
 
-QUICNetVConnection::QUICNetVConnection() {}
+QUICNetVConnection::QUICNetVConnection()
+{
+  this->_set_service(static_cast<ALPNSupport *>(this));
+  this->_set_service(static_cast<TLSBasicSupport *>(this));
+  this->_set_service(static_cast<TLSCertSwitchSupport *>(this));
+  this->_set_service(static_cast<TLSSNISupport *>(this));
+  this->_set_service(static_cast<TLSSessionResumptionSupport *>(this));
+}
 
 QUICNetVConnection::~QUICNetVConnection() {}
 
@@ -72,7 +81,7 @@ QUICNetVConnection::init(QUICVersion version, QUICConnectionId peer_cid, QUICCon
 void
 QUICNetVConnection::free()
 {
-  this->free(this_ethread());
+  this->free_thread(this_ethread());
 }
 
 // called by ET_UDP
@@ -103,13 +112,17 @@ QUICNetVConnection::set_local_addr()
 }
 
 void
-QUICNetVConnection::free(EThread *t)
+QUICNetVConnection::free_thread(EThread *t)
 {
   QUICConDebug("Free connection");
 
   this->_udp_con = nullptr;
 
   quiche_conn_free(this->_quiche_con);
+  this->_quiche_con = nullptr;
+
+  this->_unschedule_quiche_timeout();
+  this->_unschedule_packet_write_ready();
 
   delete this->_application_map;
   this->_application_map = nullptr;
@@ -150,6 +163,7 @@ QUICNetVConnection::state_handshake(int event, Event *data)
     this->_schedule_packet_write_ready(true);
     break;
   case EVENT_INTERVAL:
+    this->_close_quiche_timeout(data);
     this->_handle_interval();
     break;
   case VC_EVENT_EOS:
@@ -170,6 +184,10 @@ QUICNetVConnection::state_handshake(int event, Event *data)
 int
 QUICNetVConnection::state_established(int event, Event *data)
 {
+  if (!this->_quiche_con) {
+    // Connection has been closed.
+    return EVENT_DONE;
+  }
   switch (event) {
   case QUIC_EVENT_PACKET_READ_READY:
     this->_handle_read_ready();
@@ -181,6 +199,7 @@ QUICNetVConnection::state_established(int event, Event *data)
     this->_schedule_packet_write_ready(true);
     break;
   case EVENT_INTERVAL:
+    this->_close_quiche_timeout(data);
     this->_handle_interval();
     break;
   case VC_EVENT_EOS:
@@ -281,7 +300,7 @@ QUICNetVConnection::acceptEvent(int event, Event *e)
 
   // Send this NetVC to NetHandler and start to polling read & write event.
   if (h->startIO(this) < 0) {
-    free(t);
+    this->free_thread(t);
     return EVENT_DONE;
   }
 
@@ -309,7 +328,7 @@ QUICNetVConnection::acceptEvent(int event, Event *e)
   action_.continuation->handleEvent(NET_EVENT_ACCEPT, this);
   this->_schedule_packet_write_ready();
 
-  this->thread->schedule_in(this, HRTIME_MSECONDS(quiche_conn_timeout_as_millis(this->_quiche_con)));
+  this->_schedule_quiche_timeout();
 
   return EVENT_DONE;
 }
@@ -339,10 +358,8 @@ QUICNetVConnection::reset_quic_connection()
 void
 QUICNetVConnection::handle_received_packet(UDPPacket *packet)
 {
-  IOBufferBlock *block = packet->getIOBlockChain();
-  uint8_t *buf         = reinterpret_cast<uint8_t *>(block->buf());
-  uint64_t buf_len     = block->size();
-
+  size_t buf_len{0};
+  uint8_t *buf = packet->get_entire_chain_buffer(&buf_len);
   net_activity(this, this_ethread());
   quiche_recv_info recv_info = {
     &packet->from.sa,
@@ -551,6 +568,30 @@ QUICNetVConnection::_close_packet_write_ready(Event *data)
 }
 
 void
+QUICNetVConnection::_schedule_quiche_timeout()
+{
+  if (!this->_quiche_timeout) {
+    this->_quiche_timeout = this->thread->schedule_in(this, HRTIME_MSECONDS(quiche_conn_timeout_as_millis(this->_quiche_con)));
+  }
+}
+
+void
+QUICNetVConnection::_unschedule_quiche_timeout()
+{
+  if (this->_quiche_timeout) {
+    this->_quiche_timeout->cancel();
+    this->_quiche_timeout = nullptr;
+  }
+}
+
+void
+QUICNetVConnection::_close_quiche_timeout(Event *data)
+{
+  ink_assert(this->_quiche_timeout == data);
+  this->_quiche_timeout = nullptr;
+}
+
+void
 QUICNetVConnection::_handle_read_ready()
 {
   quiche_stream_iter *readable = quiche_conn_readable(this->_quiche_con);
@@ -649,20 +690,39 @@ QUICNetVConnection::_handle_interval()
 
   } else {
     // Just schedule timeout event again if the connection is still open
-    this->thread->schedule_in(this, HRTIME_MSECONDS(quiche_conn_timeout_as_millis(this->_quiche_con)));
+    this->_schedule_quiche_timeout();
   }
 }
 
 int
 QUICNetVConnection::populate_protocol(std::string_view *results, int n) const
 {
-  return 0;
+  int retval = 0;
+  if (n > retval) {
+    results[retval++] = IP_PROTO_TAG_QUIC;
+    if (n > retval) {
+      results[retval++] = IP_PROTO_TAG_TLS_1_3;
+      if (n > retval) {
+        retval += super::populate_protocol(results + retval, n - retval);
+      }
+    }
+  }
+  return retval;
 }
 
 const char *
-QUICNetVConnection::protocol_contains(std::string_view tag) const
+QUICNetVConnection::protocol_contains(std::string_view prefix) const
 {
-  return "";
+  const char *retval = nullptr;
+  if (prefix.size() <= IP_PROTO_TAG_QUIC.size() && strncmp(IP_PROTO_TAG_QUIC.data(), prefix.data(), prefix.size()) == 0) {
+    retval = IP_PROTO_TAG_QUIC.data();
+  } else if (prefix.size() <= IP_PROTO_TAG_TLS_1_3.size() &&
+             strncmp(IP_PROTO_TAG_TLS_1_3.data(), prefix.data(), prefix.size()) == 0) {
+    retval = IP_PROTO_TAG_TLS_1_3.data();
+  } else {
+    retval = super::protocol_contains(prefix);
+  }
+  return retval;
 }
 
 const char *
@@ -696,6 +756,12 @@ QUICNetVConnection::_get_tls_curve() const
 void
 QUICNetVConnection::_fire_ssl_servername_event()
 {
+}
+
+in_port_t
+QUICNetVConnection::_get_local_port()
+{
+  return this->get_local_port();
 }
 
 const IpEndpoint &
