@@ -1014,8 +1014,8 @@ bool
 UDPNetProcessor::CreateUDPSocket(int *resfd, sockaddr const *remote_addr, Action **status, NetVCOptions const &opt)
 {
   int res = 0, fd = -1;
-  int local_addr_len;
   IpEndpoint local_addr;
+  int local_addr_len = sizeof(local_addr.sa);
 
   // Need to do address calculations first, so we can determine the
   // address family for socket creation.
@@ -1672,6 +1672,7 @@ UDPQueue::SendMultipleUDPPackets(UDPPacket **p, uint16_t n)
   if (res > 0) {
 #ifdef SOL_UDP
     if (use_udp_gso) {
+      ink_assert(res <= n);
       Debug("udp-send", "Sent %d messages by processing %d UDPPackets (GSO)", res, n);
     } else {
 #endif
@@ -1736,7 +1737,7 @@ int
 UDPNetHandler::mainNetEvent(int event, Event *e)
 {
   ink_assert(trigger_event == e && event == EVENT_POLL);
-  return this->waitForActivity(net_config_poll_timeout);
+  return this->waitForActivity(EThread::default_wait_interval_ms);
 }
 
 int

@@ -159,7 +159,6 @@ static int regression_list        = 0;
 static int regression_level       = REGRESSION_TEST_NONE;
 #endif
 static int auto_clear_hostdb_flag = 0;
-extern int fds_limit;
 
 static char command_string[512] = "";
 static char conf_dir[512]       = "";
@@ -607,7 +606,7 @@ init_system()
   //
   // Delimit file Descriptors
   //
-  fds_limit = ink_max_out_rlimit(RLIMIT_NOFILE);
+  ink_set_fds_limit(ink_max_out_rlimit(RLIMIT_NOFILE));
 }
 
 static void
@@ -1221,9 +1220,10 @@ cmd_help(char *cmd)
 static void
 check_fd_limit()
 {
-  int fds_throttle = -1;
-  REC_ReadConfigInteger(fds_throttle, "proxy.config.net.connections_throttle");
-  if (fds_throttle > fds_limit - THROTTLE_FD_HEADROOM) {
+  int check_throttle = -1;
+  int fds_limit      = static_cast<int>(ink_get_fds_limit());
+  REC_ReadConfigInteger(check_throttle, "proxy.config.net.connections_throttle");
+  if (check_throttle > fds_limit - THROTTLE_FD_HEADROOM) {
     int new_fds_throttle = fds_limit - THROTTLE_FD_HEADROOM;
     if (new_fds_throttle < 1) {
       ink_abort("too few file descriptors (%d) available", fds_limit);
@@ -1233,7 +1233,7 @@ check_fd_limit()
              "connection throttle too high, "
              "%d (throttle) + %d (internal use) > %d (file descriptor limit), "
              "using throttle of %d",
-             fds_throttle, THROTTLE_FD_HEADROOM, fds_limit, new_fds_throttle);
+             check_throttle, THROTTLE_FD_HEADROOM, fds_limit, new_fds_throttle);
     Warning("%s", msg);
   }
 }
@@ -1326,7 +1326,7 @@ static void
 adjust_sys_settings()
 {
   struct rlimit lim;
-  int fds_throttle = -1;
+  int cfg_fds_throttle = -1;
   rlim_t maxfiles;
 
   maxfiles = ink_get_max_files();
@@ -1340,19 +1340,19 @@ adjust_sys_settings()
 
     lim.rlim_cur = lim.rlim_max = static_cast<rlim_t>(maxfiles * file_max_pct);
     if (setrlimit(RLIMIT_NOFILE, &lim) == 0 && getrlimit(RLIMIT_NOFILE, &lim) == 0) {
-      fds_limit = static_cast<int>(lim.rlim_cur);
+      ink_set_fds_limit(lim.rlim_cur);
       syslog(LOG_NOTICE, "NOTE: RLIMIT_NOFILE(%d):cur(%d),max(%d)", RLIMIT_NOFILE, static_cast<int>(lim.rlim_cur),
              static_cast<int>(lim.rlim_max));
     }
   }
 
-  REC_ReadConfigInteger(fds_throttle, "proxy.config.net.connections_throttle");
+  REC_ReadConfigInteger(cfg_fds_throttle, "proxy.config.net.connections_throttle");
 
   if (getrlimit(RLIMIT_NOFILE, &lim) == 0) {
-    if (fds_throttle > (int)(lim.rlim_cur - THROTTLE_FD_HEADROOM)) {
-      lim.rlim_cur = (lim.rlim_max = (rlim_t)(fds_throttle + THROTTLE_FD_HEADROOM));
+    if (cfg_fds_throttle > static_cast<int>(lim.rlim_cur - THROTTLE_FD_HEADROOM)) {
+      lim.rlim_cur = (lim.rlim_max = static_cast<rlim_t>(cfg_fds_throttle + THROTTLE_FD_HEADROOM));
       if (setrlimit(RLIMIT_NOFILE, &lim) == 0 && getrlimit(RLIMIT_NOFILE, &lim) == 0) {
-        fds_limit = static_cast<int>(lim.rlim_cur);
+        ink_set_fds_limit(lim.rlim_cur);
         syslog(LOG_NOTICE, "NOTE: RLIMIT_NOFILE(%d):cur(%d),max(%d)", RLIMIT_NOFILE, static_cast<int>(lim.rlim_cur),
                static_cast<int>(lim.rlim_max));
       }
@@ -2023,14 +2023,14 @@ main(int /* argc ATS_UNUSED */, const char **argv)
   // This has some special semantics, in that providing this configuration on
   // command line has higher priority than what is set in records.yaml.
   if (-1 != poll_timeout) {
-    net_config_poll_timeout = poll_timeout;
+    EThread::default_wait_interval_ms = poll_timeout;
   } else {
-    REC_ReadConfigInteger(net_config_poll_timeout, "proxy.config.net.poll_timeout");
+    REC_ReadConfigInteger(EThread::default_wait_interval_ms, "proxy.config.net.poll_timeout");
   }
 
   // This shouldn't happen, but lets make sure we run somewhat reasonable.
-  if (net_config_poll_timeout < 0) {
-    net_config_poll_timeout = 10; // Default value for all platform.
+  if (EThread::default_wait_interval_ms < 0) {
+    EThread::default_wait_interval_ms = 10; // Default value for all platform.
   }
 
   REC_ReadConfigInteger(thread_max_heartbeat_mseconds, "proxy.config.thread.max_heartbeat_mseconds");
