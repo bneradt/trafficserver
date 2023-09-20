@@ -17,7 +17,6 @@
 
 
 add_library(inknet STATIC
-        AcceptOptions.cc
         ALPNSupport.cc
         AsyncSignalEventIO.cc
         BIO_fastopen.cc
@@ -115,7 +114,7 @@ target_include_directories(inknet PUBLIC
         ${CMAKE_SOURCE_DIR}/proxy/shared
         ${CMAKE_SOURCE_DIR}/proxy/http
         ${CMAKE_SOURCE_DIR}/proxy/http/remap
-        ${CMAKE_SOURCE_DIR}/src/traffic_server
+        ${CMAKE_SOURCE_DIR}/src/api
 )
 
 target_link_libraries(inknet

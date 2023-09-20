@@ -697,6 +697,7 @@ HTTP Engine
    tr-out                      Outbound transparent.
    tr-pass                     Pass through enabled.
    mptcp                       Multipath TCP.
+   allow-plain                 Allow failback to non-TLS for TLS ports
    =========== =============== ========================================
 
 *number*
@@ -720,6 +721,8 @@ ssl
    Require SSL termination for inbound connections. SSL :ref:`must be configured <admin-ssl-termination>` for this option to provide a functional server port.
 
    Not compatible with: ``blind`` and ``quic``.
+
+   ``allow-plain`` allows a failback to non SSL for such ports.
 
 quic
    Require QUIC termination for inbound connections. SSL :ref:`must be configured <admin-ssl-termination>` for this option to provide a functional server port.
@@ -778,6 +781,10 @@ mptcp
    Enable Multipath TCP on this proxy port.
 
    Requires custom Linux kernel available at https://multipath-tcp.org.
+
+allow-plain
+   For TLS ports, will fall back to non-TLS processing if the TLS handshake fails. Incompatible with
+   quic ports.
 
 .. topic:: Example
 
@@ -2999,18 +3006,6 @@ HostDB
 
     Set the interval (in seconds) in which to re-query DNS regardless of TTL status.
 
-.. ts:cv:: CONFIG proxy.config.hostdb.filename STRING host.db
-
-   The filename to persist hostdb to on disk.
-
-.. ts:cv:: CONFIG proxy.config.cache.hostdb.sync_frequency INT 0
-
-   Set the frequency (in seconds) to sync hostdb to disk. If set to zero (default as of v9.0.0), we won't
-   sync to disk ever.
-
-   Note: hostdb is synced to disk on a per-partition basis (of which there are 64).
-   This means that the minimum time to sync all data to disk is :ts:cv:`proxy.config.cache.hostdb.sync_frequency` * 64
-
 Logging Configuration
 =====================
 
@@ -4253,6 +4248,14 @@ OCSP Stapling Configuration
 .. ts:cv:: CONFIG proxy.config.ssl.ocsp.cache_timeout INT 3600
 
    Number of seconds before an OCSP response expires in the stapling cache.
+
+.. ts:cv:: CONFIG proxy.config.ssl.ocsp.request_mode INT 0
+
+   Set the request method to prefer when querying OCSP responders. The default
+   is zero, or POST, and a value of 1 will cause ATS to attempt a GET request.
+   Because the length of the encoded request must be less than 255 bytes per RFC
+   6960, Appendix A, ATS will fall back to the POST request method when the
+   encoded size exceeds this limit.
 
 .. ts:cv:: CONFIG proxy.config.ssl.ocsp.request_timeout INT 10
    :units: seconds

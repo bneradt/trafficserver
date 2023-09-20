@@ -98,7 +98,7 @@ extern "C" int plock(int);
 #include "RemapPluginInfo.h"
 #include "RemapProcessor.h"
 #include "I_Tasks.h"
-#include "InkAPIInternal.h"
+#include "api/InkAPIInternal.h"
 #include "HTTP2.h"
 #include "tscore/ink_config.h"
 #include "P_SSLClientUtils.h"
@@ -135,8 +135,7 @@ static char diags_log_filename[PATH_NAME_MAX] = DEFAULT_DIAGS_LOG_FILENAME;
 static const long MAX_LOGIN = ink_login_name_max();
 
 static void init_ssl_ctx_callback(void *ctx, bool server);
-// This isn't static as its also called from InkAPI.cc
-void load_config_file_callback(const char *parent_file, const char *remap_file);
+extern void load_config_file_callback(const char *parent_file, const char *remap_file);
 static void load_ssl_file_callback(const char *ssl_file);
 static void task_threads_started_callback();
 
@@ -169,7 +168,7 @@ static char error_tags[1024]    = "";
 static char action_tags[1024]   = "";
 static int show_statistics      = 0;
 static DiagsConfig *diagsConfig = nullptr;
-HttpBodyFactory *body_factory   = nullptr;
+extern HttpBodyFactory *body_factory;
 
 static int accept_mss           = 0;
 static int poll_timeout         = -1; // No value set.
@@ -206,6 +205,8 @@ static ArgumentDescription argument_descriptions[] = {
   {"disable_freelist",  'f', "Disable the freelist memory allocator",                                                               "T",     &cmd_disable_freelist,           "PROXY_DPRINTF_LEVEL",     nullptr},
   {"disable_pfreelist", 'F', "Disable the freelist memory allocator in ProxyAllocator",                                             "T",     &cmd_disable_pfreelist,
    "PROXY_DPRINTF_LEVEL",                                                                                                                                                                                nullptr},
+  {"maxRecords",        'm', "Max number of librecords metrics and configurations (default & minimum: 2048)",                       "I",     &max_records_entries,
+   "PROXY_MAX_RECORDS",                                                                                                                                                                                  nullptr},
 
 #if TS_HAS_TESTS
   {"regression",        'R', "Regression Level (quick:1..long:3)",                                                                  "I",     &regression_level,               "PROXY_REGRESSION",        nullptr},
@@ -1392,34 +1393,26 @@ struct ShowStats : public Continuation {
     if (!(cycle++ % 24)) {
       printf("r:rr w:ww r:rbs w:wbs open polls\n");
     }
-    int64_t sval, cval;
-
-    NET_READ_DYN_SUM(net_calls_to_readfromnet_stat, sval);
-    int64_t d_rb  = sval - last_rb;
+    int64_t d_rb  = Metrics::read(net_rsb.calls_to_readfromnet) - last_rb;
     last_rb      += d_rb;
 
-    NET_READ_DYN_SUM(net_calls_to_writetonet_stat, sval);
-    int64_t d_wb  = sval - last_wb;
+    int64_t d_wb  = Metrics::read(net_rsb.calls_to_writetonet) - last_wb;
     last_wb      += d_wb;
 
-    NET_READ_DYN_STAT(net_read_bytes_stat, sval, cval);
-    int64_t d_nrb  = sval - last_nrb;
+    int64_t d_nrb  = Metrics::read(net_rsb.read_bytes) - last_nrb;
     last_nrb      += d_nrb;
-    int64_t d_nr   = cval - last_nr;
+    int64_t d_nr   = Metrics::read(net_rsb.read_bytes_count) - last_nr;
     last_nr       += d_nr;
 
-    NET_READ_DYN_STAT(net_write_bytes_stat, sval, cval);
-    int64_t d_nwb  = sval - last_nwb;
+    int64_t d_nwb  = Metrics::read(net_rsb.write_bytes) - last_nwb;
     last_nwb      += d_nwb;
-    int64_t d_nw   = cval - last_nw;
+    int64_t d_nw   = Metrics::read(net_rsb.write_bytes_count) - last_nw;
     last_nw       += d_nw;
 
-    NET_READ_GLOBAL_DYN_SUM(net_connections_currently_open_stat, sval);
-    int64_t d_o = sval;
+    int64_t d_o = Metrics::read(net_rsb.connections_currently_open);
+    int64_t d_p = Metrics::read(net_rsb.handler_run) - last_p;
 
-    NET_READ_DYN_STAT(net_handler_run_stat, sval, cval);
-    int64_t d_p  = cval - last_p;
-    last_p      += d_p;
+    last_p += d_p;
     printf("%" PRId64 ":%" PRId64 ":%" PRId64 ":%" PRId64 " %" PRId64 ":%" PRId64 " %" PRId64 " %" PRId64 "\n", d_rb, d_wb, d_nrb,
            d_nr, d_nwb, d_nw, d_o, d_p);
 #ifdef ENABLE_TIME_TRACE
@@ -2313,12 +2306,6 @@ static void
 load_ssl_file_callback(const char *ssl_file)
 {
   FileManager::instance().configFileChild(ts::filename::SSL_MULTICERT, ssl_file);
-}
-
-void
-load_config_file_callback(const char *parent_file, const char *remap_file)
-{
-  FileManager::instance().configFileChild(parent_file, remap_file);
 }
 
 static void

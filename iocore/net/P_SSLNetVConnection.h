@@ -89,7 +89,7 @@ typedef enum {
   SSL_HOOK_OP_LAST = SSL_HOOK_OP_TERMINATE ///< End marker value.
 } SslVConnOp;
 
-enum SSLHandshakeStatus { SSL_HANDSHAKE_ONGOING, SSL_HANDSHAKE_DONE, SSL_HANDSHAKE_ERROR };
+enum class SSLHandshakeStatus { SSL_HANDSHAKE_ONGOING, SSL_HANDSHAKE_DONE, SSL_HANDSHAKE_ERROR };
 
 //////////////////////////////////////////////////////////////////
 //
@@ -124,14 +124,20 @@ public:
     return retval;
   }
 
+  SSLHandshakeStatus
+  getSSLHandshakeStatus() const
+  {
+    return sslHandshakeStatus;
+  }
+
   bool
   getSSLHandShakeComplete() const override
   {
-    return sslHandshakeStatus != SSL_HANDSHAKE_ONGOING;
+    return sslHandshakeStatus != SSLHandshakeStatus::SSL_HANDSHAKE_ONGOING;
   }
 
   virtual void
-  setSSLHandShakeComplete(enum SSLHandshakeStatus state)
+  setSSLHandShakeComplete(SSLHandshakeStatus state)
   {
     sslHandshakeStatus = state;
   }
@@ -173,6 +179,18 @@ public:
   setTransparentPassThrough(bool val)
   {
     transparentPassThrough = val;
+  }
+
+  bool
+  getAllowPlain() const
+  {
+    return allowPlain;
+  }
+
+  void
+  setAllowPlain(bool val)
+  {
+    allowPlain = val;
   }
 
   // Copy up here so we overload but don't override
@@ -423,7 +441,7 @@ private:
   NetProcessor *_getNetProcessor() override;
   void *_prepareForMigration() override;
 
-  enum SSLHandshakeStatus sslHandshakeStatus = SSL_HANDSHAKE_ONGOING;
+  enum SSLHandshakeStatus sslHandshakeStatus = SSLHandshakeStatus::SSL_HANDSHAKE_ONGOING;
   bool sslClientRenegotiationAbort           = false;
   bool first_ssl_connect                     = true;
   MIOBuffer *handShakeBuffer                 = nullptr;
@@ -432,6 +450,7 @@ private:
   int handShakeBioStored                     = 0;
 
   bool transparentPassThrough = false;
+  bool allowPlain             = false;
 
   int sent_cert = 0;
 
@@ -478,6 +497,8 @@ private:
   void _make_ssl_connection(SSL_CTX *ctx);
   void _bindSSLObject();
   void _unbindSSLObject();
+  UnixNetVConnection *_migrateFromSSL();
+  void _propagateHandShakeBuffer(UnixNetVConnection *target, EThread *t);
 
   int _ssl_read_from_net(EThread *lthread, int64_t &ret);
   ssl_error_t _ssl_read_buffer(void *buf, int64_t nbytes, int64_t &nread);

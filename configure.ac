@@ -592,6 +592,19 @@ AC_ARG_ENABLE([32bit-build],
 )
 AC_MSG_RESULT([$enable_32bit])
 
+#
+# Check if disk failure handling tests should be built.
+# This means compiling disk failure simulation code into ATS.
+#
+AC_MSG_CHECKING([whether to build disk failure handling tests])
+AC_ARG_ENABLE([disk-failure-tests],
+  [AS_HELP_STRING([--enable-disk-failure-tests],[Build disk failure tests])],
+  [],
+  [enable_disk_failure_tests=no]
+)
+AC_MSG_RESULT([$enable_disk_failure_tests])
+AM_CONDITIONAL([ENABLE_DISK_FAILURE_TESTS], [ test "x${enable_disk_failure_tests}" = "xyes" ])
+
 
 #
 # Installation directories
@@ -758,6 +771,7 @@ esac
 
 TS_ADDTO(AM_CPPFLAGS, [-D$host_os_def])
 AM_CONDITIONAL([OS_LINUX], [test "x$host_os_def" = "xlinux"])
+AM_CONDITIONAL([OS_NON_MACOS], [test "x$host_os_def" != "xdarwin"])
 
 dnl AM_PROG_AR is not always available, but it doesn't seem to be needed in older versions.
 ifdef([AM_PROG_AR],
@@ -1101,6 +1115,12 @@ elif test "x${enable_tsan}" = "xstatic"; then
   CXXFLAGS="$tsan_CXXFLAGS"
   TS_ADDTO(AM_CFLAGS, [-fsanitize=thread -static-libtsan])
   TS_ADDTO(AM_CXXFLAGS, [-fsanitize=thread -static-libtsan])
+fi
+
+# Build for disk failure simulation
+if test "x${enable_disk_failure_tests}" = "xyes"; then
+  TS_ADDTO(AM_CFLAGS, [-DAIO_FAULT_INJECTION])
+  TS_ADDTO(AM_CXXFLAGS, [-DAIO_FAULT_INJECTION])
 fi
 
 # Checks for pointer size.
@@ -1680,14 +1700,19 @@ use_hwloc=0
 AS_IF([test "x$enable_hwloc" = "xyes"], [
   # Use pkg-config, because some distros (*cough* Ubuntu) put hwloc in unusual places.
   PKG_CHECK_MODULES([HWLOC], [hwloc], [
+    SAVE_CXXFLAGS="$CXXFLAGS"
+    CXXFLAGS="${HWLOC_CFLAGS}"
+
     SAVE_LIBS="$LIBS"
-    LIBS="-lhwloc"
+    LIBS="${HWLOC_LIBS}"
+
     AC_LANG_PUSH([C++])
     AC_MSG_CHECKING([for hwloc C++ linking])
     AC_LINK_IFELSE([
-      AC_LANG_PROGRAM([#include <hwloc.h>],[hwloc_topology_t t; hwloc_topology_init(&t); hwloc_get_type_depth(t, HWLOC_OBJ_SOCKET);])],[
+      AC_LANG_PROGRAM([#include <hwloc.h>],[hwloc_topology_t t; hwloc_topology_init(&t); hwloc_get_type_depth(t, HWLOC_OBJ_SOCKET);])],
+      [
       use_hwloc=1
-      AC_SUBST([HWLOC_CFLAGS])
+      AC_SUBST([HWLOC_INCLUDES], "$HWLOC_CFLAGS")
       AC_SUBST([HWLOC_LIBS])
       AC_MSG_RESULT([yes])
       # Old versions of libhwloc don't have HWLOC_OBJ_PU.
@@ -1698,14 +1723,15 @@ AS_IF([test "x$enable_hwloc" = "xyes"], [
     ], [
       AC_MSG_RESULT([no])
       AC_MSG_WARN([hwloc not linkable, try --disable-hwloc])
-      AC_SUBST([HWLOC_CFLAGS],[""])
+      AC_SUBST([HWLOC_INCLUDES],[""])
       AC_SUBST([HWLOC_LIBS],[""])
     ])
     AC_LANG_POP()
     LIBS="$SAVE_LIBS"
+    CXXFLAGS="$SAVE_CXXFLAGS"
   ], [
     AC_MSG_WARN([hwloc not found, try --disable-hwloc])
-    AC_SUBST([HWLOC_CFLAGS],[""])
+    AC_SUBST([HWLOC_INCLUDES],[""])
     AC_SUBST([HWLOC_LIBS],[""])
   ])
 ])
