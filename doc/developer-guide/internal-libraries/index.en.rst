@@ -35,4 +35,6 @@ development team.
    MemSpan.en
    TextView.en
    buffer-writer.en
+   intrusive-hash-map.en
+   intrusive-list.en
    scalar.en
