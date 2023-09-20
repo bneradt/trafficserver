@@ -48,7 +48,7 @@ Cache::scan(Continuation *cont, const char *hostname, int host_len, int KB_per_s
   /* do we need to make a copy */
   c->hostname        = const_cast<char *>(hostname);
   c->host_len        = host_len;
-  c->base_stat       = cache_scan_active_stat;
+  c->op_type         = static_cast<int>(CacheOpType::Scan);
   c->buf             = new_IOBufferData(BUFFER_SIZE_FOR_XMALLOC(SCAN_BUF_SIZE), MEMALIGNED);
   c->scan_msec_delay = (SCAN_BUF_SIZE / KB_per_second);
   c->offset          = 0;
@@ -210,7 +210,7 @@ CacheVC::scanObject(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
     goto Lread;
   }
 
-  if (static_cast<size_t>(io.aio_result) != io.aiocb.aio_nbytes) {
+  if (!io.ok()) {
     result = (void *)-ECACHE_READ_FAIL;
     goto Ldone;
   }

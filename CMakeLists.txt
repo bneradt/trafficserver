@@ -47,15 +47,32 @@ execute_process(COMMAND id -ng OUTPUT_VARIABLE BUILD_GROUP OUTPUT_STRIP_TRAILING
 execute_process(COMMAND uname -n OUTPUT_VARIABLE BUILD_MACHINE OUTPUT_STRIP_TRAILING_WHITESPACE)
 
 # Options
+include(AutoOptionHelpers)
+auto_option(HWLOC FEATURE_VAR TS_USE_HWLOC PACKAGE_DEPENDS hwloc)
+auto_option(JEMALLOC
+    FEATURE_VAR TS_HAS_JEMALLOC
+    PACKAGE_DEPENDS jemalloc
+)
+auto_option(MIMALLOC
+    FEATURE_VAR TS_HAS_MIMALLOC
+    PACKAGE_DEPENDS mimalloc
+    DEFAULT OFF
+)
+auto_option(LUAJIT PACKAGE_DEPENDS LuaJIT)
+auto_option(UNWIND FEATURE_VAR TS_USE_REMOTE_UNWINDING PACKAGE_DEPENDS unwind)
+
 option(ENABLE_ASAN "Use address sanitizer (default OFF)")
+option(ENABLE_FUZZING  "Enable fuzzing (default OFF)")
 option(BUILD_REGRESSION_TESTING "Build regression tests (default ON)" ON)
 option(BUILD_EXPERIMENTAL_PLUGINS "Build the experimental plugins (default OFF)")
 set(DEFAULT_STACK_SIZE 1048576 CACHE STRING "Default stack size (default 1048576)")
 option(ENABLE_FAST_SDK "Use fast SDK APIs (default OFF)")
-option(ENABLE_JEMALLOC "Use jemalloc (default OFF)")
-option(ENABLE_LUAJIT   "Use LuaJIT (default OFF)")
-option(ENABLE_MIMALLOC "Use mimalloc (default OFF)")
 option(ENABLE_DOCS "Build docs (default OFF)")
+option(ENABLE_DISK_FAILURE_TESTS "Build disk failure tests (enables AIO fault injection, default OFF)" OFF)
+if(ENABLE_DISK_FAILURE_TESTS)
+    add_compile_definitions("AIO_FAULT_INJECTION")
+endif()
+option(ENABLE_AUTEST "Setup autest (default OFF)")
 option(ENABLE_BENCHMARKS "Build benchmarks (default OFF)")
 
 # Setup user
@@ -97,7 +114,7 @@ set(ENABLE_TPROXY
         anything else to enable."
 )
 option(ENABLE_QUICHE   "Use quiche (default OFF)")
-option(ENABLE_UNWIND   "Use libunwind if found on system (default ON)" ON)
+
 option(ENABLE_WCCP     "Use WCCP v2 (default OFF)")
 option(ENABLE_EXAMPLE  "Build example directory (default OFF)")
 set(TS_MAX_HOST_NAME_LEN 256 CACHE STRING "Max host name length (default 256)")
@@ -115,7 +132,7 @@ set(MAX_THREADS_PER_TYPE
 )
 set(TS_USE_SET_RBIO 1 CACHE STRING "Use openssl set_rbio (default 1)")
 set(TS_USE_DIAGS 1 CACHE STRING "Use diags (default 1)")
-option(TS_USE_HWLOC "Use hwloc (default OFF)")
+option(ENABLE_CRIPTS "Build and install the Cripts library and headers  (default OFF)")
 
 set(TS_USE_FAST_SDK ${ENABLE_FAST_SDK})
 
@@ -171,10 +188,6 @@ if(brotli_FOUND)
     set(HAVE_BROTLI_ENCODE_H TRUE)
 endif()
 
-if(ENABLE_LUAJIT)
-    find_package(LuaJIT REQUIRED)
-endif()
-
 if(ENABLE_POSIX_CAP)
     find_package(cap REQUIRED)
     set(TS_USE_POSIX_CAP ${cap_FOUND})
@@ -189,11 +202,6 @@ else()
     find_package(cap QUIET)
 endif()
 set(HAVE_SYS_CAPABILITY_H ${cap_FOUND})
-
-find_package(hwloc)
-if(hwloc_FOUND)
-    set(TS_USE_HWLOC TRUE)
-endif()
 
 find_package(LibLZMA)
 if(LibLZMA_FOUND)
@@ -216,9 +224,14 @@ if(ENABLE_PROFILER)
     set(TS_HAS_PROFILER ${profiler_FOUND})
 endif()
 
-find_package(TSMallocReplacement QUIET MODULE)
-if(TSMallocReplacement_FOUND)
-    link_libraries(ts::TSMallocReplacement)
+if(TS_HAS_JEMALLOC AND TS_HAS_MIMALLOC)
+    message(FATAL_ERROR "Cannot build with both jemalloc and mimalloc.")
+endif()
+
+if(TS_HAS_JEMALLOC)
+    link_libraries(jemalloc)
+elseif(TS_HAS_MIMALLOC)
+    link_libraries(mimalloc)
 endif()
 
 if(ENABLE_UNWIND)
@@ -314,11 +327,21 @@ check_symbol_exists(
 )
 check_symbol_exists(TLS1_3_VERSION "openssl/ssl.h" TS_USE_TLS13)
 
-# document tools
+if(ENABLE_DOCS OR ENABLE_AUTEST)
+    find_package(Python3 REQUIRED)
+    find_program(PipEnv pipenv REQUIRED)
+endif()
+
 if(ENABLE_DOCS)
-  find_package(Python3 REQUIRED)
-  find_package(Java COMPONENTS Runtime REQUIRED)
-  find_program(PipEnv pipenv REQUIRED)
+    find_package(Java COMPONENTS Runtime REQUIRED)
+endif()
+
+if(ENABLE_AUTEST)
+  set(AUTEST_SANDBOX ${CMAKE_BINARY_DIR}/_sandbox CACHE STRING "Location for autest output (default
+  CMAKE_BINARY_DIR/_sandbox)")
+  set(PROXY_VERIFIER_VERSION "v2.10.1")
+  set(PROXY_VERIFIER_HASH "SHA1=0f189a37596d7488b5b81b5547df6fc1eadf56a1")
+  include(proxy-verifier)
 endif()
 
 include(CTest)
@@ -346,6 +369,13 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 add_compile_definitions(${HOST_OS} PACKAGE_NAME="ats" PACKAGE_VERSION="${TS_VERSION_STRING}")
 add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wno-invalid-offsetof>)
+
+# Enable fuzzing
+if(ENABLE_FUZZING)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "Fuzzing is only supported with clang")
+    endif()
+endif()
 
 # Common includes for everyone
 include_directories(
@@ -389,7 +419,6 @@ configure_file(include/ts/apidefs.h.in include/ts/apidefs.h)
 
 enable_testing()
 
-add_subdirectory(src/api)
 add_subdirectory(src/tscpp/util)
 add_subdirectory(src/tscpp/api)
 add_subdirectory(src/tscore)
@@ -398,6 +427,7 @@ add_subdirectory(iocore)
 add_subdirectory(proxy)
 add_subdirectory(mgmt/config)
 add_subdirectory(mgmt/rpc)
+add_subdirectory(src/api)
 add_subdirectory(src/traffic_crashlog)
 add_subdirectory(src/traffic_server)
 add_subdirectory(src/traffic_ctl)
@@ -413,8 +443,16 @@ if(ENABLE_WCCP)
     add_subdirectory(src/wccp)
     add_subdirectory(src/traffic_wccp)
 endif()
+if (ENABLE_CRIPTS)
+    add_subdirectory(src/cripts)
+endif()
 add_subdirectory(src/tests)
-add_subdirectory(tests)
+if(ENABLE_AUTEST)
+    add_subdirectory(tests)
+endif()
+if(ENABLE_FUZZING)
+    add_subdirectory(tests/fuzzing)
+endif()
 add_subdirectory(plugins)
 add_subdirectory(configs)
 if(ENABLE_EXAMPLE)
@@ -424,6 +462,7 @@ endif()
 if(ENABLE_DOCS)
     add_subdirectory(doc)
 endif()
+add_subdirectory(rc)
 
 if(ENABLE_BENCHMARKS)
     message(STATUS "Building benchmarks in tools/benchmark")
@@ -479,7 +518,7 @@ add_custom_target(format
         COMMENT "formatting all files"
         )
 
-if(NOT EXISTS ${CMAKE_SOURCE_DIR}/.git/hooks/pre-commit)
+if(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/.git AND NOT EXISTS ${CMAKE_SOURCE_DIR}/.git/hooks/pre-commit)
     message(STATUS "Installing github hook")
     configure_file(${CMAKE_SOURCE_DIR}/tools/git/pre-commit ${CMAKE_SOURCE_DIR}/.git/hooks/pre-commit COPYONLY)
 endif()
@@ -508,4 +547,4 @@ cmake_print_variables(TS_PKGSYSGROUP)
 cmake_print_variables(BUILD_MACHINE)
 cmake_print_variables(DEFAULT_STACK_SIZE)
 cmake_print_variables(CMAKE_INSTALL_RPATH)
-cmake_print_variables(OPENSSL_VERSION)
+print_auto_options_summary()
