@@ -1,0 +1,97 @@
+meta:
+    version: '1.0'
+
+sessions:
+
+- transactions:
+
+  # First request: accepted.
+  - client-request:
+      method: POST
+      url: /path/to/file.xml
+      version: '1.1'
+      headers:
+        fields:
+        - [ Host, www.example.com ]
+        - [ Content-Type, application/xml ]
+        - [ Content-Length, '299' ]
+        - [ uuid, accepted ]
+      content:
+        encoding: plain
+        # Each line is 30 characters, including the newline.
+        # The last line doesn't have a newline, thus 29.
+        data: |-
+          12345678901234567890123456789
+          12345678901234567890123456789
+          12345678901234567890123456789
+          12345678901234567890123456789
+          12345678901234567890123456789
+          12345678901234567890123456789
+          12345678901234567890123456789
+          1234567890123456789: accepted
+          12345678901234567890123456789
+          12345678901234567890123456789
+        size: 299
+
+    proxy-request:
+      content:
+        verify: {value: accepted, as: contains}
+
+    server-response:
+        status: 200
+        reason: OK
+        headers:
+          fields:
+          - [ Date, "Sat, 21 Sep 2023 03:11:36 GMT" ]
+          - [ Content-Type, application/xml ]
+          - [ Transfer-Encoding, chunked ]
+          - [ Connection, keep-alive ]
+        content:
+          size: 3432
+
+  # Second request: exact same request, but contains rejected in the body. The
+  # TSVConnClose plugin should kill the session.
+  - client-request:
+      method: POST
+      url: /path/to/file.xml
+      version: '1.1'
+      headers:
+        fields:
+        - [ Host, www.example.com ]
+        - [ Content-Type, application/xml ]
+        - [ Content-Length, '299' ]
+        - [ uuid, rejected ]
+      content:
+        encoding: plain
+        # Each line is 30 characters, including the newline.
+        # The last line doesn't have a newline, thus 29.
+        data: |-
+          12345678901234567890123456789
+          12345678901234567890123456789
+          12345678901234567890123456789
+          12345678901234567890123456789
+          12345678901234567890123456789
+          12345678901234567890123456789
+          12345678901234567890123456789
+          1234567890123456789: rejected
+          12345678901234567890123456789
+          12345678901234567890123456789
+        size: 299
+
+    # We expect the plugin to kill the underlying connection, so this response
+    # should never make it through. But in case that connection drop doesn't
+    # happen, send a 400 response and configure the client to error if it sees
+    # it.
+    server-response:
+        status: 400
+        reason: Bad Request
+        headers:
+          fields:
+          - [ Date, "Sat, 21 Sep 2023 03:11:36 GMT" ]
+          - [ Connection, keep-alive ]
+          - [ X-Response, rejected-response ]
+
+    # Make sure that 400 response doesn't come through because the plugin should
+    # drop the connection.
+    proxy-response:
+      status: 502
