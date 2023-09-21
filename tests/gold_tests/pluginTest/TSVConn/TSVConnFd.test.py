@@ -43,7 +43,7 @@ ts.Disk.records_config.update({
     'proxy.config.diags.debug.tags': f'{plugin_name}',
 })
 
-rp = os.path.join(Test.Variables.AtsBuildGoldTestsDir, 'pluginTest', 'TSVConnFd', '.libs', f'{plugin_name}.so')
+rp = os.path.join(Test.Variables.AtsBuildGoldTestsDir, 'pluginTest', 'TSVConn', '.libs', f'{plugin_name}.so')
 ts.Setup.Copy(rp, ts.Env['PROXY_CONFIG_PLUGIN_PLUGIN_DIR'])
 
 Test.GetTcpPort("tcp_port")

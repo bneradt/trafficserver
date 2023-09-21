@@ -32,7 +32,7 @@ add_subdirectory(gold_tests/continuations/plugins)
 add_subdirectory(gold_tests/jsonrpc/plugins)
 add_subdirectory(gold_tests/pluginTest/polite_hook_wait)
 add_subdirectory(gold_tests/pluginTest/tsapi)
-add_subdirectory(gold_tests/pluginTest/TSVConnFd)
+add_subdirectory(gold_tests/pluginTest/TSVConn)
 add_subdirectory(gold_tests/timeout)
 add_subdirectory(gold_tests/tls)
 

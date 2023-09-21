@@ -16,3 +16,4 @@
 #######################
 
 add_autest_plugin(TSVConnFd TSVConnFd.cc)
+add_autest_plugin(TSVConnClose TSVConnClose.cc)
