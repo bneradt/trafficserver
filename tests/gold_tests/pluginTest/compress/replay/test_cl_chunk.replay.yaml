@@ -1,0 +1,80 @@
+meta:
+    version: '1.0'
+
+sessions:
+
+- transactions:
+
+  # First: cache miss.
+  - client-request:
+      method: GET
+      url: /pictures/flower.jpeg
+      version: '1.1'
+      headers:
+        fields:
+        - [ Host, www.example.com ]
+        - [ Content-Type, application/json ]
+        - [ uuid, first-request ]
+
+    proxy-request:
+      headers:
+        fields:
+        - [ Content-Type, { value: 'application/json', as: equal } ]
+
+    server-response:
+        status: 200
+        reason: OK
+        headers:
+          fields:
+          - [ Content-Type, application/json ]
+          - [ Transfer-Encoding, chunked ]
+          - [ Connection, keep-alive ]
+          - [ X-Response, first-missed ]
+        content:
+          size: 3432
+
+    proxy-response:
+      status: 200
+      headers:
+        fields:
+        - [ Transfer-Encoding, { value: chunked, as: equal } ]
+
+  # Second: cache hit.
+  - client-request:
+      # Give time for caching io to finish.
+      delay: 100ms
+
+      method: GET
+      url: /pictures/flower.jpeg
+      version: '1.1'
+      headers:
+        fields:
+        - [ Host, www.example.com ]
+        - [ Content-Type, application/json ]
+        - [ uuid, second-request ]
+
+    proxy-request:
+      headers:
+        fields:
+        - [ Content-Type, { value: 'application/json', as: equal } ]
+
+    # The response should be replied from teh cache, not the origin. So the
+    # verifier server should not receive this request.
+    server-response:
+        status: 400
+        reason: Bad Request
+        headers:
+          fields:
+          - [ Content-Type, application/json ]
+          - [ Transfer-Encoding, chunked ]
+          - [ Connection, keep-alive ]
+          - [ X-Response, chunked ]
+        content:
+          size: 3432
+
+    proxy-response:
+      # Expected the cached response.
+      status: 200
+      headers:
+        fields:
+        - [ Content-Length, { value: 3432, as: equal } ]
