@@ -27,17 +27,15 @@ sessions:
         headers:
           fields:
           - [ Content-Type, application/json ]
-          - [ Transfer-Encoding, chunked ]
+          - [ Content-Length, 3432 ]
           - [ Connection, keep-alive ]
           - [ X-Response, first-missed ]
-        content:
-          size: 3432
 
     proxy-response:
       status: 200
       headers:
         fields:
-        - [ Transfer-Encoding, { value: chunked, as: equal } ]
+        - [ Content-Length, { value: 3432, as: equal } ]
 
   # Second: cache hit.
   - client-request:
