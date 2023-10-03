@@ -256,7 +256,7 @@ class TestClChunk:
 
         ts.Disk.records_config.update({
             'proxy.config.diags.debug.enabled': 1,
-            'proxy.config.diags.debug.tags': 'http|compress',
+            'proxy.config.diags.debug.tags': 'http|compress|cache',
 
             # Make caching easier.
             "proxy.config.http.cache.required_headers": 0,

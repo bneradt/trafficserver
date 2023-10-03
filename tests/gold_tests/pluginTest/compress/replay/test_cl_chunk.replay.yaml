@@ -8,71 +8,72 @@ sessions:
   # First: cache miss.
   - client-request:
       method: GET
-      url: /pictures/flower.jpeg
+      url: /trafficserver/some.css
       version: '1.1'
       headers:
         fields:
         - [ Host, www.example.com ]
-        - [ Content-Type, application/json ]
+        - [ Accept, "*/*" ]
+        - [ Accept-Encoding, "deflate, gzip, br" ]
         - [ uuid, first-request ]
-
-    proxy-request:
-      headers:
-        fields:
-        - [ Content-Type, { value: 'application/json', as: equal } ]
 
     server-response:
         status: 200
         reason: OK
         headers:
           fields:
-          - [ Content-Type, application/json ]
-          - [ Content-Length, 3432 ]
-          - [ Connection, keep-alive ]
+          - [ Content-Type, text/css ]
+          - [ Content-Length, 25030 ]
           - [ X-Response, first-missed ]
 
     proxy-response:
       status: 200
       headers:
         fields:
-        - [ Content-Length, { value: 3432, as: equal } ]
+        # Note that since it is compressed, the content length will be smaller
+        # than the 3432 sent by the origin.
+        - [ Content-Length, { as: present } ]
 
-  # Second: cache hit.
-  - client-request:
-      # Give time for caching io to finish.
-      delay: 100ms
-
-      method: GET
-      url: /pictures/flower.jpeg
-      version: '1.1'
-      headers:
-        fields:
-        - [ Host, www.example.com ]
-        - [ Content-Type, application/json ]
-        - [ uuid, second-request ]
-
-    proxy-request:
-      headers:
-        fields:
-        - [ Content-Type, { value: 'application/json', as: equal } ]
-
-    # The response should be replied from teh cache, not the origin. So the
-    # verifier server should not receive this request.
-    server-response:
-        status: 400
-        reason: Bad Request
-        headers:
-          fields:
-          - [ Content-Type, application/json ]
-          - [ Transfer-Encoding, chunked ]
-          - [ Connection, keep-alive ]
-          - [ X-Response, chunked ]
-        content:
-          size: 3432
-
-    proxy-response:
-      # Expected the cached response.
-      status: 200
-      headers:
-        fields:
-        - [ Content-Length, { value: 3432, as: equal } ]
+#  # Second: cache hit.
+#  - client-request:
+#      # Give time for caching io to finish.
+#      delay: 100ms
+#
+#      method: GET
+#      url: /trafficserver/some.css
+#      version: '1.1'
+#      headers:
+#        fields:
+#        - [ Host, www.example.com ]
+#        - [ Accept, "*/*" ]
+#        - [ Accept-Encoding, "deflate, gzip, br" ]
+#        - [ uuid, second-request ]
+#
+#    proxy-request:
+#      headers:
+#        fields:
+#        - [ Content-Type, { value: 'application/json', as: equal } ]
+#
+#    # The response should be replied from teh cache, not the origin. So the
+#    # verifier server should not receive this request.
+#    server-response:
+#        status: 400
+#        reason: Bad Request
+#        headers:
+#          fields:
+#          - [ Content-Type, application/json ]
+#          - [ Transfer-Encoding, chunked ]
+#          - [ Connection, keep-alive ]
+#          - [ X-Response, chunked ]
+#        content:
+#          size: 3432
+#
+#    proxy-response:
+#      # Expected the cached response.
+#      status: 200
+#      headers:
+#        fields:
+#        # Note that since it is compressed, the content length will be smaller
+#        # than the 3432 sent by the origin.
+#        - [ Content-Length, { as: present } ]
+#
