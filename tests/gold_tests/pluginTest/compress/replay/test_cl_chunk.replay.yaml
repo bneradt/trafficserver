@@ -22,16 +22,21 @@ sessions:
         reason: OK
         headers:
           fields:
+          - [ Date, "Tue, 03 Oct 2023 21:53:37 GMT" ]
+          - [ Last-Modified, "Wed, 05 Jul 2023 04:42:53 GMT" ]
+          - [ ETag, "095ce8b369cbc690e6d2faa84cb9fb40" ]
+          - [ Cache-Control, "public,max-age=31536000" ]
+          - [ Accept-Ranges, bytes ]
           - [ Content-Type, text/css ]
+          - [ Server, AmazonS3 ]
           - [ Content-Length, 25030 ]
           - [ X-Response, first-missed ]
+
 
     proxy-response:
       status: 200
       headers:
         fields:
-        # Note that since it is compressed, the content length will be smaller
-        # than the 3432 sent by the origin.
         - [ Content-Length, { as: present } ]
 
 #  # Second: cache hit.
@@ -63,6 +68,7 @@ sessions:
 #          fields:
 #          - [ Content-Type, application/json ]
 #          - [ Transfer-Encoding, chunked ]
+#          - [ Accept-Ranges, bytes ]
 #          - [ Connection, keep-alive ]
 #          - [ X-Response, chunked ]
 #        content:
@@ -73,7 +79,5 @@ sessions:
 #      status: 200
 #      headers:
 #        fields:
-#        # Note that since it is compressed, the content length will be smaller
-#        # than the 3432 sent by the origin.
 #        - [ Content-Length, { as: present } ]
 #

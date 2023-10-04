@@ -264,6 +264,58 @@ class TestClChunk:
 
             'proxy.config.dns.nameservers': f"127.0.0.1:{dns_port}",
             'proxy.config.dns.resolv_conf': "NULL",
+
+            'proxy.config.http.cache.ignore_client_cc_max_age': 1,
+            'proxy.config.http.normalize_ae': 1,
+            'proxy.config.http.cache.cache_responses_to_cookies': 1,
+            'proxy.config.http.cache.cache_urls_that_look_dynamic': 1,
+            'proxy.config.http.cache.when_to_revalidate': 0,
+            'proxy.config.http.cache.required_headers': 1,
+
+
+
+            'proxy.config.http.cache.heuristic_min_lifetime': 3600,
+            'proxy.config.http.cache.heuristic_max_lifetime': 86400,
+            'proxy.config.http.cache.heuristic_lm_factor': 0.1,
+            'proxy.config.net.connections_throttle': 0,
+            'proxy.config.net.max_connections_in': 0,
+            'proxy.config.net.max_requests_in': 0,
+            'proxy.config.cache.ram_cache.size': 32000000000,
+            'proxy.config.cache.ram_cache_cutoff': 16777216,
+            'proxy.config.cache.limits.http.max_alts': 4,
+            'proxy.config.cache.log.alternate.eviction': 0,
+            'proxy.config.cache.max_doc_size': 0,
+            'proxy.config.cache.min_average_object_size': 12000,
+
+            'proxy.config.http.wait_for_cache': 2,
+            'proxy.config.http.cache.ignore_client_no_cache': 1,
+            'proxy.config.http.cache.ims_on_client_no_cache': 1,
+            'proxy.config.http.cache.ignore_server_no_cache': 0,
+            'proxy.config.http.cache.open_write_fail_action': 0,
+            'proxy.config.http.cache.ignore_authentication': 1,
+            'proxy.config.http.cache.max_stale_age': 604800,
+            'proxy.config.http.cache.range.lookup': 1,
+            'proxy.config.http.cache.range.write': 0,
+            'proxy.config.cache.enable_checksum': 0,
+            'proxy.config.http_ui_enabled': 2,
+            'proxy.config.http.enable_http_stats': 1,
+            'proxy.config.websocket.no_activity_timeout': 600,
+            'proxy.config.websocket.active_timeout': 3600,
+            'proxy.config.body_factory.enable_customizations': 1,
+            'proxy.config.body_factory.enable_logging': 0,
+            'proxy.config.body_factory.response_suppression_mode': 0,
+            'proxy.config.net.defer_accept': 45,
+            'proxy.config.cache.permit.pinning': 0,
+            'proxy.config.cache.ram_cache.algorithm': 1,
+            'proxy.config.cache.ram_cache.use_seen_filter': 0,
+            'proxy.config.cache.ram_cache.compress': 0,
+            'proxy.config.cache.select_alternate': 1,
+            'proxy.config.cache.target_fragment_size': 1048576,
+            'proxy.config.cache.enable_read_while_writer': 1,
+            'proxy.config.cache.read_while_writer.max_retries': 10,
+            'proxy.config.cache.mutex_retry_delay': 2,
+
+            'proxy.config.ssl.client.sni_policy STRING remap': 'remap',
         })
         tr.Setup.Copy("compress3.config")
         config_path = os.path.join(tr.TestDirectory, 'compress3.config')
