@@ -60,14 +60,9 @@ HttpCacheAction::cancel(Continuation *c)
 {
 }
 PostDataBuffers::~PostDataBuffers() {}
-void
-APIHooks::clear()
-{
-}
 
 HttpTunnel::HttpTunnel() {}
 HttpCacheSM::HttpCacheSM() {}
-HttpHookState::HttpHookState() {}
 HttpTunnelConsumer::HttpTunnelConsumer() {}
 HttpTunnelProducer::HttpTunnelProducer() {}
 ChunkedHandler::ChunkedHandler() {}

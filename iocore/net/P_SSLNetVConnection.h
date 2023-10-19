@@ -147,7 +147,6 @@ public:
   void net_read_io(NetHandler *nh, EThread *lthread) override;
   int64_t load_buffer_and_write(int64_t towrite, MIOBufferAccessor &buf, int64_t &total_written, int &needs) override;
   void do_io_close(int lerrno = -1) override;
-  void update_early_data_config(uint32_t max_early_data, uint32_t recv_max_early_data);
 
   ////////////////////////////////////////////////////////////
   // Instances of NetVConnection should be allocated        //
@@ -339,8 +338,8 @@ public:
   SSLNetVConnection(const SSLNetVConnection &)            = delete;
   SSLNetVConnection &operator=(const SSLNetVConnection &) = delete;
 
-  bool protocol_mask_set = false;
-  unsigned long protocol_mask;
+  bool protocol_mask_set      = false;
+  unsigned long protocol_mask = 0;
 
   // Only applies during the VERIFY certificate hooks (client and server side)
   // Means to give the plugin access to the data structure passed in during the underlying
@@ -407,10 +406,6 @@ public:
   {
     return _ca_cert_dir.get();
   }
-
-  void set_valid_tls_protocols(unsigned long proto_mask, unsigned long max_mask);
-  void set_valid_tls_version_min(int min);
-  void set_valid_tls_version_max(int max);
 
 protected:
   SSL *
@@ -505,6 +500,9 @@ private:
   ssl_error_t _ssl_write_buffer(const void *buf, int64_t nbytes, int64_t &nwritten);
   ssl_error_t _ssl_connect();
   ssl_error_t _ssl_accept();
+
+  void _in_context_tunnel() override;
+  void _out_context_tunnel() override;
 };
 
 typedef int (SSLNetVConnection::*SSLNetVConnHandler)(int, void *);

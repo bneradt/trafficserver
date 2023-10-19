@@ -23,39 +23,38 @@ find_package(fmt 8.1 REQUIRED)
 pkg_check_modules(PCRE2 REQUIRED IMPORTED_TARGET libpcre2-8)
 
 # The source files, globbed so we can drop in local / custom Bundles and extensions.
-file(GLOB CPP_FILES ${PROJECT_SOURCE_DIR}/src/cripts/*.cc ${PROJECT_SOURCE_DIR}/src/cripts/Bundles/*.cc)
+file(GLOB CPP_FILES ${PROJECT_SOURCE_DIR}/src/cripts/*.cc ${PROJECT_SOURCE_DIR}/src/cripts/*/*.cc)
 
 add_library(cripts SHARED ${CPP_FILES})
 add_library(ts::cripts ALIAS cripts)
 
-target_link_libraries(cripts fmt::fmt PkgConfig::PCRE2)
-target_include_directories(cripts PRIVATE
-    ${PROJECT_SOURCE_DIR}
-    ${PROJECT_SOURCE_DIR}/proxy
-    ${PROJECT_SOURCE_DIR}/iocore
-    ${PROJECT_SOURCE_DIR}/iocore/eventsystem
+target_link_libraries(cripts libswoc fmt::fmt PkgConfig::PCRE2)
+target_include_directories(
+  cripts PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/proxy ${PROJECT_SOURCE_DIR}/iocore
+                 ${PROJECT_SOURCE_DIR}/iocore/eventsystem
 )
 
-set_target_properties(cripts PROPERTIES
-    VERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}
-    SOVERSION ${PROJECT_VERSION_MAJOR}
-    MACHO_COMPATIBILITY_VERSION ${PROJECT_VERSION_MAJOR}.0.0
+set_target_properties(
+  cripts
+  PROPERTIES VERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}
+             SOVERSION ${PROJECT_VERSION_MAJOR}
+             MACHO_COMPATIBILITY_VERSION ${PROJECT_VERSION_MAJOR}.0.0
 )
 
 install(TARGETS cripts)
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/cripts DESTINATION include)
 
 if(APPLE)
-    target_link_options(cripts PRIVATE -undefined dynamic_lookup)
+  target_link_options(cripts PRIVATE -undefined dynamic_lookup)
 endif()
 
 # This generates the src/cripts/Configs.cc file from the ATS source file with
 # overridable confiugrations. This needs to be generated whenever we add new
 # configurations to the ATS source file.
-add_custom_target(Cripts-Configs
-    COMMAND ${PROJECT_SOURCE_DIR}/tools/cripts/genconfig.py ${PROJECT_SOURCE_DIR}/src/shared/overridable_txn_vars.cc >
-            ${PROJECT_SOURCE_DIR}/include/cripts/Configs.hpp
-    DEPENDS ${PROJECT_SOURCE_DIR}/src/shared/overridable_txn_vars.cc
-            ${PROJECT_SOURCE_DIR}/tools/cripts/genconfig.py
-    VERBATIM
+add_custom_target(
+  Cripts-Configs
+  COMMAND ${PROJECT_SOURCE_DIR}/tools/cripts/genconfig.py ${PROJECT_SOURCE_DIR}/src/shared/overridable_txn_vars.cc >
+          ${PROJECT_SOURCE_DIR}/include/cripts/Configs.hpp
+  DEPENDS ${PROJECT_SOURCE_DIR}/src/shared/overridable_txn_vars.cc ${PROJECT_SOURCE_DIR}/tools/cripts/genconfig.py
+  VERBATIM
 )

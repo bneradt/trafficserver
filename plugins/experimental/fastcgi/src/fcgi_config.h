@@ -31,7 +31,7 @@
 #pragma once
 namespace ats_plugin
 {
-using FcgiConfigKey = enum {
+enum FcgiConfigKey {
   fcgiEnabled,
   fcgiHostname,
   fcgiServerIp,
@@ -44,7 +44,7 @@ using FcgiConfigKey = enum {
   fcgiMaxRequests,
   fcgiRequestQueueSize
 };
-using FcgiParamKey = enum {
+enum FcgiParamKey {
   gatewayInterface,
   serverSoftware,
   queryString,
@@ -155,17 +155,17 @@ class InterceptPluginData
 public:
   InterceptPluginData()
     : active_hash_map(nullptr),
-      mutex(0),
+      mutex(nullptr),
       seq_id(0),
       txn_slot(0),
       global_config(nullptr),
       last_gc_time(0),
-      read_while_writer(0),
+      read_while_writer(false),
       tol_global_hook_reqs(0),
       tol_remap_hook_reqs(0),
       tol_non_cacheable_reqs(0),
       tol_got_passed_reqs(0){
-        // TSDebug(PLUGIN_NAME, "FCGIPluginData Initialised.");
+        // Dbg(dbg_ctl, "FCGIPluginData Initialised.");
       };
   ~InterceptPluginData();
   FcgiPluginConfig *getGlobalConfigObj();

@@ -406,6 +406,7 @@ public:
 
     SM_ACTION_API_SM_START,
     SM_ACTION_API_READ_REQUEST_HDR,
+    SM_ACTION_API_TUNNEL_START,
     SM_ACTION_API_PRE_REMAP,
     SM_ACTION_API_POST_REMAP,
     SM_ACTION_API_OS_DNS,
@@ -525,8 +526,9 @@ public:
     bool proxy_connect_hdr        = false;
     /// @c errno from the most recent attempt to connect.
     /// zero means no failure (not attempted, succeeded).
-    int connect_result                   = 0;
-    char *name                           = nullptr;
+    int connect_result = 0;
+    char *name         = nullptr;
+    swoc::IPAddr name_addr;
     TransferEncoding_t transfer_encoding = NO_TRANSFER_ENCODING;
 
     /** This is the source address of the connection from the point of view of the transaction.
@@ -751,10 +753,11 @@ public:
     int64_t internal_msg_buffer_size                = 0;       // out
     int64_t internal_msg_buffer_fast_allocator_size = -1;
 
-    int scheme          = -1;     // out
-    int next_hop_scheme = scheme; // out
-    int orig_scheme     = scheme; // pre-mapped scheme
-    int method          = 0;
+    int scheme                     = -1;     // out
+    int next_hop_scheme            = scheme; // out
+    int orig_scheme                = scheme; // pre-mapped scheme
+    int method                     = 0;
+    bool method_metric_incremented = false;
 
     /// The errno associated with a failed connect attempt.
     ///

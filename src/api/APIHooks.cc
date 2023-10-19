@@ -1,6 +1,6 @@
 /** @file
 
-  A brief file description
+  Internal SDK stuff
 
   @section license License
 
@@ -21,8 +21,38 @@
   limitations under the License.
  */
 
-#pragma once
+#include "api/APIHooks.h"
 
-void Debug(const char *tag, const char *fmt, ...);
+#include "tscore/Allocator.h"
 
-void Error(const char *fmt, ...);
+// inkevent
+#include "I_ProxyAllocator.h"
+#include "I_Thread.h"
+
+static ClassAllocator<APIHook> apiHookAllocator("apiHookAllocator");
+
+APIHook *
+APIHooks::head() const
+{
+  return m_hooks.head;
+}
+
+void
+APIHooks::append(INKContInternal *cont)
+{
+  APIHook *api_hook;
+
+  api_hook         = THREAD_ALLOC(apiHookAllocator, this_thread());
+  api_hook->m_cont = cont;
+
+  m_hooks.enqueue(api_hook);
+}
+
+void
+APIHooks::clear()
+{
+  APIHook *hook;
+  while (nullptr != (hook = m_hooks.pop())) {
+    THREAD_FREE(hook, apiHookAllocator, this_thread());
+  }
+}

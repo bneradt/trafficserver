@@ -26,6 +26,7 @@
 #include "ts_lua_cached_response.h"
 #include "ts_lua_context.h"
 #include "ts_lua_hook.h"
+#include "ts_lua_vconn.h"
 #include "ts_lua_http.h"
 #include "ts_lua_misc.h"
 #include "ts_lua_log.h"
@@ -208,18 +209,18 @@ ts_lua_script_registered(lua_State *L, char *script)
   TSMgmtInt curr_time;
   ts_lua_instance_conf *conf = nullptr;
 
-  TSDebug(TS_LUA_DEBUG_TAG, "[%s] checking if script [%s] is registered", __FUNCTION__, script);
+  Dbg(dbg_ctl, "[%s] checking if script [%s] is registered", __FUNCTION__, script);
 
   // first check the reconfigure_time for the script. if it is not found, then it is new
   // if it matches the current reconfigure_time, then it is loaded already
   // And we return the conf pointer of it. Otherwise it can be loaded again.
-  if (TS_SUCCESS == TSMgmtIntGet("proxy.node.config.reconfigure_time", &curr_time)) {
+  if (TS_SUCCESS == TSMgmtIntGet("proxy.process.proxy.reconfigure_time", &curr_time)) {
     lua_pushliteral(L, "__scriptTime");
     lua_pushstring(L, script);
     lua_concat(L, 2);
     lua_rawget(L, LUA_REGISTRYINDEX);
     if (lua_isnil(L, -1)) {
-      TSDebug(TS_LUA_DEBUG_TAG, "[%s] failed to get script time for [%s]", __FUNCTION__, script);
+      Dbg(dbg_ctl, "[%s] failed to get script time for [%s]", __FUNCTION__, script);
       lua_pop(L, -1);
       return nullptr;
     } else {
@@ -232,7 +233,7 @@ ts_lua_script_registered(lua_State *L, char *script)
         lua_concat(L, 2);
         lua_rawget(L, LUA_REGISTRYINDEX);
         if (lua_isnil(L, -1)) {
-          TSDebug(TS_LUA_DEBUG_TAG, "[%s] failed to get script ptr for [%s]", __FUNCTION__, script);
+          Dbg(dbg_ctl, "[%s] failed to get script ptr for [%s]", __FUNCTION__, script);
           lua_pop(L, -1);
           return nullptr;
         } else {
@@ -241,7 +242,7 @@ ts_lua_script_registered(lua_State *L, char *script)
           return conf;
         }
       } else {
-        TSDebug(TS_LUA_DEBUG_TAG, "[%s] script time not matching for [%s]", __FUNCTION__, script);
+        Dbg(dbg_ctl, "[%s] script time not matching for [%s]", __FUNCTION__, script);
         return nullptr;
       }
     }
@@ -257,10 +258,10 @@ ts_lua_script_register(lua_State *L, char *script, ts_lua_instance_conf *conf)
 {
   TSMgmtInt time;
 
-  TSDebug(TS_LUA_DEBUG_TAG, "[%s] registering script [%s]", __FUNCTION__, script);
+  Dbg(dbg_ctl, "[%s] registering script [%s]", __FUNCTION__, script);
 
   // we recorded the script reconfigure_time and its conf pointer in registry
-  if (TS_SUCCESS == TSMgmtIntGet("proxy.node.config.reconfigure_time", &time)) {
+  if (TS_SUCCESS == TSMgmtIntGet("proxy.process.proxy.reconfigure_time", &time)) {
     lua_pushliteral(L, "__scriptTime");
     lua_pushstring(L, script);
     lua_concat(L, 2);
@@ -369,10 +370,10 @@ ts_lua_add_module(ts_lua_instance_conf *conf, ts_lua_main_ctx *arr, int n, int a
     lua_replace(L, LUA_GLOBALSINDEX); /* L[GLOBAL] = EMPTY */
 
     if (conf->ljgc > 0) {
-      TSDebug(TS_LUA_DEBUG_TAG, "ljgc = %d, running LuaJIT Garbage Collector...", conf->ljgc);
+      Dbg(dbg_ctl, "ljgc = %d, running LuaJIT Garbage Collector...", conf->ljgc);
       lua_gc(L, LUA_GCCOLLECT, 0);
     } else {
-      TSDebug(TS_LUA_DEBUG_TAG, "ljgc = %d, NOT running LuaJIT Garbage Collector...", conf->ljgc);
+      Dbg(dbg_ctl, "ljgc = %d, NOT running LuaJIT Garbage Collector...", conf->ljgc);
     }
 
     TSMutexUnlock(arr[i].mutexp);
@@ -411,11 +412,11 @@ ts_lua_del_module(ts_lua_instance_conf *conf, ts_lua_main_ctx *arr, int n)
     lua_pushlightuserdata(L, conf);
 
     if (conf->ref_count > 1) {
-      TSDebug(TS_LUA_DEBUG_TAG, "Reference Count = %d , NOT clearing registry...", conf->ref_count);
+      Dbg(dbg_ctl, "Reference Count = %d , NOT clearing registry...", conf->ref_count);
       lua_pushvalue(L, LUA_GLOBALSINDEX);
       lua_rawset(L, LUA_REGISTRYINDEX); /* L[REG][conf] = L[GLOBAL] */
     } else {
-      TSDebug(TS_LUA_DEBUG_TAG, "Reference Count = %d , clearing registry...", conf->ref_count);
+      Dbg(dbg_ctl, "Reference Count = %d , clearing registry...", conf->ref_count);
       lua_pushnil(L);
       lua_rawset(L, LUA_REGISTRYINDEX); /* L[REG][conf] = nil */
     }
@@ -424,10 +425,10 @@ ts_lua_del_module(ts_lua_instance_conf *conf, ts_lua_main_ctx *arr, int n)
     lua_replace(L, LUA_GLOBALSINDEX); /* L[GLOBAL] = EMPTY  */
 
     if (conf->ljgc > 0) {
-      TSDebug(TS_LUA_DEBUG_TAG, "ljgc = %d, running LuaJIT Garbage Collector...", conf->ljgc);
+      Dbg(dbg_ctl, "ljgc = %d, running LuaJIT Garbage Collector...", conf->ljgc);
       lua_gc(L, LUA_GCCOLLECT, 0);
     } else {
-      TSDebug(TS_LUA_DEBUG_TAG, "ljgc = %d, NOT running LuaJIT Garbage Collector...", conf->ljgc);
+      Dbg(dbg_ctl, "ljgc = %d, NOT running LuaJIT Garbage Collector...", conf->ljgc);
     }
 
     TSMutexUnlock(arr[i].mutexp);
@@ -492,10 +493,10 @@ ts_lua_reload_module(ts_lua_instance_conf *conf, ts_lua_main_ctx *arr, int n)
     lua_replace(L, LUA_GLOBALSINDEX); /* L[GLOBAL] = EMPTY */
 
     if (conf->ljgc > 0) {
-      TSDebug(TS_LUA_DEBUG_TAG, "ljgc = %d, running LuaJIT Garbage Collector...", conf->ljgc);
+      Dbg(dbg_ctl, "ljgc = %d, running LuaJIT Garbage Collector...", conf->ljgc);
       lua_gc(L, LUA_GCCOLLECT, 0);
     } else {
-      TSDebug(TS_LUA_DEBUG_TAG, "ljgc = %d, NOT running LuaJIT Garbage Collector...", conf->ljgc);
+      Dbg(dbg_ctl, "ljgc = %d, NOT running LuaJIT Garbage Collector...", conf->ljgc);
     }
 
     TSMutexUnlock(arr[i].mutexp);
@@ -545,6 +546,8 @@ ts_lua_inject_ts_api(lua_State *L)
 
   ts_lua_inject_context_api(L);
   ts_lua_inject_hook_api(L);
+
+  ts_lua_inject_vconn_api(L);
 
   ts_lua_inject_http_api(L);
   ts_lua_inject_intercept_api(L);
@@ -666,6 +669,95 @@ ts_lua_destroy_async_ctx(ts_lua_http_ctx *http_ctx)
 
   ts_lua_release_cont_info(ci);
   TSfree(http_ctx);
+}
+
+void
+ts_lua_set_vconn_ctx(lua_State *L, ts_lua_vconn_ctx *ctx)
+{
+  lua_pushliteral(L, "__ts_vconn_ctx");
+  lua_pushlightuserdata(L, ctx);
+  lua_rawset(L, LUA_GLOBALSINDEX);
+}
+
+ts_lua_vconn_ctx *
+ts_lua_get_vconn_ctx(lua_State *L)
+{
+  ts_lua_vconn_ctx *ctx;
+
+  lua_pushliteral(L, "__ts_vconn_ctx");
+  lua_rawget(L, LUA_GLOBALSINDEX);
+  ctx = static_cast<decltype(ctx)>(lua_touserdata(L, -1));
+
+  lua_pop(L, 1); // pop the ctx out
+
+  return ctx;
+}
+
+ts_lua_vconn_ctx *
+ts_lua_create_vconn_ctx(ts_lua_main_ctx *main_ctx, ts_lua_instance_conf *conf)
+{
+  ts_lua_vconn_ctx *vconn_ctx;
+
+  vconn_ctx = tsapi::malloc<ts_lua_vconn_ctx>();
+  memset(vconn_ctx, 0, sizeof(*vconn_ctx));
+
+  lua_State *L = main_ctx->lua;
+  lua_State *l = lua_newthread(L);
+
+  lua_pushlightuserdata(L, conf);
+  lua_rawget(L, LUA_REGISTRYINDEX);
+
+  /* new globals table for coroutine */
+  lua_newtable(l);
+  lua_pushvalue(l, -1);
+  lua_setfield(l, -2, "_G");
+  lua_newtable(l);
+  lua_xmove(L, l, 1);
+  lua_setfield(l, -2, "__index");
+  lua_setmetatable(l, -2);
+
+  lua_replace(l, LUA_GLOBALSINDEX);
+
+  // init coroutine
+  vconn_ctx->ref = luaL_ref(L, LUA_REGISTRYINDEX);
+
+  vconn_ctx->lua  = l;
+  vconn_ctx->mctx = main_ctx;
+
+  // update thread stats
+  ts_lua_ctx_stats *const stats = main_ctx->stats;
+
+  TSMutexLock(stats->mutexp);
+  ++stats->threads;
+  if (stats->threads_max < stats->threads) {
+    stats->threads_max = stats->threads;
+  }
+  TSMutexUnlock(stats->mutexp);
+
+  vconn_ctx->instance_conf = conf;
+
+  ts_lua_set_vconn_ctx(l, vconn_ctx);
+  ts_lua_create_context_table(l);
+
+  return vconn_ctx;
+}
+
+void
+ts_lua_destroy_vconn_ctx(ts_lua_vconn_ctx *vconn_ctx)
+{
+  // update thread stats
+  ts_lua_main_ctx *const main_ctx = vconn_ctx->mctx;
+  ts_lua_ctx_stats *const stats   = main_ctx->stats;
+
+  TSMutexLock(stats->mutexp);
+  --stats->threads;
+  TSMutexUnlock(stats->mutexp);
+
+  if (vconn_ctx->lua) {
+    luaL_unref(vconn_ctx->lua, LUA_REGISTRYINDEX, vconn_ctx->ref);
+  }
+
+  TSfree(vconn_ctx);
 }
 
 void
@@ -1184,4 +1276,9 @@ ts_lua_http_cont_handler(TSCont contp, TSEvent ev, void *edata)
   }
 
   return 0;
+}
+
+namespace ts_lua_ns
+{
+DbgCtl dbg_ctl{TS_LUA_DEBUG_TAG};
 }

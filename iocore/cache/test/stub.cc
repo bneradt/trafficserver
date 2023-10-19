@@ -21,62 +21,15 @@
   limitations under the License.
  */
 
-#include <string_view>
+#include "SSLAPIHooks.h"
 
-#include "HttpSessionManager.h"
-#include "HttpBodyFactory.h"
-#include "DiagsConfig.h"
-#include "ts/InkAPIPrivateIOCore.h"
+#include "api/InkAPIInternal.h"
+
+#include "HttpAPIHooks.h"
 
 #include "tscore/I_Version.h"
 
 AppVersionInfo appVersionInfo;
-
-void
-initialize_thread_for_http_sessions(EThread *, int)
-{
-  ink_assert(false);
-}
-
-#include "api/InkAPIInternal.h"
-void
-APIHooks::append(INKContInternal *cont)
-{
-}
-
-int
-APIHook::invoke(int, void *) const
-{
-  ink_assert(false);
-  return 0;
-}
-
-int
-APIHook::blocking_invoke(int, void *) const
-{
-  ink_assert(false);
-  return 0;
-}
-
-APIHook *
-APIHook::next() const
-{
-  ink_assert(false);
-  return nullptr;
-}
-
-APIHook *
-APIHooks::head() const
-{
-  return nullptr;
-}
-
-void
-APIHooks::clear()
-{
-}
-
-HttpHookState::HttpHookState() {}
 
 void
 HttpHookState::init(TSHttpHookID id, HttpAPIHooks const *global, HttpAPIHooks const *ssn, HttpAPIHooks const *txn)
@@ -94,158 +47,37 @@ HttpHookState::getNext()
   return nullptr;
 }
 
-void
-ConfigUpdateCbTable::invoke(const char * /* name ATS_UNUSED */)
+namespace tsapi::c
 {
-  ink_release_assert(false);
+TSVConn
+TSHttpConnectWithPluginId(sockaddr const *addr, const char *tag, int64_t id)
+{
+  return TSVConn{};
 }
 
-HttpAPIHooks *http_global_hooks        = nullptr;
-SslAPIHooks *ssl_hooks                 = nullptr;
-LifecycleAPIHooks *lifecycle_hooks     = nullptr;
-ConfigUpdateCbTable *global_config_cbs = nullptr;
+int TS_MIME_LEN_CONTENT_LENGTH           = 0;
+const char *TS_MIME_FIELD_CONTENT_LENGTH = "";
 
-void
-HostStatus::setHostStatus(const std::string_view name, const TSHostStatus status, const unsigned int down_time,
-                          const unsigned int reason)
+TSIOBufferBlock
+TSIOBufferReaderStart(TSIOBufferReader readerp)
 {
+  return TSIOBufferBlock{};
 }
 
-HostStatRec *
-HostStatus::getHostStatus(const std::string_view name)
+TSIOBufferBlock
+TSIOBufferBlockNext(TSIOBufferBlock blockp)
 {
-  return nullptr;
+  return TSIOBufferBlock{};
 }
 
-HostStatus::HostStatus() {}
-
-HostStatus::~HostStatus() {}
-
-void
-INKVConnInternal::do_io_close(int error)
+const char *
+TSIOBufferBlockReadStart(TSIOBufferBlock blockp, TSIOBufferReader readerp, int64_t *avail)
 {
+  return "";
 }
 
 void
-INKVConnInternal::do_io_shutdown(ShutdownHowTo_t howto)
+TSIOBufferReaderConsume(TSIOBufferReader readerp, int64_t nbytes)
 {
 }
-
-VIO *
-INKVConnInternal::do_io_write(Continuation *c, int64_t nbytes, IOBufferReader *buf, bool owner)
-{
-  return nullptr;
-}
-
-VIO *
-INKVConnInternal::do_io_read(Continuation *c, int64_t nbytes, MIOBuffer *buf)
-{
-  return nullptr;
-}
-
-void
-INKVConnInternal::destroy()
-{
-}
-
-void
-INKVConnInternal::free()
-{
-}
-
-void
-INKVConnInternal::clear()
-{
-}
-
-void
-INKVConnInternal::reenable(VIO * /* vio ATS_UNUSED */)
-{
-}
-
-bool
-INKVConnInternal::get_data(int id, void *data)
-{
-  return false;
-}
-
-bool
-INKVConnInternal::set_data(int id, void *data)
-{
-  return false;
-}
-
-void
-INKVConnInternal::do_io_transform(VConnection *vc)
-{
-}
-
-void
-INKContInternal::handle_event_count(int event)
-{
-}
-
-void
-INKVConnInternal::retry(unsigned int delay)
-{
-}
-
-INKContInternal::INKContInternal(TSEventFunc funcp, TSMutex mutexp) : DummyVConnection(reinterpret_cast<ProxyMutex *>(mutexp)) {}
-
-INKContInternal::INKContInternal() : DummyVConnection(nullptr) {}
-
-void
-INKContInternal::destroy()
-{
-}
-
-void
-INKContInternal::clear()
-{
-}
-
-void
-INKContInternal::free()
-{
-}
-
-INKVConnInternal::INKVConnInternal() : INKContInternal() {}
-
-INKVConnInternal::INKVConnInternal(TSEventFunc funcp, TSMutex mutexp) : INKContInternal(funcp, mutexp) {}
-
-#include "api/FetchSM.h"
-ClassAllocator<FetchSM> FetchSMAllocator("unusedFetchSMAllocator");
-void
-FetchSM::ext_launch()
-{
-}
-void
-FetchSM::ext_destroy()
-{
-}
-ssize_t
-FetchSM::ext_read_data(char *, unsigned long)
-{
-  return 0;
-}
-void
-FetchSM::ext_add_header(char const *, int, char const *, int)
-{
-}
-void
-FetchSM::ext_write_data(void const *, unsigned long)
-{
-}
-void *
-FetchSM::ext_get_user_data()
-{
-  return nullptr;
-}
-void
-FetchSM::ext_set_user_data(void *)
-{
-}
-void
-FetchSM::ext_init(Continuation *, char const *, char const *, char const *, sockaddr const *, int)
-{
-}
+} // namespace tsapi::c

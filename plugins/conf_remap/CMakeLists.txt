@@ -15,6 +15,5 @@
 #
 #######################
 
-add_atsplugin(conf_remap
-        conf_remap.cc
-)
+add_atsplugin(conf_remap conf_remap.cc)
+target_link_libraries(conf_remap PRIVATE ts::tscpputil)

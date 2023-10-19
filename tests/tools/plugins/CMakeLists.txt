@@ -15,7 +15,6 @@
 #
 #######################
 
-add_autest_plugin(cert_update cert_update.cc)
 add_autest_plugin(conf_remap_stripped conf_remap_stripped.cc)
 add_autest_plugin(continuations_verify continuations_verify.cc)
 add_autest_plugin(cont_schedule cont_schedule.cc)
@@ -23,10 +22,7 @@ add_autest_plugin(custom204plugin custom204plugin.cc)
 add_autest_plugin(emergency_shutdown emergency_shutdown.cc)
 add_autest_plugin(fatal_shutdown fatal_shutdown.cc)
 add_autest_plugin(hook_add_plugin hook_add_plugin.cc)
-add_autest_plugin(missing_mangled_definition
-    missing_mangled_definition_c.c
-    missing_mangled_definition_cpp.cc
-)
+add_autest_plugin(missing_mangled_definition missing_mangled_definition_c.c missing_mangled_definition_cpp.cc)
 add_autest_plugin(missing_ts_plugin_init missing_ts_plugin_init.cc)
 add_autest_plugin(ssl_client_verify_test ssl_client_verify_test.cc)
 add_autest_plugin(ssl_hook_test ssl_hook_test.cc)
@@ -39,8 +35,9 @@ add_autest_plugin(test_hooks test_hooks.cc)
 add_autest_plugin(test_log_interface test_log_interface.cc)
 add_autest_plugin(user_args user_args.cc)
 add_autest_plugin(async_engine async_engine.c)
+add_autest_plugin(hook_tunnel_plugin hook_tunnel_plugin.cc)
+add_autest_plugin(tunnel_transform tunnel_transform.cc)
 
-target_link_libraries(cert_update PRIVATE OpenSSL::SSL)
 target_link_libraries(continuations_verify PRIVATE OpenSSL::SSL)
 target_link_libraries(ssl_client_verify_test PRIVATE OpenSSL::SSL)
 target_link_libraries(ssl_hook_test PRIVATE OpenSSL::SSL)

@@ -30,7 +30,7 @@
 
 /* Bytes from LSB to MSB 0..3 */
 
-#define BYTE_0(x) ((x)&0xff)
+#define BYTE_0(x) ((x) & 0xff)
 #define BYTE_1(x) ((x) >> 8 & 0xff)
 #define BYTE_2(x) ((x) >> 16 & 0xff)
 #define BYTE_3(x) ((x) >> 24 | 0x80)
@@ -47,7 +47,7 @@ namespace ats_plugin
 {
 using namespace atscppapi;
 
-using FCGI_State = enum {
+enum FCGI_State {
   fcgi_state_version = 0,
   fcgi_state_type,
   fcgi_state_request_id_hi,
@@ -74,9 +74,9 @@ struct FCGIRecordList {
 
   FCGIRecordList() : content(nullptr), state(FCGI_State::fcgi_state_version), length(0), offset(0)
   {
-    header = (FCGI_Header *)TSmalloc(sizeof(FCGI_Header));
+    header = static_cast<FCGI_Header *>(TSmalloc(sizeof(FCGI_Header)));
     memset(header, 0, sizeof(FCGI_Header));
-    endBody = (FCGI_EndRequestBody *)TSmalloc(sizeof(FCGI_EndRequestBody));
+    endBody = static_cast<FCGI_EndRequestBody *>(TSmalloc(sizeof(FCGI_EndRequestBody)));
     memset(endBody, 0, sizeof(FCGI_EndRequestBody));
   };
 

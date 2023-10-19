@@ -32,14 +32,15 @@
 #include "SSLSNIConfig.h"
 #include "P_SNIActionPerformer.h"
 
-#include "PreWarmManager.h"
-
 #include "tscore/Diags.h"
 #include "tscore/SimpleTokenizer.h"
 #include "tscore/ink_memory.h"
 #include "tscore/I_Layout.h"
 
 #include "tscpp/util/ts_ip.h"
+#include "tscpp/util/Convert.h"
+
+#include "swoc/TextView.h"
 
 #include <netinet/in.h>
 
@@ -47,11 +48,22 @@
 #include <utility>
 #include <pcre.h>
 #include <algorithm>
+#include <functional>
 
 static constexpr int OVECSIZE{30};
 
 static DbgCtl dbg_ctl_ssl{"ssl"};
 static DbgCtl dbg_ctl_ssl_sni{"ssl_sni"};
+
+namespace
+{
+bool
+is_port_in_the_ranges(const std::vector<ts::port_range_t> &port_ranges, in_port_t port)
+{
+  return std::any_of(port_ranges.begin(), port_ranges.end(),
+                     [port](ts::port_range_t const &port_range) { return port_range.contains(port); });
+}
+} // namespace
 
 ////
 // NamedElement
@@ -117,13 +129,36 @@ SNIConfigParams::get_property_config(const std::string &servername) const
 bool
 SNIConfigParams::load_sni_config()
 {
+  uint32_t count = 0;
+  ats_wildcard_matcher wildcard;
+
   for (auto &item : yaml_sni.items) {
-    auto &ai = sni_action_list.emplace_back();
-    ai.set_glob_name(item.fqdn);
-    ai.inbound_port_ranges = item.inbound_port_ranges;
     Dbg(dbg_ctl_ssl, "name: %s", item.fqdn.data());
 
-    item.populate_sni_actions(ai.actions);
+    ActionElement *element = nullptr;
+
+    // servername is case-insensitive, store & find it in lower case
+    char lower_case_name[TS_MAX_HOST_NAME_LEN + 1];
+    ts::transform_lower(item.fqdn, lower_case_name);
+
+    if (wildcard.match(lower_case_name)) {
+      auto &ai = sni_action_list.emplace_back();
+      ai.set_glob_name(lower_case_name);
+      element = &ai;
+    } else {
+      auto it = sni_action_map.emplace(std::make_pair(lower_case_name, ActionElement()));
+      if (it == sni_action_map.end()) {
+        Error("error on loading sni yaml - fqdn=%s", item.fqdn.c_str());
+        return false;
+      }
+
+      element = &it->second;
+    }
+
+    element->inbound_port_ranges = item.inbound_port_ranges;
+    element->rank                = count++;
+
+    item.populate_sni_actions(element->actions);
     if (!set_next_hop_properties(item)) {
       return false;
     }
@@ -167,20 +202,50 @@ SNIConfigParams::load_certs_if_client_cert_specified(YamlSNIConfig::Item const &
   return true;
 }
 
+/**
+  CAVEAT: the "fqdn" field in the sni.yaml accepts wildcards (*), but it has a negative performance impact.
+  */
 std::pair<const ActionVector *, ActionItem::Context>
 SNIConfigParams::get(std::string_view servername, in_port_t dest_incoming_port) const
 {
+  const ActionElement *element = nullptr;
+
+  // Check for exact matches
+  char lower_case_name[TS_MAX_HOST_NAME_LEN + 1];
+  ts::transform_lower(servername, lower_case_name);
+
+  Debug("sni", "lower_case_name=%s", lower_case_name);
+
+  auto range = sni_action_map.equal_range(lower_case_name);
+  for (auto it = range.first; it != range.second; ++it) {
+    Debug("sni", "match with %s", it->first.c_str());
+
+    if (!is_port_in_the_ranges(it->second.inbound_port_ranges, dest_incoming_port)) {
+      continue;
+    }
+
+    const ActionElement *candidate = &it->second;
+    if (element == nullptr) {
+      element = candidate;
+    } else if (candidate->rank < element->rank) {
+      element = &it->second;
+    }
+  }
+
+  // Check for wildcard matches
   int ovector[OVECSIZE];
 
   for (auto const &retval : sni_action_list) {
+    if (element != nullptr && element->rank < retval.rank) {
+      break;
+    }
+
     int length = servername.length();
     if (retval.match == nullptr && length == 0) {
       return {&retval.actions, {}};
     } else if (auto offset = pcre_exec(retval.match.get(), nullptr, servername.data(), length, 0, 0, ovector, OVECSIZE);
                offset >= 0) {
-      if (std::none_of(
-            retval.inbound_port_ranges.begin(), retval.inbound_port_ranges.end(),
-            [dest_incoming_port](ts::port_range_t const &port_range) { return port_range.contains(dest_incoming_port); })) {
+      if (!is_port_in_the_ranges(retval.inbound_port_ranges, dest_incoming_port)) {
         continue;
       }
       if (offset == 1) {
@@ -209,7 +274,12 @@ SNIConfigParams::get(std::string_view servername, in_port_t dest_incoming_port) 
       return {&retval.actions, {std::move(groups)}};
     }
   }
-  return {nullptr, {}};
+
+  if (element != nullptr) {
+    return {&element->actions, {}};
+  } else {
+    return {nullptr, {}};
+  }
 }
 
 bool
@@ -251,13 +321,14 @@ SNIConfigParams::initialize(std::string const &sni_filename)
 
 SNIConfigParams::~SNIConfigParams()
 {
-  // sni_action_list and next_hop_list should cleanup with the params object
+  // sni_action_map, sni_action_list and next_hop_list should cleanup with the params object
 }
 
 ////
 // SNIConfig
 //
-int SNIConfig::_configid = 0;
+int SNIConfig::_configid                        = 0;
+std::function<void()> SNIConfig::on_reconfigure = nullptr;
 
 void
 SNIConfig::startup()
@@ -277,7 +348,9 @@ SNIConfig::reconfigure()
   bool retStatus = params->initialize();
   if (retStatus) {
     _configid = configProcessor.set(_configid, params);
-    prewarmManager.reconfigure();
+    if (SNIConfig::on_reconfigure) {
+      SNIConfig::on_reconfigure();
+    }
   } else {
     delete params;
   }
@@ -302,6 +375,12 @@ void
 SNIConfig::release(SNIConfigParams *params)
 {
   configProcessor.release(_configid, params);
+}
+
+void
+SNIConfig::set_on_reconfigure_callback(std::function<void()> cb)
+{
+  SNIConfig::on_reconfigure = cb;
 }
 
 // See if any of the client-side actions would trigger for this combination of servername and client IP

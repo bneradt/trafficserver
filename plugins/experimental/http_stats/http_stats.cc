@@ -43,10 +43,12 @@
 
 constexpr char PLUGIN[] = "http_stats";
 
-#define VDEBUG(fmt, ...) TSDebug(PLUGIN, fmt, ##__VA_ARGS__)
+static DbgCtl dbg_ctl{PLUGIN};
+
+#define VDEBUG(fmt, ...) Dbg(dbg_ctl, fmt, ##__VA_ARGS__)
 
 #if DEBUG
-#define VERROR(fmt, ...) TSDebug(PLUGIN, fmt, ##__VA_ARGS__)
+#define VERROR(fmt, ...) Dbg(dbg_ctl, fmt, ##__VA_ARGS__)
 #else
 #define VERROR(fmt, ...) TSError("[%s] %s: " fmt, PLUGIN, __FUNCTION__, ##__VA_ARGS__)
 #endif
@@ -597,8 +599,8 @@ TSRemapNewInstance(int argc, char *argv[], void **ih, char * /* errbuf ATS_UNUSE
 {
   static const struct option longopt[] = {
     {"csv",              no_argument,       nullptr, 'c' },
-    {"integer-counters", no_argument,       NULL,    'i' },
-    {"wrap-counters",    no_argument,       NULL,    'w' },
+    {"integer-counters", no_argument,       nullptr, 'i' },
+    {"wrap-counters",    no_argument,       nullptr, 'w' },
     {"max-age",          required_argument, nullptr, 'a' },
     {nullptr,            no_argument,       nullptr, '\0'}
   };
@@ -720,7 +722,7 @@ json_out_stat(TSRecordType rec_type, void *edata, int registered, const char *na
     APPEND_STAT_JSON(fmtr, name, "%s", datum->rec_string);
     break;
   default:
-    TSDebug(PLUGIN, "unknown type for %s: %d", name, data_type);
+    Dbg(dbg_ctl, "unknown type for %s: %d", name, data_type);
     break;
   }
 }
@@ -744,7 +746,7 @@ csv_out_stat(TSRecordType rec_type, void *edata, int registered, const char *nam
     APPEND_STAT_CSV(fmtr, name, "%s", datum->rec_string);
     break;
   default:
-    TSDebug(PLUGIN, "unknown type for %s: %d", name, data_type);
+    Dbg(dbg_ctl, "unknown type for %s: %d", name, data_type);
     break;
   }
 }
@@ -753,12 +755,12 @@ std::string
 HTTPStatsFormatter::output()
 {
   if (csv) {
-    TSRecordDump((TSRecordType)(TS_RECORDTYPE_PLUGIN | TS_RECORDTYPE_NODE | TS_RECORDTYPE_PROCESS), csv_out_stat, this);
+    TSRecordDump(static_cast<TSRecordType>(TS_RECORDTYPE_PLUGIN | TS_RECORDTYPE_NODE | TS_RECORDTYPE_PROCESS), csv_out_stat, this);
     APPEND_STAT_CSV(this, "version", "%s", TSTrafficServerVersionGet());
   } else {
     APPEND(buf, "{ \"global\": {\n");
 
-    TSRecordDump((TSRecordType)(TS_RECORDTYPE_PLUGIN | TS_RECORDTYPE_NODE | TS_RECORDTYPE_PROCESS), json_out_stat, this);
+    TSRecordDump(static_cast<TSRecordType>(TS_RECORDTYPE_PLUGIN | TS_RECORDTYPE_NODE | TS_RECORDTYPE_PROCESS), json_out_stat, this);
 
     APPEND(buf, "\"server\": \"");
     APPEND(buf, TSTrafficServerVersionGet());
