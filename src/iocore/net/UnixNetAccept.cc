@@ -24,6 +24,7 @@
 #include <tscore/TSSystemState.h>
 #include <tscore/ink_defs.h>
 
+#include "iocore/net/ConnectionTracker.h"
 #include "P_Net.h"
 
 using NetAcceptHandler = int (NetAccept::*)(int, void *);
@@ -104,6 +105,7 @@ net_accept(NetAccept *na, void *ep, bool blockable)
     if (!vc) {
       goto Ldone; // note: @a con will clean up the socket when it goes out of scope.
     }
+    vc->enable_inbound_connection_tracking(conn_track_group);
 
     count++;
     Metrics::increment(net_rsb.connections_currently_open);
@@ -388,6 +390,7 @@ NetAccept::do_blocking_accept(EThread *t)
     if (unlikely(!vc)) {
       return -1;
     }
+    vc->enable_inbound_connection_tracking(conn_track_group);
 
     count++;
     Metrics::increment(net_rsb.connections_currently_open);
@@ -487,6 +490,7 @@ NetAccept::acceptFastEvent(int event, void *ep)
     socklen_t sz = sizeof(con.addr);
     int fd       = SocketManager::accept4(server.fd, &con.addr.sa, &sz, SOCK_NONBLOCK | SOCK_CLOEXEC);
     con.fd       = fd;
+    std::shared_ptr<ConnectionTracker::Group> conn_track_group;
 
     if (likely(fd >= 0)) {
       // check for throttle
@@ -561,6 +565,7 @@ NetAccept::acceptFastEvent(int event, void *ep)
 
     vc = (UnixNetVConnection *)this->getNetProcessor()->allocate_vc(e->ethread);
     ink_release_assert(vc);
+    vc->enable_inbound_connection_tracking(conn_track_group);
 
     count++;
     Metrics::increment(net_rsb.connections_currently_open);

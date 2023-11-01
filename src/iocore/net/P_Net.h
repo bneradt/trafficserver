@@ -45,6 +45,7 @@ struct NetStatsBlock {
   Metrics::IntType *calls_to_writetonet;
   Metrics::IntType *connections_currently_open;
   Metrics::IntType *connections_throttled_in;
+  Metrics::IntType *per_client_connections_throttled_in;
   Metrics::IntType *connections_throttled_out;
   Metrics::IntType *default_inactivity_timeout_applied;
   Metrics::IntType *default_inactivity_timeout_count;
@@ -78,6 +79,7 @@ struct NetStatsBlock {
   Metrics::IntType *tcp_accept;
   Metrics::IntType *write_bytes;
   Metrics::IntType *write_bytes_count;
+  Metrics::IntType *connection_tracker_table_size;
 };
 
 extern NetStatsBlock net_rsb;

@@ -91,6 +91,7 @@ register_net_stats()
   net_rsb.calls_to_writetonet                       = intm.newMetricPtr("proxy.process.net.calls_to_writetonet");
   net_rsb.connections_currently_open                = intm.newMetricPtr("proxy.process.net.connections_currently_open");
   net_rsb.connections_throttled_in                  = intm.newMetricPtr("proxy.process.net.connections_throttled_in");
+  net_rsb.per_client_connections_throttled_in       = intm.newMetricPtr("proxy.process.net.per_client.connections_throttled_in");
   net_rsb.connections_throttled_out                 = intm.newMetricPtr("proxy.process.net.connections_throttled_out");
   net_rsb.tunnel_total_client_connections_blind_tcp = intm.newMetricPtr("proxy.process.tunnel.total_client_connections_blind_tcp");
   net_rsb.tunnel_current_client_connections_blind_tcp =
@@ -132,6 +133,7 @@ register_net_stats()
   net_rsb.tcp_accept                            = intm.newMetricPtr("proxy.process.tcp.total_accepts");
   net_rsb.write_bytes                           = intm.newMetricPtr("proxy.process.net.write_bytes");
   net_rsb.write_bytes_count                     = intm.newMetricPtr("proxy.process.net.write_bytes_count");
+  net_rsb.connection_tracker_table_size         = intm.newMetricPtr("proxy.process.net.connection_tracker_table_size");
 }
 
 void
