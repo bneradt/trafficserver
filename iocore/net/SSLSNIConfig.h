@@ -30,6 +30,8 @@
  ****************************************************************************/
 #pragma once
 
+#include <string>
+#include <unordered_map>
 #include <vector>
 #include <string_view>
 #include <strings.h>
@@ -40,6 +42,8 @@
 #include "ConfigProcessor.h"
 #include "SNIActionPerformer.h"
 #include "YamlSNIConfig.h"
+
+#include <functional>
 
 // Properties for the next hop server
 struct NextHopProperty {
@@ -74,6 +78,8 @@ struct NamedElement {
   std::vector<ts::port_range_t> inbound_port_ranges;
 
   std::unique_ptr<pcre, PcreFreer> match;
+
+  uint32_t rank = 0; ///< order of the config. smaller is higher.
 };
 
 struct ActionElement : public NamedElement {
@@ -83,9 +89,6 @@ struct ActionElement : public NamedElement {
 struct NextHopItem : public NamedElement {
   NextHopProperty prop;
 };
-
-using SNIList             = std::vector<ActionElement>;
-using NextHopPropertyList = std::vector<NextHopItem>;
 
 class SNIConfigParams : public ConfigInfo
 {
@@ -102,8 +105,9 @@ public:
   bool load_sni_config();
   std::pair<const ActionVector *, ActionItem::Context> get(std::string_view servername, uint16_t dest_incoming_port) const;
 
-  SNIList sni_action_list;
-  NextHopPropertyList next_hop_list;
+  std::unordered_multimap<std::string, ActionElement> sni_action_map; ///< for exact fqdn matching
+  std::vector<ActionElement> sni_action_list;                         ///< for regex fqdn matching
+  std::vector<NextHopItem> next_hop_list;
   YamlSNIConfig yaml_sni;
 
 private:
@@ -124,9 +128,17 @@ public:
   static SNIConfigParams *acquire();
   static void release(SNIConfigParams *params);
 
+  /**
+   * Sets a callback to be invoked when the SNIConfig is reconfigured.
+   *
+   * This is used to reconfigure the pre-warm manager on SNI reload.
+   */
+  static void set_on_reconfigure_callback(std::function<void()> cb);
+
   static bool test_client_action(const char *servername, uint16_t dest_incoming_port, const IpEndpoint &ep,
                                  int &enforcement_policy);
 
 private:
   static int _configid;
+  static std::function<void()> on_reconfigure;
 };

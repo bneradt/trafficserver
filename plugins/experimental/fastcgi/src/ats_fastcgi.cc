@@ -24,7 +24,7 @@
 #include <atscppapi/PluginInit.h>
 #include <iostream>
 #include <netinet/in.h>
-#include <string.h>
+#include <cstring>
 
 #include "ts/ink_defs.h"
 #include "ts/ts.h"
@@ -83,11 +83,11 @@ public:
   {
     if (transaction.getCacheStatus() == Transaction::CACHE_LOOKUP_HIT_FRESH) {
       transaction.resume();
-      TSDebug(PLUGIN_NAME, " Cache hit.");
+      Dbg(dbg_ctl, " Cache hit.");
       return;
     }
     if (static_cast<TSHttpTxn>(transaction.getAtsHandle()) == nullptr) {
-      TSDebug(PLUGIN_NAME, "Invalid Transaction.");
+      Dbg(dbg_ctl, "Invalid Transaction.");
       return;
     }
     string path = transaction.getClientRequest().getUrl().getPath();
@@ -110,8 +110,9 @@ public:
 
       if (threadKey == 0) {
         // setup thread local storage
-        while (!gServer->setupThreadLocalStorage())
-          ;
+        while (!gServer->setupThreadLocalStorage()) {
+          // do nothing
+        }
       }
       gServer->connect(intercept);
 
@@ -214,6 +215,6 @@ TSPluginInit(int argc, const char *argv[])
     TSStatIntSet(phpConnCount, 0);
 
   } else {
-    TSDebug(PLUGIN_NAME, " plugin is disabled.");
+    Dbg(dbg_ctl, " plugin is disabled.");
   }
 }

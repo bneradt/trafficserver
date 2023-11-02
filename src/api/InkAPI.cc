@@ -44,6 +44,7 @@
 #include "ProxySession.h"
 #include "Http2ClientSession.h"
 #include "PoolableSession.h"
+#include "HttpAPIHooks.h"
 #include "HttpSM.h"
 #include "HttpConfig.h"
 #include "P_Net.h"
@@ -55,6 +56,7 @@
 #include "records/I_RecCore.h"
 #include "P_SSLConfig.h"
 #include "P_SSLClientUtils.h"
+#include "SSLAPIHooks.h"
 #include "SSLDiags.h"
 #include "SSLInternal.h"
 #include "TLSBasicSupport.h"
@@ -66,6 +68,7 @@
 #include "HttpSessionAccept.h"
 #include "PluginVC.h"
 #include "api/FetchSM.h"
+#include "api/LifecycleAPIHooks.h"
 #include "HttpDebugNames.h"
 #include "I_AIO.h"
 #include "I_Tasks.h"
@@ -391,9 +394,6 @@ namespace c
 } // end namespace c
 } // end namespace tsapi
 
-HttpAPIHooks *http_global_hooks        = nullptr;
-SslAPIHooks *ssl_hooks                 = nullptr;
-LifecycleAPIHooks *lifecycle_hooks     = nullptr;
 ConfigUpdateCbTable *global_config_cbs = nullptr;
 static ts::Metrics &global_api_metrics = ts::Metrics::getInstance();
 
@@ -404,7 +404,7 @@ static int ts_patch_version             = 0;
 
 static ClassAllocator<APIHook> apiHookAllocator("apiHookAllocator");
 extern ClassAllocator<INKContInternal> INKContAllocator;
-static ClassAllocator<INKVConnInternal> INKVConnAllocator("INKVConnAllocator");
+extern ClassAllocator<INKVConnInternal> INKVConnAllocator;
 static ClassAllocator<MIMEFieldSDKHandle> mHandleAllocator("MIMEFieldSDKHandle");
 
 ////////////////////////////////////////////////////////////////////
@@ -1044,276 +1044,9 @@ FileImpl::fgets(char *buf, size_t length)
 
 ////////////////////////////////////////////////////////////////////
 //
-// INKContInternal
-//
-////////////////////////////////////////////////////////////////////
-
-////////////////////////////////////////////////////////////////////
-//
-// INKVConnInternal
-//
-////////////////////////////////////////////////////////////////////
-
-INKVConnInternal::INKVConnInternal() : INKContInternal(), m_read_vio(), m_write_vio(), m_output_vc(nullptr)
-{
-  m_closed = 0;
-}
-
-INKVConnInternal::INKVConnInternal(TSEventFunc funcp, TSMutex mutexp)
-  : INKContInternal(funcp, mutexp), m_read_vio(), m_write_vio(), m_output_vc(nullptr)
-{
-  m_closed = 0;
-}
-
-void
-INKVConnInternal::clear()
-{
-  m_read_vio.set_continuation(nullptr);
-  m_write_vio.set_continuation(nullptr);
-  INKContInternal::clear();
-}
-
-void
-INKVConnInternal::free()
-{
-  clear();
-  this->mutex.clear();
-  m_free_magic = INKCONT_INTERN_MAGIC_DEAD;
-  THREAD_FREE(this, INKVConnAllocator, this_thread());
-}
-
-void
-INKVConnInternal::destroy()
-{
-  if (m_free_magic == INKCONT_INTERN_MAGIC_DEAD) {
-    ink_release_assert(!"Plugin tries to use a vconnection which is deleted");
-  }
-
-  m_deleted = 1;
-  if (m_deletable) {
-    free();
-  }
-}
-
-VIO *
-INKVConnInternal::do_io_read(Continuation *c, int64_t nbytes, MIOBuffer *buf)
-{
-  m_read_vio.buffer.writer_for(buf);
-  m_read_vio.op = VIO::READ;
-  m_read_vio.set_continuation(c);
-  m_read_vio.nbytes    = nbytes;
-  m_read_vio.ndone     = 0;
-  m_read_vio.vc_server = this;
-
-  if (ink_atomic_increment((int *)&m_event_count, 1) < 0) {
-    ink_assert(!"not reached");
-  }
-  eventProcessor.schedule_imm(this, ET_NET);
-
-  return &m_read_vio;
-}
-
-VIO *
-INKVConnInternal::do_io_write(Continuation *c, int64_t nbytes, IOBufferReader *buf, bool owner)
-{
-  ink_assert(!owner);
-  m_write_vio.buffer.reader_for(buf);
-  m_write_vio.op = VIO::WRITE;
-  m_write_vio.set_continuation(c);
-  m_write_vio.nbytes    = nbytes;
-  m_write_vio.ndone     = 0;
-  m_write_vio.vc_server = this;
-
-  if (m_write_vio.buffer.reader()->read_avail() > 0) {
-    if (ink_atomic_increment((int *)&m_event_count, 1) < 0) {
-      ink_assert(!"not reached");
-    }
-    eventProcessor.schedule_imm(this, ET_NET);
-  }
-
-  return &m_write_vio;
-}
-
-void
-INKVConnInternal::do_io_transform(VConnection *vc)
-{
-  m_output_vc = vc;
-}
-
-void
-INKVConnInternal::do_io_close(int error)
-{
-  if (ink_atomic_increment((int *)&m_event_count, 1) < 0) {
-    ink_assert(!"not reached");
-  }
-
-  INK_WRITE_MEMORY_BARRIER;
-
-  if (error != -1) {
-    lerrno   = error;
-    m_closed = TS_VC_CLOSE_ABORT;
-  } else {
-    m_closed = TS_VC_CLOSE_NORMAL;
-  }
-
-  m_read_vio.op = VIO::NONE;
-  m_read_vio.buffer.clear();
-
-  m_write_vio.op = VIO::NONE;
-  m_write_vio.buffer.clear();
-
-  if (m_output_vc) {
-    m_output_vc->do_io_close(error);
-    m_output_vc = nullptr;
-  }
-
-  eventProcessor.schedule_imm(this, ET_NET);
-}
-
-void
-INKVConnInternal::do_io_shutdown(ShutdownHowTo_t howto)
-{
-  if ((howto == IO_SHUTDOWN_READ) || (howto == IO_SHUTDOWN_READWRITE)) {
-    m_read_vio.op = VIO::NONE;
-    m_read_vio.buffer.clear();
-  }
-
-  if ((howto == IO_SHUTDOWN_WRITE) || (howto == IO_SHUTDOWN_READWRITE)) {
-    m_write_vio.op = VIO::NONE;
-    m_write_vio.buffer.clear();
-  }
-
-  if (ink_atomic_increment((int *)&m_event_count, 1) < 0) {
-    ink_assert(!"not reached");
-  }
-  eventProcessor.schedule_imm(this, ET_NET);
-}
-
-void
-INKVConnInternal::reenable(VIO * /* vio ATS_UNUSED */)
-{
-  if (ink_atomic_increment((int *)&m_event_count, 1) < 0) {
-    ink_assert(!"not reached");
-  }
-  eventProcessor.schedule_imm(this, ET_NET);
-}
-
-void
-INKVConnInternal::retry(unsigned int delay)
-{
-  if (ink_atomic_increment((int *)&m_event_count, 1) < 0) {
-    ink_assert(!"not reached");
-  }
-  mutex->thread_holding->schedule_in(this, HRTIME_MSECONDS(delay));
-}
-
-bool
-INKVConnInternal::get_data(int id, void *data)
-{
-  switch (id) {
-  case TS_API_DATA_READ_VIO:
-    *((TSVIO *)data) = reinterpret_cast<TSVIO>(&m_read_vio);
-    return true;
-  case TS_API_DATA_WRITE_VIO:
-    *((TSVIO *)data) = reinterpret_cast<TSVIO>(&m_write_vio);
-    return true;
-  case TS_API_DATA_OUTPUT_VC:
-    *((TSVConn *)data) = reinterpret_cast<TSVConn>(m_output_vc);
-    return true;
-  case TS_API_DATA_CLOSED:
-    *((int *)data) = m_closed;
-    return true;
-  default:
-    return INKContInternal::get_data(id, data);
-  }
-}
-
-bool
-INKVConnInternal::set_data(int id, void *data)
-{
-  switch (id) {
-  case TS_API_DATA_OUTPUT_VC:
-    m_output_vc = (VConnection *)data;
-    return true;
-  default:
-    return INKContInternal::set_data(id, data);
-  }
-}
-
-////////////////////////////////////////////////////////////////////
-//
 // APIHook, APIHooks, HttpAPIHooks, HttpHookState
 //
 ////////////////////////////////////////////////////////////////////
-APIHook *
-APIHook::next() const
-{
-  return m_link.next;
-}
-
-APIHook *
-APIHook::prev() const
-{
-  return m_link.prev;
-}
-
-int
-APIHook::invoke(int event, void *edata) const
-{
-  if (event == EVENT_IMMEDIATE || event == EVENT_INTERVAL || event == TS_EVENT_HTTP_TXN_CLOSE) {
-    if (ink_atomic_increment((int *)&m_cont->m_event_count, 1) < 0) {
-      ink_assert(!"not reached");
-    }
-  }
-  WEAK_MUTEX_TRY_LOCK(lock, m_cont->mutex, this_ethread());
-  if (!lock.is_locked()) {
-    // If we cannot get the lock, the caller needs to restructure to handle rescheduling
-    ink_release_assert(0);
-  }
-  return m_cont->handleEvent(event, edata);
-}
-
-int
-APIHook::blocking_invoke(int event, void *edata) const
-{
-  if (event == EVENT_IMMEDIATE || event == EVENT_INTERVAL || event == TS_EVENT_HTTP_TXN_CLOSE) {
-    if (ink_atomic_increment((int *)&m_cont->m_event_count, 1) < 0) {
-      ink_assert(!"not reached");
-    }
-  }
-
-  WEAK_SCOPED_MUTEX_LOCK(lock, m_cont->mutex, this_ethread());
-
-  return m_cont->handleEvent(event, edata);
-}
-
-APIHook *
-APIHooks::head() const
-{
-  return m_hooks.head;
-}
-
-void
-APIHooks::append(INKContInternal *cont)
-{
-  APIHook *api_hook;
-
-  api_hook         = THREAD_ALLOC(apiHookAllocator, this_thread());
-  api_hook->m_cont = cont;
-
-  m_hooks.enqueue(api_hook);
-}
-
-void
-APIHooks::clear()
-{
-  APIHook *hook;
-  while (nullptr != (hook = m_hooks.pop())) {
-    THREAD_FREE(hook, apiHookAllocator, this_thread());
-  }
-}
-
-HttpHookState::HttpHookState() : _id(TS_HTTP_LAST_HOOK) {}
 
 void
 HttpHookState::init(TSHttpHookID id, HttpAPIHooks const *global, HttpAPIHooks const *ssn, HttpAPIHooks const *txn)
@@ -1392,52 +1125,6 @@ HttpHookState::Scope::clear()
 {
   _hooks = nullptr;
   _p = _c = nullptr;
-}
-
-////////////////////////////////////////////////////////////////////
-//
-// ConfigUpdateCbTable
-//
-////////////////////////////////////////////////////////////////////
-
-ConfigUpdateCbTable::ConfigUpdateCbTable() {}
-
-ConfigUpdateCbTable::~ConfigUpdateCbTable() {}
-
-void
-ConfigUpdateCbTable::insert(INKContInternal *contp, const char *name)
-{
-  if (contp && name) {
-    cb_table.emplace(name, contp);
-  }
-}
-
-void
-ConfigUpdateCbTable::invoke(const char *name)
-{
-  INKContInternal *contp;
-
-  if (name != nullptr) {
-    if (strcmp(name, "*") == 0) {
-      for (auto &&it : cb_table) {
-        contp = it.second;
-        ink_assert(contp != nullptr);
-        invoke(contp);
-      }
-    } else {
-      if (auto it = cb_table.find(name); it != cb_table.end()) {
-        contp = it->second;
-        ink_assert(contp != nullptr);
-        invoke(contp);
-      }
-    }
-  }
-}
-
-void
-ConfigUpdateCbTable::invoke(INKContInternal *contp)
-{
-  eventProcessor.schedule_imm(new ConfigUpdateCallback(contp), ET_TASK);
 }
 
 ////////////////////////////////////////////////////////////////////
@@ -1704,9 +1391,9 @@ api_init()
     TS_HTTP_LEN_PUBLIC           = HTTP_LEN_PUBLIC;
     TS_HTTP_LEN_S_MAXAGE         = HTTP_LEN_S_MAXAGE;
 
-    http_global_hooks = new HttpAPIHooks;
-    ssl_hooks         = new SslAPIHooks;
-    lifecycle_hooks   = new LifecycleAPIHooks;
+    init_global_http_hooks();
+    init_global_ssl_hooks();
+    init_global_lifecycle_hooks();
     global_config_cbs = new ConfigUpdateCbTable;
 
     // Setup the version string for returning to plugins
@@ -4797,7 +4484,7 @@ tsapi::c::TSHttpHookAdd(TSHttpHookID id, TSCont contp)
 
   TSSslHookInternalID internalId{id};
   if (internalId.is_in_bounds()) {
-    ssl_hooks->append(internalId, icontp);
+    g_ssl_hooks->append(internalId, icontp);
   } else { // Follow through the regular HTTP hook framework
     http_global_hooks->append(id, icontp);
   }
@@ -4809,7 +4496,7 @@ tsapi::c::TSLifecycleHookAdd(TSLifecycleHookID id, TSCont contp)
   sdk_assert(sdk_sanity_check_continuation(contp) == TS_SUCCESS);
   sdk_assert(sdk_sanity_check_lifecycle_hook_id(id) == TS_SUCCESS);
 
-  lifecycle_hooks->append(id, (INKContInternal *)contp);
+  g_lifecycle_hooks->append(id, (INKContInternal *)contp);
 }
 
 /* HTTP sessions */
@@ -5735,12 +5422,15 @@ tsapi::c::TSHttpTxnOutgoingAddrGet(TSHttpTxn txnp)
   HttpSM *sm = reinterpret_cast<HttpSM *>(txnp);
 
   const sockaddr *retval = nullptr;
+  NetVConnection *vc     = nullptr;
   ProxyTransaction *ssn  = sm->get_server_txn();
-  if (ssn != nullptr) {
-    NetVConnection *vc = ssn->get_netvc();
-    if (vc != nullptr) {
-      retval = vc->get_local_addr();
-    }
+  if (ssn == nullptr) {
+    vc = sm->get_server_vc();
+  } else {
+    vc = ssn->get_netvc();
+  }
+  if (vc != nullptr) {
+    retval = vc->get_local_addr();
   }
   return retval;
 }
@@ -7448,40 +7138,6 @@ tsapi::c::TSStatFindName(const char *name, int *idp)
   }
 }
 
-/**************************   Tracing API   ****************************/
-// returns 1 or 0 to indicate whether TS is being run with a debug tag.
-int
-tsapi::c::TSIsDebugTagSet(const char *t)
-{
-  return diags()->on_for_TSDebug(t);
-}
-
-void
-tsapi::c::TSDebugSpecific(int debug_flag, const char *tag, const char *format_str, ...)
-{
-  if ((debug_flag && diags()->on_for_TSDebug()) || diags()->on_for_TSDebug(tag)) {
-    va_list ap;
-
-    va_start(ap, format_str);
-    diags()->print_va(tag, DL_Diag, nullptr, format_str, ap);
-    va_end(ap);
-  }
-}
-
-// Plugins would use TSDebug just as the TS internal uses Debug
-// e.g. TSDebug("plugin-cool", "Snoopy is a cool guy even after %d requests.", num_reqs);
-void
-tsapi::c::TSDebug(const char *tag, const char *format_str, ...)
-{
-  if (diags()->on_for_TSDebug() && diags()->tag_activated(tag)) {
-    va_list ap;
-
-    va_start(ap, format_str);
-    diags()->print_va(tag, DL_Diag, nullptr, format_str, ap);
-    va_end(ap);
-  }
-}
-
 /**************************   Logging API   ****************************/
 
 TSReturnCode
@@ -8006,6 +7662,56 @@ tsapi::c::TSHttpTxnIsInternal(TSHttpTxn txnp)
   return TSHttpSsnIsInternal(TSHttpTxnSsnGet(txnp));
 }
 
+static void
+txn_error_get(TSHttpTxn txnp, bool client, bool sent, uint32_t &error_class, uint64_t &error_code)
+{
+  sdk_assert(sdk_sanity_check_txn(txnp) == TS_SUCCESS);
+  HttpSM *sm                                                = reinterpret_cast<HttpSM *>(txnp);
+  HttpTransact::ConnectionAttributes *connection_attributes = nullptr;
+
+  if (client == true) {
+    // client
+    connection_attributes = &sm->t_state.client_info;
+  } else {
+    // server
+    connection_attributes = &sm->t_state.server_info;
+  }
+
+  if (sent == true) {
+    // sent
+    error_code  = connection_attributes->tx_error_code.code;
+    error_class = static_cast<uint32_t>(connection_attributes->tx_error_code.cls);
+  } else {
+    // received
+    error_code  = connection_attributes->rx_error_code.code;
+    error_class = static_cast<uint32_t>(connection_attributes->rx_error_code.cls);
+  }
+}
+
+void
+tsapi::c::TSHttpTxnClientReceivedErrorGet(TSHttpTxn txnp, uint32_t *error_class, uint64_t *error_code)
+{
+  txn_error_get(txnp, true, false, *error_class, *error_code);
+}
+
+void
+tsapi::c::TSHttpTxnClientSentErrorGet(TSHttpTxn txnp, uint32_t *error_class, uint64_t *error_code)
+{
+  txn_error_get(txnp, true, true, *error_class, *error_code);
+}
+
+void
+tsapi::c::TSHttpTxnServerReceivedErrorGet(TSHttpTxn txnp, uint32_t *error_class, uint64_t *error_code)
+{
+  txn_error_get(txnp, false, false, *error_class, *error_code);
+}
+
+void
+tsapi::c::TSHttpTxnServerSentErrorGet(TSHttpTxn txnp, uint32_t *error_class, uint64_t *error_code)
+{
+  txn_error_get(txnp, false, true, *error_class, *error_code);
+}
+
 TSReturnCode
 tsapi::c::TSHttpTxnServerPush(TSHttpTxn txnp, const char *url, int url_len)
 {
@@ -8255,7 +7961,7 @@ static void *
 _conf_to_memberp(TSOverridableConfigKey conf, OverridableHttpConfigParams *overridableHttpConfig, MgmtConverter const *&conv)
 {
   // External converters.
-  extern MgmtConverter const &HostDBDownServerCacheTimeConv;
+  extern MgmtConverter const &HttpDownServerCacheTimeConv;
 
   void *ret = nullptr;
   conv      = nullptr;
@@ -8412,7 +8118,7 @@ _conf_to_memberp(TSOverridableConfigKey conf, OverridableHttpConfigParams *overr
     ret = _memberp_to_generic(&overridableHttpConfig->connect_attempts_timeout, conv);
     break;
   case TS_CONFIG_HTTP_DOWN_SERVER_CACHE_TIME:
-    conv = &HostDBDownServerCacheTimeConv;
+    conv = &HttpDownServerCacheTimeConv;
     ret  = &overridableHttpConfig->down_server_timeout;
     break;
   case TS_CONFIG_HTTP_DOC_IN_CACHE_SKIP_DNS:
@@ -10143,4 +9849,22 @@ tsapi::c::TSRecYAMLConfigParse(TSYaml node, TSYAMLRecNodeHandler handler, void *
   }
 
   return err.empty() ? TS_SUCCESS : TS_ERROR;
+}
+
+TSTxnType
+tsapi::c::TSHttpTxnTypeGet(TSHttpTxn txnp)
+{
+  sdk_assert(sdk_sanity_check_txn(txnp) == TS_SUCCESS);
+  HttpSM *sm       = (HttpSM *)txnp;
+  TSTxnType retval = TS_TXN_TYPE_UNKNOWN;
+  if (sm != nullptr) {
+    if (sm->t_state.transparent_passthrough) {
+      retval = TS_TXN_TYPE_TR_PASS_TUNNEL;
+    } else if (sm->t_state.client_info.port_attribute == HttpProxyPort::TRANSPORT_BLIND_TUNNEL) {
+      retval = TS_TXN_TYPE_EXPLICIT_TUNNEL;
+    } else {
+      retval = TS_TXN_TYPE_HTTP;
+    }
+  }
+  return retval;
 }

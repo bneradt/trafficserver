@@ -90,7 +90,7 @@ public:
     if (_active < limit) {
       ++_active;
       TSMutexUnlock(_active_lock); // Reduce the critical section, release early
-      TSDebug(PLUGIN_NAME, "Reserving a slot, active entities == %u", active());
+      Dbg(dbg_ctl, "Reserving a slot, active entities == %u", active());
       return true;
     } else {
       TSMutexUnlock(_active_lock);
@@ -104,7 +104,7 @@ public:
     TSMutexLock(_active_lock);
     --_active;
     TSMutexUnlock(_active_lock);
-    TSDebug(PLUGIN_NAME, "Releasing a slot, active entities == %u", active());
+    Dbg(dbg_ctl, "Releasing a slot, active entities == %u", active());
   }
 
   // Current size of the active_in connections
@@ -189,7 +189,7 @@ public:
 
     for (int i = 0; i < RATE_LIMITER_METRIC_MAX; i++) {
       size_t const metricsz = metric_prefix.length() + strlen(suffixes[i]) + 2; // padding for dot+terminator
-      char *const metric    = (char *)TSmalloc(metricsz);
+      char *const metric    = static_cast<char *>(TSmalloc(metricsz));
       snprintf(metric, metricsz, "%s.%s", metric_prefix.data(), suffixes[i]);
 
       _metrics[i] = TS_ERROR;
@@ -199,7 +199,7 @@ public:
       }
 
       if (_metrics[i] != TS_ERROR) {
-        TSDebug(PLUGIN_NAME, "established metric '%s' as ID %d", metric, _metrics[i]);
+        Dbg(dbg_ctl, "established metric '%s' as ID %d", metric, _metrics[i]);
       } else {
         TSError("failed to create metric '%s'", metric);
       }

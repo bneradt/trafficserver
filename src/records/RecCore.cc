@@ -313,15 +313,6 @@ RecLinkConfigByte(const char *name, RecByte *rec_byte)
   return RecRegisterConfigUpdateCb(name, link_byte, (void *)rec_byte);
 }
 
-RecErrT
-RecLinkConfigBool(const char *name, RecBool *rec_bool)
-{
-  if (RecGetRecordBool(name, rec_bool) == REC_ERR_FAIL) {
-    return REC_ERR_FAIL;
-  }
-  return RecRegisterConfigUpdateCb(name, link_byte, (void *)rec_bool);
-}
-
 //-------------------------------------------------------------------------
 // RecRegisterConfigUpdateCb
 //-------------------------------------------------------------------------
@@ -489,11 +480,11 @@ RecGetRecordBool(const char *name, RecBool *rec_bool, bool lock)
 RecErrT
 RecLookupRecord(const char *name, void (*callback)(const RecRecord *, void *), void *data, bool lock)
 {
-  RecErrT err              = REC_ERR_FAIL;
-  ts::Metrics &api_metrics = ts::Metrics::getInstance();
-  auto it                  = api_metrics.find(name);
+  RecErrT err       = REC_ERR_FAIL;
+  ts::Metrics &intm = ts::Metrics::getInstance();
+  auto it           = intm.find(name);
 
-  if (it != api_metrics.end()) {
+  if (it != intm.end()) {
     RecRecord r;
     auto &&[name, val] = *it;
 
@@ -536,18 +527,18 @@ RecLookupMatchingRecords(unsigned rec_type, const char *match, void (*callback)(
     return REC_ERR_FAIL;
   }
 
-  if (rec_type & RECT_PLUGIN) { // ToDo: This should change if we use the new metrics for core metrics
-    RecRecord r;
+  // First find the new metrics, this is a bit of a hack, beacuse we still use the old
+  // librecords callback with a "pseudo" record.
+  RecRecord tmp;
 
-    r.rec_type  = RECT_PLUGIN;
-    r.data_type = RECD_INT;
+  tmp.rec_type  = RECT_ALL;
+  tmp.data_type = RECD_INT;
 
-    for (auto &&[name, val] : ts::Metrics::getInstance()) {
-      if (regex.match(name.data()) >= 0) {
-        r.name         = name.data();
-        r.data.rec_int = val;
-        callback(&r, data);
-      }
+  for (auto &&[name, val] : ts::Metrics::getInstance()) {
+    if (regex.match(name.data()) >= 0) {
+      tmp.name         = name.data();
+      tmp.data.rec_int = val;
+      callback(&tmp, data);
     }
   }
 
@@ -644,228 +635,6 @@ RecGetRecordPersistenceType(const char *name, RecPersistT *persist_type, bool lo
       *persist_type = r->stat_meta.persist_type;
       err           = REC_ERR_OKAY;
     }
-    rec_mutex_release(&(r->lock));
-  }
-
-  if (lock) {
-    ink_rwlock_unlock(&g_records_rwlock);
-  }
-
-  return err;
-}
-
-RecErrT
-RecGetRecordOrderAndId(const char *name, int *order, int *id, bool lock, bool check_sync_cb)
-{
-  RecErrT err = REC_ERR_FAIL;
-
-  if (lock) {
-    ink_rwlock_rdlock(&g_records_rwlock);
-  }
-
-  if (auto it = g_records_ht.find(name); it != g_records_ht.end()) {
-    RecRecord *r = it->second;
-
-    if (r->registered) {
-      if (!check_sync_cb || r->stat_meta.sync_cb) {
-        rec_mutex_acquire(&(r->lock));
-        if (order) {
-          *order = r->order;
-        }
-        if (id) {
-          *id = r->rsb_id;
-        }
-        err = REC_ERR_OKAY;
-        rec_mutex_release(&(r->lock));
-      }
-    }
-  }
-
-  if (lock) {
-    ink_rwlock_unlock(&g_records_rwlock);
-  }
-
-  return err;
-}
-
-RecErrT
-RecGetRecordUpdateType(const char *name, RecUpdateT *update_type, bool lock)
-{
-  RecErrT err = REC_ERR_FAIL;
-
-  if (lock) {
-    ink_rwlock_rdlock(&g_records_rwlock);
-  }
-
-  if (auto it = g_records_ht.find(name); it != g_records_ht.end()) {
-    RecRecord *r = it->second;
-
-    rec_mutex_acquire(&(r->lock));
-    if (REC_TYPE_IS_CONFIG(r->rec_type)) {
-      *update_type = r->config_meta.update_type;
-      err          = REC_ERR_OKAY;
-    } else {
-      ink_assert(!"rec_type is not CONFIG");
-    }
-    rec_mutex_release(&(r->lock));
-  }
-
-  if (lock) {
-    ink_rwlock_unlock(&g_records_rwlock);
-  }
-
-  return err;
-}
-
-RecErrT
-RecGetRecordCheckType(const char *name, RecCheckT *check_type, bool lock)
-{
-  RecErrT err = REC_ERR_FAIL;
-
-  if (lock) {
-    ink_rwlock_rdlock(&g_records_rwlock);
-  }
-
-  if (auto it = g_records_ht.find(name); it != g_records_ht.end()) {
-    RecRecord *r = it->second;
-
-    rec_mutex_acquire(&(r->lock));
-    if (REC_TYPE_IS_CONFIG(r->rec_type)) {
-      *check_type = r->config_meta.check_type;
-      err         = REC_ERR_OKAY;
-    } else {
-      ink_assert(!"rec_type is not CONFIG");
-    }
-    rec_mutex_release(&(r->lock));
-  }
-
-  if (lock) {
-    ink_rwlock_unlock(&g_records_rwlock);
-  }
-
-  return err;
-}
-
-RecErrT
-RecGetRecordCheckExpr(const char *name, char **check_expr, bool lock)
-{
-  RecErrT err = REC_ERR_FAIL;
-
-  if (lock) {
-    ink_rwlock_rdlock(&g_records_rwlock);
-  }
-
-  if (auto it = g_records_ht.find(name); it != g_records_ht.end()) {
-    RecRecord *r = it->second;
-
-    rec_mutex_acquire(&(r->lock));
-    if (REC_TYPE_IS_CONFIG(r->rec_type)) {
-      *check_expr = r->config_meta.check_expr;
-      err         = REC_ERR_OKAY;
-    } else {
-      ink_assert(!"rec_type is not CONFIG");
-    }
-    rec_mutex_release(&(r->lock));
-  }
-
-  if (lock) {
-    ink_rwlock_unlock(&g_records_rwlock);
-  }
-
-  return err;
-}
-
-RecErrT
-RecGetRecordDefaultDataString_Xmalloc(char *name, char **buf, bool lock)
-{
-  RecErrT err;
-
-  if (lock) {
-    ink_rwlock_rdlock(&g_records_rwlock);
-  }
-
-  if (auto it = g_records_ht.find(name); it != g_records_ht.end()) {
-    RecRecord *r = it->second;
-
-    *buf = static_cast<char *>(ats_malloc(sizeof(char) * 1024));
-    memset(*buf, 0, 1024);
-    err = REC_ERR_OKAY;
-
-    switch (r->data_type) {
-    case RECD_INT:
-      snprintf(*buf, 1023, "%" PRId64 "", r->data_default.rec_int);
-      break;
-    case RECD_FLOAT:
-      snprintf(*buf, 1023, "%f", r->data_default.rec_float);
-      break;
-    case RECD_STRING:
-      if (r->data_default.rec_string) {
-        ink_strlcpy(*buf, r->data_default.rec_string, 1024);
-      } else {
-        ats_free(*buf);
-        *buf = nullptr;
-      }
-      break;
-    case RECD_COUNTER:
-      snprintf(*buf, 1023, "%" PRId64 "", r->data_default.rec_counter);
-      break;
-    default:
-      ink_assert(!"Unexpected RecD type");
-      ats_free(*buf);
-      *buf = nullptr;
-      break;
-    }
-  } else {
-    err = REC_ERR_FAIL;
-  }
-
-  if (lock) {
-    ink_rwlock_unlock(&g_records_rwlock);
-  }
-
-  return err;
-}
-
-RecErrT
-RecGetRecordAccessType(const char *name, RecAccessT *access, bool lock)
-{
-  RecErrT err = REC_ERR_FAIL;
-
-  if (lock) {
-    ink_rwlock_rdlock(&g_records_rwlock);
-  }
-
-  if (auto it = g_records_ht.find(name); it != g_records_ht.end()) {
-    RecRecord *r = it->second;
-
-    rec_mutex_acquire(&(r->lock));
-    *access = r->config_meta.access_type;
-    err     = REC_ERR_OKAY;
-    rec_mutex_release(&(r->lock));
-  }
-
-  if (lock) {
-    ink_rwlock_unlock(&g_records_rwlock);
-  }
-
-  return err;
-}
-
-RecErrT
-RecSetRecordAccessType(const char *name, RecAccessT access, bool lock)
-{
-  RecErrT err = REC_ERR_FAIL;
-
-  if (lock) {
-    ink_rwlock_rdlock(&g_records_rwlock);
-  }
-
-  if (auto it = g_records_ht.find(name); it != g_records_ht.end()) {
-    RecRecord *r = it->second;
-
-    rec_mutex_acquire(&(r->lock));
-    r->config_meta.access_type = access;
-    err                        = REC_ERR_OKAY;
     rec_mutex_release(&(r->lock));
   }
 
@@ -1093,14 +862,13 @@ RecDumpRecords(RecT rec_type, RecDumpEntryCb callback, void *edata)
       rec_mutex_release(&(r->lock));
     }
   }
-  // Also dump the new ts::Metrics if asked for
-  if (rec_type & RECT_PLUGIN) { // ToDo: This should change if we use the new metrics for core metrics
-    RecData datum;
 
-    for (auto &&[name, val] : ts::Metrics::getInstance()) {
-      datum.rec_int = val;
-      callback(RECT_PLUGIN, edata, true, name.data(), TS_RECORDDATATYPE_INT, &datum);
-    }
+  // Dump all new metrics as well (no "type" for them)
+  RecData datum;
+
+  for (auto &&[name, val] : ts::Metrics::getInstance()) {
+    datum.rec_int = val;
+    callback(RECT_PLUGIN, edata, true, name.data(), TS_RECORDDATATYPE_INT, &datum);
   }
 }
 
@@ -1135,14 +903,6 @@ REC_ConfigReadFloat(const char *name)
 {
   RecFloat t = 0;
   RecGetRecordFloat(name, &t);
-  return t;
-}
-
-RecCounter
-REC_ConfigReadCounter(const char *name)
-{
-  RecCounter t = 0;
-  RecGetRecordCounter(name, &t);
   return t;
 }
 

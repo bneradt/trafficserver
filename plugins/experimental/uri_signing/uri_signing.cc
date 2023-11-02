@@ -25,10 +25,10 @@
 #include <ts/remap.h>
 #include <ts/remap_version.h>
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <inttypes.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <cinttypes>
 
 #include <cjose/cjose.h>
 
@@ -50,7 +50,7 @@ TSRemapNewInstance(int argc, char *argv[], void **ih, char *errbuf, int errbuf_s
     return TS_ERROR;
   }
 
-  TSDebug(PLUGIN_NAME, "Initializing remap function of %s -> %s with config from %s", argv[0], argv[1], argv[2]);
+  Dbg(dbg_ctl, "Initializing remap function of %s -> %s with config from %s", argv[0], argv[1], argv[2]);
 
   char const *const fname = argv[2];
 
@@ -69,7 +69,7 @@ TSRemapNewInstance(int argc, char *argv[], void **ih, char *errbuf, int errbuf_s
     static_cast<void>(snprintf(config_file, config_file_ct + 1, "%s/%s", config_dir, fname));
   }
 
-  TSDebug(PLUGIN_NAME, "config file name: %s", config_file);
+  Dbg(dbg_ctl, "config file name: %s", config_file);
   struct config *cfg = read_config_from_path(config_file);
   if (!cfg) {
     snprintf(errbuf, errbuf_size, "Unable to open config file: \"%s\"", config_file);
@@ -95,7 +95,7 @@ add_cookie(TSCont cont, TSEvent event, void *edata)
   struct timer t;
   start_timer(&t);
 
-  TSHttpTxn txn = (TSHttpTxn)edata;
+  TSHttpTxn txn = static_cast<TSHttpTxn>(edata);
   char *cookie  = static_cast<char *>(TSContDataGet(cont));
   TSMBuffer buffer;
   TSMLoc hdr;
@@ -235,7 +235,7 @@ TSRemapDoRemap(void *ih, TSHttpTxn txnp, TSRemapRequestInfo *rri)
   checkpoints[cpi++] = mark_timer(&t);
 
   strip_size = url_ct + 1;
-  strip_uri  = (char *)TSmalloc(strip_size);
+  strip_uri  = static_cast<char *>(TSmalloc(strip_size));
   memset(strip_uri, 0, strip_size);
 
   jws = get_jws_from_uri(url, url_ct, package, strip_uri, strip_size, &strip_ct);
@@ -248,8 +248,8 @@ TSRemapDoRemap(void *ih, TSHttpTxn txnp, TSRemapRequestInfo *rri)
   } else {
     /* There has been a JWS found in the url */
     /* Strip the token from the URL for upstream if configured to do so */
-    if (config_strip_token((struct config *)ih)) {
-      if ((int)strip_ct != url_ct) {
+    if (config_strip_token(static_cast<struct config *>(ih))) {
+      if (static_cast<int>(strip_ct) != url_ct) {
         int map_url_ct      = 0;
         char *map_url       = nullptr;
         char *map_strip_uri = nullptr;
@@ -258,7 +258,7 @@ TSRemapDoRemap(void *ih, TSHttpTxn txnp, TSRemapRequestInfo *rri)
         PluginDebug("Stripping Token from requestUrl: %s", map_url);
 
         int map_strip_size = map_url_ct + 1;
-        map_strip_uri      = (char *)TSmalloc(map_strip_size);
+        map_strip_uri      = static_cast<char *>(TSmalloc(map_strip_size));
         memset(map_strip_uri, 0, map_strip_size);
         size_t map_strip_ct = 0;
 
@@ -290,7 +290,7 @@ TSRemapDoRemap(void *ih, TSHttpTxn txnp, TSRemapRequestInfo *rri)
     }
   }
   /* Check auth_dir and pass through if configured */
-  if (uri_matches_auth_directive((struct config *)ih, url, url_ct)) {
+  if (uri_matches_auth_directive(static_cast<struct config *>(ih), url, url_ct)) {
     PluginDebug("Auth directive matched for %.*s", url_ct, url);
     if (url != nullptr) {
       TSfree((void *)url);
@@ -310,7 +310,7 @@ TSRemapDoRemap(void *ih, TSHttpTxn txnp, TSRemapRequestInfo *rri)
     checkpoints[cpi++] = mark_timer(&t);
   }
 
-  jwt = validate_jws(jws, (struct config *)ih, strip_uri, strip_ct);
+  jwt = validate_jws(jws, static_cast<struct config *>(ih), strip_uri, strip_ct);
   cjose_jws_release(jws);
 
   if (cpi < max_cpi) {
@@ -319,7 +319,7 @@ TSRemapDoRemap(void *ih, TSHttpTxn txnp, TSRemapRequestInfo *rri)
   if (jwt || check_cookies(checked_cookies)) {
     /* There has been a validated JWT found in either the cookie or url */
 
-    struct signer *signer = config_signer((struct config *)ih);
+    struct signer *signer = config_signer(static_cast<struct config *>(ih));
     char *cookie          = renew(jwt, signer->issuer, signer->jwk, signer->alg, package, strip_uri, strip_ct);
     jwt_delete(jwt);
 

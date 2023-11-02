@@ -34,13 +34,18 @@ libinkcache_a_SOURCES = \
 	Cache.cc \
 	CacheDir.cc \
 	CacheDisk.cc \
+	CacheEvacuateDocVC.cc \
+	CacheEvacuateDocVC.h \
 	CacheHosting.cc \
 	CacheHttp.cc \
 	CachePages.cc \
 	CachePagesInternal.cc \
 	CacheRead.cc \
+	CacheVC.cc \
 	CacheVol.cc \
 	CacheWrite.cc \
+	HttpTransactCache.cc \
+	HttpTransactcache.h \
 	I_Cache.h \
 	I_CacheDefs.h \
 	I_Store.h \
@@ -55,7 +60,8 @@ libinkcache_a_SOURCES = \
 	P_RamCache.h \
 	RamCacheCLFUS.cc \
 	RamCacheLRU.cc \
-	Store.cc
+	Store.cc \
+	Vol.cc
 
 if BUILD_TESTS
 libinkcache_a_SOURCES += \
@@ -64,6 +70,7 @@ libinkcache_a_SOURCES += \
 endif
 
 TESTS = $(check_PROGRAMS)
+TESTS_ENVIRONMENT = LSAN_OPTIONS=suppressions=$(abs_top_srcdir)/ci/asan_leak_suppression/unit_tests.txt
 
 test_CPPFLAGS = \
 	$(AM_CPPFLAGS) \
@@ -104,6 +111,7 @@ test_LDADD = \
 	$(top_builddir)/lib/fastlz/libfastlz.a \
 	$(top_builddir)/iocore/eventsystem/libinkevent.a \
 	$(top_builddir)/src/tscpp/util/libtscpputil.la \
+	$(top_builddir)/mgmt/rpc/libjsonrpc_protocol.la \
 	@SWOC_LIBS@ \
 	@HWLOC_LIBS@ \
 	@LIBPCRE@ \

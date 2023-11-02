@@ -2185,31 +2185,6 @@ namespace c
   TSReturnCode TSRecYAMLConfigParse(TSYaml node, TSYAMLRecNodeHandler handler, void *data);
 
   /* --------------------------------------------------------------------------
-     tracing api */
-
-  int TSIsDebugTagSet(const char *t);
-  void TSDebug(const char *tag, const char *format_str, ...) TS_PRINTFLIKE(2, 3);
-  /**
-      Output a debug line even if the debug tag is turned off, as long as
-      debugging is enabled. Could be used as follows:
-      @code
-      TSDebugSpecific(TSHttpTxnDebugGet(txn), "plugin_tag" , "Hello World from transaction %p", txn);
-      @endcode
-      will be printed if the plugin_tag is enabled or the transaction specific
-      debugging is turned on for txn.
-
-      @param debug_flag boolean flag.
-      @param tag Debug tag for the line.
-      @param format Format string.
-      @param ... Format arguments.
-   */
-  void TSDebugSpecific(int debug_flag, const char *tag, const char *format_str, ...) TS_PRINTFLIKE(3, 4);
-  extern int diags_on_for_plugins; /* Do not use directly. */
-#define TSDEBUG             \
-  if (diags_on_for_plugins) \
-  TSDebug
-
-  /* --------------------------------------------------------------------------
      logging api */
 
   /**
@@ -2677,6 +2652,42 @@ namespace c
   TSIOBufferReader TSHttpTxnPostBufferReaderGet(TSHttpTxn txnp);
 
   /**
+   * @brief Get the client error received from the transaction
+   *
+   * @param txnp The transaction where the error code is stored
+   * @param error_class Either session/connection or stream/transaction error
+   * @param error_code Error code received from the client
+   */
+  void TSHttpTxnClientReceivedErrorGet(TSHttpTxn txnp, uint32_t *error_class, uint64_t *error_code);
+
+  /**
+   * @brief Get the client error sent from the transaction
+   *
+   * @param txnp The transaction where the error code is stored
+   * @param error_class Either session/connection or stream/transaction error
+   * @param error_code Error code sent to the client
+   */
+  void TSHttpTxnClientSentErrorGet(TSHttpTxn txnp, uint32_t *error_class, uint64_t *error_code);
+
+  /**
+   * @brief Get the server error received from the transaction
+   *
+   * @param txnp The transaction where the error code is stored
+   * @param error_class Either session/connection or stream/transaction error
+   * @param error_code Error code sent from the server
+   */
+  void TSHttpTxnServerReceivedErrorGet(TSHttpTxn txnp, uint32_t *error_class, uint64_t *error_code);
+
+  /**
+   * @brief Get the server error sent from the transaction
+   *
+   * @param txnp The transaction where the error code is stored
+   * @param error_class Either session/connection or stream/transaction error
+   * @param error_code Error code sent to the server
+   */
+  void TSHttpTxnServerSentErrorGet(TSHttpTxn txnp, uint32_t *error_class, uint64_t *error_code);
+
+  /**
    * Initiate an HTTP/2 Server Push preload request.
    * Use this api to register a URL that you want to preload with HTTP/2 Server Push.
    *
@@ -2849,6 +2860,16 @@ namespace c
 
   /* IP addr parsing. This is a candidate for deprecation in v10.0.0, in favor of libswoc */
   TSReturnCode TSIpStringToAddr(const char *str, size_t str_len, struct sockaddr *addr);
+
+  /**
+   * Return information about the type of the transaction. Is it a tunnel transaction or fully parsed?
+   * If tunneled is it due to parse failures and TR_PASS or is it due to an explicit configuration.
+   *
+   * @param[in] txnp The Transaction for which the type should be retrieved.
+   *
+   * @return enun value of type TSTxnType
+   */
+  TSTxnType TSHttpTxnTypeGet(TSHttpTxn txnp);
 
 } // end namespace c
 

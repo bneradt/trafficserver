@@ -25,6 +25,8 @@
 #include <cstring>
 #include <mutex>
 #include <cassert>
+#include <thread>
+#include <chrono>
 #include <unistd.h>
 #include <sys/time.h>
 #include <openssl/rand.h>
@@ -51,6 +53,18 @@ static int channel_key_length = 0;
 static std::atomic<bool> stek_master_setter_running(false); /* stek master setter thread running */
 
 static std::atomic<bool> stek_initialized(false);
+
+using std::this_thread::sleep_for;
+using std::chrono::time_point_cast;
+using std::chrono::seconds;
+using std::chrono::system_clock;
+using TimePoint = std::chrono::time_point<system_clock, seconds>;
+
+TimePoint
+get_current_time()
+{
+  return time_point_cast<seconds>(system_clock::now());
+}
 
 bool
 isSTEKMaster()
@@ -171,7 +185,7 @@ STEK_encrypt(struct ssl_ticket_key_t *stek, const char *key, int key_length, cha
                               stek_len, ret_encrypted, encrypted_size, &encrypted_len)) == 0) {
     *ret_len = encrypted_len;
   } else {
-    TSDebug(PLUGIN, "STEK_encrypt calling encrypt_encode64 failed, error: %d", ret);
+    Dbg(dbg_ctl, "STEK_encrypt calling encrypt_encode64 failed, error: %d", ret);
   }
   return ret;
 }
@@ -183,7 +197,7 @@ STEK_decrypt(const std::string &encrypted_data, const char *key, int key_length,
     return -1;
   }
 
-  TSDebug(PLUGIN, "STEK_decrypt: requested to decrypt %lu bytes", encrypted_data.length());
+  Dbg(dbg_ctl, "STEK_decrypt: requested to decrypt %lu bytes", encrypted_data.length());
 
   int ret                  = -1;
   size_t decrypted_size    = DECODED_LEN(encrypted_data.length()) + EVP_MAX_BLOCK_LENGTH * 2;
@@ -193,7 +207,7 @@ STEK_decrypt(const std::string &encrypted_data, const char *key, int key_length,
   std::memset(decrypted, 0, decrypted_size);
   if ((ret = decrypt_decode64(reinterpret_cast<const unsigned char *>(key), key_length, encrypted_data.c_str(),
                               encrypted_data.length(), decrypted, decrypted_size, &decrypted_len)) != 0) {
-    TSDebug(PLUGIN, "STEK_decrypt calling decrypt_decode64 failed, error: %d", ret);
+    Dbg(dbg_ctl, "STEK_decrypt calling decrypt_decode64 failed, error: %d", ret);
     goto Cleanup;
   }
 
@@ -262,12 +276,12 @@ STEK_Update_Setter_Thread(void *arg)
 
   if (stek_master_setter_running) {
     /* Sanity check triggered.  Already running...don't do another. */
-    TSDebug(PLUGIN, "Faulty STEK-master launch. Internal error. Moving on...");
+    Dbg(dbg_ctl, "Faulty STEK-master launch. Internal error. Moving on...");
     return nullptr;
   }
 
   stek_master_setter_running = true;
-  TSDebug(PLUGIN, "Will now act as the STEK rotator for POD.");
+  Dbg(dbg_ctl, "Will now act as the STEK rotator for POD.");
 
   while (!plugin_threads.shutdown) {
     try {
@@ -281,7 +295,7 @@ STEK_Update_Setter_Thread(void *arg)
       } else {
         //  Everything good. will sleep for normal rotation time period and then repeat
         startProblem = 0;
-        TSDebug(PLUGIN, "New POD STEK created and sent to network.");
+        Dbg(dbg_ctl, "New POD STEK created and sent to network.");
 
         sleepInterval = ssl_param.key_update_interval;
       }
@@ -301,19 +315,19 @@ STEK_Update_Setter_Thread(void *arg)
         goto done_master_setter;
       }
     } catch (...) {
-      TSDebug(PLUGIN, "STEK_Update_Setter_Thread exception");
+      Dbg(dbg_ctl, "STEK_Update_Setter_Thread exception");
       goto done_master_setter;
     }
   } // while(forever)
 
 done_master_setter:
-  TSDebug(PLUGIN, "Yielding STEK-Master rotation responsibility to another node in POD.");
+  Dbg(dbg_ctl, "Yielding STEK-Master rotation responsibility to another node in POD.");
   memset(&newKey, 0, sizeof(struct ssl_ticket_key_t));
   stek_master_setter_running = false;
   return nullptr;
 }
 
-time_t lastChangeTime = 0;
+TimePoint lastChangeTime;
 
 void
 STEK_update(const std::string &encrypted_stek)
@@ -329,7 +343,7 @@ STEK_update(const std::string &encrypted_stek)
       // Let TSAPI know about new ticket information
       stek_initialized = true;
       TSSslTicketKeyUpdate(reinterpret_cast<char *>(ssl_param.ticket_keys), sizeof(ssl_param.ticket_keys));
-      time(&lastChangeTime);
+      lastChangeTime = get_current_time();
       ssl_key_lock.unlock();
     }
   }
@@ -342,8 +356,8 @@ STEK_Update_Checker_Thread(void *arg)
   ::pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, nullptr);
   ::pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, nullptr);
 
-  time_t currentTime;
-  time_t lastWarningTime; // last time we put out a warning
+  TimePoint currentTime;
+  TimePoint lastWarningTime; // last time we put out a warning
 
   /* STEK_Update_Checker_Thread() - This thread runs forever, sleeping most
    * of the time, then checking and updating our Session-Ticket-Encryption-Key
@@ -351,10 +365,10 @@ STEK_Update_Checker_Thread(void *arg)
    * that something is up with our STEK master, and nominate a new STEK master.
    */
 
-  TSDebug(PLUGIN, "Starting STEK_Update_Checker_Thread.");
+  Dbg(dbg_ctl, "Starting STEK_Update_Checker_Thread.");
 
-  lastChangeTime = lastWarningTime = time(&currentTime); // init to current to suppress a startup warning.
-  int check_count                  = 0;                  // Keep track of how many times we've checked whether we got a new STEK.
+  lastChangeTime = lastWarningTime = currentTime = get_current_time(); // init to current to suppress a startup warning.
+  int check_count                                = 0; // Keep track of how many times we've checked whether we got a new STEK.
 
   while (!plugin_threads.shutdown) {
     try {
@@ -362,21 +376,22 @@ STEK_Update_Checker_Thread(void *arg)
         // Launch a request for the master to resend you the ticket key
         std::string redis_channel = ssl_param.cluster_name + "." + STEK_ID_RESEND;
         ssl_param.pub->publish(redis_channel, ""); // send it
-        TSDebug(PLUGIN, "Request for ticket.");
+        Dbg(dbg_ctl, "Request for ticket.");
       }
-      time(&currentTime);
-      time_t sleepUntil;
+      currentTime = get_current_time();
+      seconds sleepFor{0};
       if (stek_initialized) {
         // Sleep until we are overdue for a key update
-        sleepUntil       = 2 * STEK_MAX_LIFETIME - (currentTime - lastChangeTime);
+        auto duration    = currentTime - lastChangeTime;
+        sleepFor         = seconds{2 * STEK_MAX_LIFETIME} - duration;
         stek_initialized = false;
         check_count      = 0;
       } else {
         // Wait for a while in hopes that the server gets back to us
-        sleepUntil = 30;
+        sleepFor = seconds{30};
         ++check_count;
       }
-      ::sleep(sleepUntil);
+      sleep_for(sleepFor);
 
       if (check_count == 0) {
         continue;
@@ -389,25 +404,25 @@ STEK_Update_Checker_Thread(void *arg)
        * STEK, we believe that the master has died, so "now, I am the master".
        * ...no problem we will recover POD STEK rotation now */
 
-      time(&currentTime);
-      if ((currentTime - lastChangeTime) > (2 * STEK_MAX_LIFETIME) || check_count > 10) {
+      currentTime = get_current_time();
+      if ((currentTime - lastChangeTime) > seconds{2 * STEK_MAX_LIFETIME} || check_count > 10) {
         // Yes we were way past due for a new STEK, and haven't received it.
-        if ((currentTime - lastWarningTime) > STEK_NOT_CHANGED_WARNING_INTERVAL) {
+        if ((currentTime - lastWarningTime) > seconds{STEK_NOT_CHANGED_WARNING_INTERVAL}) {
           // Yes it's time to put another warning in log file.
           TSError("Session Ticket Encryption Key not syncd in past %d hours.",
-                  static_cast<int>(((currentTime - lastChangeTime) / 3600)));
+                  static_cast<int>(((currentTime - lastChangeTime).count() / 3600)));
 
           lastWarningTime = currentTime;
         }
 
         /* Time to nominate a new stek master for pod key rotation... */
         if (!stek_master_setter_running) {
-          TSDebug(PLUGIN, "Will nominate a new STEK-master thread now for pod key rotation.");
+          Dbg(dbg_ctl, "Will nominate a new STEK-master thread now for pod key rotation.");
           TSThreadCreate(STEK_Update_Setter_Thread, nullptr);
         }
       }
     } catch (...) {
-      TSDebug(PLUGIN, "STEK_Update_Checker_Thread exception");
+      Dbg(dbg_ctl, "STEK_Update_Checker_Thread exception");
       break;
     }
   } // while(forever)

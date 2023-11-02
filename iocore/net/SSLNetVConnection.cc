@@ -24,12 +24,11 @@
 #include "tscore/ink_config.h"
 #include "tscore/EventNotify.h"
 #include "tscore/I_Layout.h"
+#include "tscore/InkErrno.h"
 #include "tscore/TSSystemState.h"
 
 #include "api/InkAPIInternal.h" // Added to include the ssl_hook definitions
-#include "HttpTunnel.h"
 #include "ProxyProtocol.h"
-#include "HttpConfig.h"
 #include "SSLSNIConfig.h"
 
 #include "P_Net.h"
@@ -39,6 +38,7 @@
 #include "P_SSLClientUtils.h"
 #include "P_SSLNetVConnection.h"
 #include "BIO_fastopen.h"
+#include "SSLAPIHooks.h"
 #include "SSLStats.h"
 #include "P_ALPNSupport.h"
 
@@ -224,7 +224,7 @@ SSLNetVConnection::_make_ssl_connection(SSL_CTX *ctx)
       SSL_set_bio(ssl, rbio, wbio);
 
 #if TS_HAS_TLS_EARLY_DATA
-      update_early_data_config(SSLConfigParams::server_max_early_data, SSLConfigParams::server_recv_max_early_data);
+      update_early_data_config(ssl, SSLConfigParams::server_max_early_data, SSLConfigParams::server_recv_max_early_data);
 #endif
     }
     this->_bindSSLObject();
@@ -1035,6 +1035,29 @@ SSLNetVConnection::free_thread(EThread *t)
   }
   con.close();
 
+  if (is_tunnel_endpoint()) {
+    ink_assert(get_context() != NET_VCONNECTION_UNSET);
+
+    Metrics::decrement(([&]() -> Metrics::IntType * {
+      if (get_context() == NET_VCONNECTION_IN) {
+        switch (get_tunnel_type()) {
+        case SNIRoutingType::BLIND:
+          return net_rsb.tunnel_current_client_connections_tls_tunnel;
+        case SNIRoutingType::FORWARD:
+          return net_rsb.tunnel_current_client_connections_tls_forward;
+        case SNIRoutingType::PARTIAL_BLIND:
+          return net_rsb.tunnel_current_client_connections_tls_partial_blind;
+        default:
+          return net_rsb.tunnel_current_client_connections_tls_http;
+        }
+      }
+      // NET_VCONNECTION_OUT - Never a tunnel type for out (to server) context.
+      ink_assert(get_tunnel_type() == SNIRoutingType::NONE);
+
+      return net_rsb.tunnel_current_server_connections_tls;
+    })());
+  }
+
 #if TS_HAS_TLS_EARLY_DATA
   if (_early_data_reader != nullptr) {
     _early_data_reader->dealloc();
@@ -1265,7 +1288,7 @@ SSLNetVConnection::sslServerHandShakeEvent(int &err)
     Metrics::increment(ssl_rsb.total_attempts_handshake_count_in);
     if (!curHook) {
       Dbg(dbg_ctl_ssl, "Initialize preaccept curHook from NULL");
-      curHook = ssl_hooks->get(TSSslHookInternalID(TS_VCONN_START_HOOK));
+      curHook = g_ssl_hooks->get(TSSslHookInternalID(TS_VCONN_START_HOOK));
     } else {
       curHook = curHook->next();
     }
@@ -1567,7 +1590,7 @@ SSLNetVConnection::sslClientHandShakeEvent(int &err)
     Metrics::increment(ssl_rsb.total_attempts_handshake_count_out);
     if (!curHook) {
       Dbg(dbg_ctl_ssl, "Initialize outbound connect curHook from NULL");
-      curHook = ssl_hooks->get(TSSslHookInternalID(TS_VCONN_OUTBOUND_START_HOOK));
+      curHook = g_ssl_hooks->get(TSSslHookInternalID(TS_VCONN_OUTBOUND_START_HOOK));
     } else {
       curHook = curHook->next();
     }
@@ -1842,7 +1865,7 @@ SSLNetVConnection::callHooks(TSEvent eventId)
   case HANDSHAKE_HOOKS_CLIENT_HELLO:
   case HANDSHAKE_HOOKS_CLIENT_HELLO_INVOKE:
     if (!curHook) {
-      curHook = ssl_hooks->get(TSSslHookInternalID(TS_SSL_CLIENT_HELLO_HOOK));
+      curHook = g_ssl_hooks->get(TSSslHookInternalID(TS_SSL_CLIENT_HELLO_HOOK));
     } else {
       curHook = curHook->next();
     }
@@ -1856,14 +1879,14 @@ SSLNetVConnection::callHooks(TSEvent eventId)
     // The server verify event addresses ATS to origin handshake
     // All the other events are for client to ATS
     if (!curHook) {
-      curHook = ssl_hooks->get(TSSslHookInternalID(TS_SSL_VERIFY_SERVER_HOOK));
+      curHook = g_ssl_hooks->get(TSSslHookInternalID(TS_SSL_VERIFY_SERVER_HOOK));
     } else {
       curHook = curHook->next();
     }
     break;
   case HANDSHAKE_HOOKS_SNI:
     if (!curHook) {
-      curHook = ssl_hooks->get(TSSslHookInternalID(TS_SSL_SERVERNAME_HOOK));
+      curHook = g_ssl_hooks->get(TSSslHookInternalID(TS_SSL_SERVERNAME_HOOK));
     } else {
       curHook = curHook->next();
     }
@@ -1874,7 +1897,7 @@ SSLNetVConnection::callHooks(TSEvent eventId)
   case HANDSHAKE_HOOKS_CERT:
   case HANDSHAKE_HOOKS_CERT_INVOKE:
     if (!curHook) {
-      curHook = ssl_hooks->get(TSSslHookInternalID(TS_SSL_CERT_HOOK));
+      curHook = g_ssl_hooks->get(TSSslHookInternalID(TS_SSL_CERT_HOOK));
     } else {
       curHook = curHook->next();
     }
@@ -1887,7 +1910,7 @@ SSLNetVConnection::callHooks(TSEvent eventId)
   case HANDSHAKE_HOOKS_CLIENT_CERT:
   case HANDSHAKE_HOOKS_CLIENT_CERT_INVOKE:
     if (!curHook) {
-      curHook = ssl_hooks->get(TSSslHookInternalID(TS_SSL_VERIFY_CLIENT_HOOK));
+      curHook = g_ssl_hooks->get(TSSslHookInternalID(TS_SSL_VERIFY_CLIENT_HOOK));
     } else {
       curHook = curHook->next();
     }
@@ -1897,14 +1920,14 @@ SSLNetVConnection::callHooks(TSEvent eventId)
     if (eventId == TS_EVENT_VCONN_CLOSE) {
       sslHandshakeHookState = HANDSHAKE_HOOKS_DONE;
       if (curHook == nullptr) {
-        curHook = ssl_hooks->get(TSSslHookInternalID(TS_VCONN_CLOSE_HOOK));
+        curHook = g_ssl_hooks->get(TSSslHookInternalID(TS_VCONN_CLOSE_HOOK));
       } else {
         curHook = curHook->next();
       }
     } else if (eventId == TS_EVENT_VCONN_OUTBOUND_CLOSE) {
       sslHandshakeHookState = HANDSHAKE_HOOKS_DONE;
       if (curHook == nullptr) {
-        curHook = ssl_hooks->get(TSSslHookInternalID(TS_VCONN_OUTBOUND_CLOSE_HOOK));
+        curHook = g_ssl_hooks->get(TSSslHookInternalID(TS_VCONN_OUTBOUND_CLOSE_HOOK));
       } else {
         curHook = curHook->next();
       }
@@ -1956,6 +1979,47 @@ SSLNetVConnection::populate(Connection &con, Continuation *c, void *arg)
   sslHandshakeStatus = SSLHandshakeStatus::SSL_HANDSHAKE_DONE;
   this->_bindSSLObject();
   return EVENT_DONE;
+}
+
+void
+SSLNetVConnection::_in_context_tunnel()
+{
+  ink_assert(get_context() == NET_VCONNECTION_IN);
+
+  Metrics::IntType *t, *c;
+
+  switch (get_tunnel_type()) {
+  case SNIRoutingType::BLIND:
+    t = net_rsb.tunnel_total_client_connections_tls_tunnel;
+    c = net_rsb.tunnel_current_client_connections_tls_tunnel;
+    break;
+  case SNIRoutingType::FORWARD:
+    t = net_rsb.tunnel_total_client_connections_tls_forward;
+    c = net_rsb.tunnel_current_client_connections_tls_forward;
+    break;
+  case SNIRoutingType::PARTIAL_BLIND:
+    t = net_rsb.tunnel_total_client_connections_tls_partial_blind;
+    c = net_rsb.tunnel_current_client_connections_tls_partial_blind;
+    break;
+  default:
+    t = net_rsb.tunnel_total_client_connections_tls_http;
+    c = net_rsb.tunnel_current_client_connections_tls_http;
+    break;
+  }
+  Metrics::increment(t);
+  Metrics::increment(c);
+}
+
+void
+SSLNetVConnection::_out_context_tunnel()
+{
+  ink_assert(get_context() == NET_VCONNECTION_OUT);
+
+  // Never a tunnel type for out (to server) context.
+  ink_assert(get_tunnel_type() == SNIRoutingType::NONE);
+
+  Metrics::increment(net_rsb.tunnel_total_server_connections_tls);
+  Metrics::increment(net_rsb.tunnel_current_server_connections_tls);
 }
 
 void
@@ -2580,78 +2644,4 @@ SSLNetVConnection::_ssl_read_buffer(void *buf, int64_t nbytes, int64_t &nread)
   }
 
   return ssl_error;
-}
-
-void
-SSLNetVConnection::set_valid_tls_protocols(unsigned long proto_mask, unsigned long max_mask)
-{
-  SSL_set_options(this->ssl, proto_mask);
-  SSL_clear_options(this->ssl, max_mask & ~proto_mask);
-}
-
-void
-SSLNetVConnection::set_valid_tls_version_min(int min)
-{
-  // Ignore available versions set by SSL_(CTX_)set_options if a ragne is specified
-  SSL_clear_options(this->ssl, SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1 | SSL_OP_NO_TLSv1_2 | SSL_OP_NO_TLSv1_3);
-
-  int ver = 0;
-  if (min >= 0) {
-    ver = TLS1_VERSION + min;
-  }
-  SSL_set_min_proto_version(this->ssl, ver);
-}
-
-void
-SSLNetVConnection::set_valid_tls_version_max(int max)
-{
-  // Ignore available versions set by SSL_(CTX_)set_options if a ragne is specified
-  SSL_clear_options(this->ssl, SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1 | SSL_OP_NO_TLSv1_2 | SSL_OP_NO_TLSv1_3);
-
-  int ver = 0;
-  if (max >= 0) {
-    ver = TLS1_VERSION + max;
-  }
-  SSL_set_max_proto_version(this->ssl, ver);
-}
-
-void
-SSLNetVConnection::update_early_data_config(uint32_t max_early_data, uint32_t recv_max_early_data)
-{
-#if TS_HAS_TLS_EARLY_DATA
-  // Must disable OpenSSL's internal anti-replay if external cache is used with
-  // 0-rtt, otherwise session reuse will be broken. The freshness check described
-  // in https://tools.ietf.org/html/rfc8446#section-8.3 is still performed. But we
-  // still need to implement something to try to prevent replay atacks.
-  //
-  // We are now also disabling this when using OpenSSL's internal cache, since we
-  // are calling "ssl_accept" non-blocking, it seems to be confusing the anti-replay
-  // mechanism and causing session resumption to fail.
-#ifdef HAVE_SSL_SET_MAX_EARLY_DATA
-  bool ret1 = false;
-  bool ret2 = false;
-  if ((ret1 = SSL_set_max_early_data(ssl, max_early_data)) == 1) {
-    Dbg(dbg_ctl_ssl_early_data, "SSL_set_max_early_data %u: success", max_early_data);
-  } else {
-    Dbg(dbg_ctl_ssl_early_data, "SSL_set_max_early_data %u: failed", max_early_data);
-  }
-
-  if ((ret2 = SSL_set_recv_max_early_data(ssl, recv_max_early_data)) == 1) {
-    Dbg(dbg_ctl_ssl_early_data, "SSL_set_recv_max_early_data %u: success", recv_max_early_data);
-  } else {
-    Dbg(dbg_ctl_ssl_early_data, "SSL_set_recv_max_early_data %u: failed", recv_max_early_data);
-  }
-
-  if (ret1 && ret2) {
-    Dbg(dbg_ctl_ssl_early_data, "Must disable anti-replay if 0-rtt is enabled.");
-    SSL_set_options(ssl, SSL_OP_NO_ANTI_REPLAY);
-  }
-#else
-  // If SSL_set_max_early_data is unavailable, it's probably BoringSSL,
-  // and SSL_set_early_data_enabled should be available.
-  bool const early_data_enabled = max_early_data > 0 ? 1 : 0;
-  SSL_set_early_data_enabled(ssl, early_data_enabled);
-  Debug("ssl", "Called SSL_set_early_data_enabled with %d", early_data_enabled);
-#endif
-#endif
 }

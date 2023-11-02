@@ -32,6 +32,7 @@ check_PROGRAMS = test_jsonrpc test_jsonrpcserver
 
 
 TESTS = $(check_PROGRAMS)
+TESTS_ENVIRONMENT = LSAN_OPTIONS=suppressions=$(abs_top_srcdir)/ci/asan_leak_suppression/unit_tests.txt
 
 ###########################################################################################
 # Protocol library only, no transport.
@@ -64,6 +65,7 @@ test_jsonrpc_LDADD = \
 	libjsonrpc_protocol.la \
 	$(top_builddir)/src/tscpp/util/libtscpputil.la \
 	$(top_builddir)/src/tscore/libtscore.a \
+	$(top_builddir)/src/api/libtsapicore.a \
 	$(top_builddir)/iocore/eventsystem/libinkevent.a \
 	$(top_builddir)/src/records/librecords_p.a \
 	$(top_builddir)/src/tscore/libtscore.a \
@@ -104,6 +106,7 @@ test_jsonrpcserver_LDADD = \
 	libjsonrpc_protocol.la \
 	libjsonrpc_server.la \
 	$(top_builddir)/src/tscore/libtscore.a \
+	$(top_builddir)/src/api/libtsapicore.a \
 	$(top_builddir)/iocore/eventsystem/libinkevent.a \
 	$(top_builddir)/src/records/librecords_p.a \
 	$(top_builddir)/src/api/libtsapicore.a \

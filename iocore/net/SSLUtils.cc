@@ -42,12 +42,16 @@
 #include "P_TLSKeyLogger.h"
 #include "BoringSSLUtils.h"
 #include "ProxyProtocol.h"
+#include "SSLAPIHooks.h"
 #include "SSLSessionCache.h"
 #include "SSLSessionTicket.h"
 #include "SSLDynlock.h"
 #include "SSLDiags.h"
 #include "SSLStats.h"
 #include "TLSSessionResumptionSupport.h"
+#if TS_USE_QUIC == 1
+#include "QUICSupport.h"
+#endif
 #include "P_SSLNetVConnection.h"
 
 #include <string>
@@ -228,7 +232,7 @@ ssl_new_cached_session(SSL *ssl, SSL_SESSION *sess)
   session_cache->insertSession(sid, sess, ssl);
 
   // Call hook after new session is created
-  APIHook *hook = ssl_hooks->get(TSSslHookInternalID(TS_SSL_SESSION_HOOK));
+  APIHook *hook = g_ssl_hooks->get(TSSslHookInternalID(TS_SSL_SESSION_HOOK));
   while (hook) {
     hook->invoke(TS_EVENT_SSL_SESSION_NEW, &sid);
     hook = hook->m_link.next;
@@ -251,7 +255,7 @@ ssl_rm_cached_session(SSL_CTX *ctx, SSL_SESSION *sess)
   SSLSessionID sid(id, len);
 
   // Call hook before session is removed
-  APIHook *hook = ssl_hooks->get(TSSslHookInternalID(TS_SSL_SESSION_HOOK));
+  APIHook *hook = g_ssl_hooks->get(TSSslHookInternalID(TS_SSL_SESSION_HOOK));
   while (hook) {
     hook->invoke(TS_EVENT_SSL_SESSION_REMOVE, &sid);
     hook = hook->m_link.next;
@@ -302,7 +306,7 @@ ssl_client_hello_callback(SSL *s, int *al, void *arg)
   TLSSNISupport *snis = TLSSNISupport::getInstance(s);
   if (snis) {
     snis->on_client_hello(s, al, arg);
-    int ret = snis->perform_sni_action();
+    int ret = snis->perform_sni_action(*s);
     if (ret != SSL_TLSEXT_ERR_OK) {
       return SSL_CLIENT_HELLO_ERROR;
     }
@@ -338,7 +342,7 @@ ssl_client_hello_callback(const SSL_CLIENT_HELLO *client_hello)
 
   if (snis) {
     snis->on_client_hello(client_hello);
-    int ret = snis->perform_sni_action();
+    int ret = snis->perform_sni_action(*s);
     if (ret != SSL_TLSEXT_ERR_OK) {
       return ssl_select_cert_error;
     }
@@ -457,7 +461,7 @@ ssl_servername_callback(SSL *ssl, int *al, void *arg)
     snis->on_servername(ssl, al, arg);
 #if !TS_USE_HELLO_CB && !defined(OPENSSL_IS_BORINGSSL)
     // Only call the SNI actions here if not already performed in the HELLO_CB
-    int ret = snis->perform_sni_action();
+    int ret = snis->perform_sni_action(*ssl);
     if (ret != SSL_TLSEXT_ERR_OK) {
       return SSL_TLSEXT_ERR_ALERT_FATAL;
     }
@@ -959,6 +963,9 @@ SSLInitializeLibrary()
   TLSEarlyDataSupport::initialize();
   TLSTunnelSupport::initialize();
   TLSCertSwitchSupport::initialize();
+#if TS_USE_QUIC == 1
+  QUICSupport::initialize();
+#endif
 
   open_ssl_initialized = true;
 }

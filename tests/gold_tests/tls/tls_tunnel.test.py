@@ -93,22 +93,24 @@ ts.Disk.sni_yaml.AddLines([
     'sni:',
     '- fqdn: foo.com',
     "  tunnel_route: localhost:{0}".format(server_foo.Variables.SSL_Port),
-    "- fqdn: bob.*.com",
+    "- fqdn: '*.bar.com'",
     "  tunnel_route: localhost:{0}".format(server_foo.Variables.SSL_Port),
     "- fqdn: '*.match.com'",
     "  tunnel_route: $1.testmatch:{0}".format(server_foo.Variables.SSL_Port),
-    "- fqdn: '*.ok.*.com'",
-    "  tunnel_route: $2.example.$1:{0}".format(server_foo.Variables.SSL_Port),
+    "- fqdn: '*.ok.two.com'",
+    "  tunnel_route: two.example.$1:{0}".format(server_foo.Variables.SSL_Port),
     "- fqdn: ''",  # No SNI sent
     "  tunnel_route: localhost:{0}".format(server_bar.Variables.SSL_Port),
     "- fqdn: 'incoming.port.com'",
     "  tunnel_route: backend.incoming.port.com:{inbound_local_port}",
     "- fqdn: 'proxy.protocol.port.com'",
     "  tunnel_route: backend.proxy.protocol.port.com:{proxy_protocol_port}",
-    "- fqdn: '*.*.incoming.port.com'",
-    "  tunnel_route: backend.$1.$2.incoming.port.com:{inbound_local_port}",
-    "- fqdn: '*.*.proxy.protocol.port.com'",
-    "  tunnel_route: backend.$1.$2.proxy.protocol.port.com:{proxy_protocol_port}",
+    "- fqdn: '*.backend.incoming.port.com'",
+    "  tunnel_route: backend.$1.incoming.port.com:{inbound_local_port}",
+    "- fqdn: '*.with.incoming.port.com'",
+    "  tunnel_route: backend.$1.with.incoming.port.com:{inbound_local_port}",
+    "- fqdn: '*.with.proxy.protocol.port.com'",
+    "  tunnel_route: backend.$1.with.proxy.protocol.port.com:{proxy_protocol_port}",
 ])
 
 tr = Test.AddTestRun("foo.com Tunnel-test")
@@ -335,7 +337,21 @@ tr.Processes.Default.Command = (
     " proxy.process.http.total_client_connections_ipv6" +
     " proxy.process.http.total_server_connections" +
     " proxy.process.http2.total_client_connections" +
-    " proxy.process.http.connect_requests'" +
+    " proxy.process.http.connect_requests" +
+    " proxy.process.tunnel.total_client_connections_blind_tcp" +
+    " proxy.process.tunnel.current_client_connections_blind_tcp" +
+    " proxy.process.tunnel.total_server_connections_blind_tcp" +
+    " proxy.process.tunnel.current_server_connections_blind_tcp" +
+    " proxy.process.tunnel.total_client_connections_tls_tunnel" +
+    " proxy.process.tunnel.current_client_connections_tls_tunnel" +
+    " proxy.process.tunnel.total_client_connections_tls_forward" +
+    " proxy.process.tunnel.current_client_connections_tls_forward" +
+    " proxy.process.tunnel.total_client_connections_tls_partial_blind" +
+    " proxy.process.tunnel.current_client_connections_tls_partial_blind" +
+    " proxy.process.tunnel.total_client_connections_tls_http" +
+    " proxy.process.tunnel.current_client_connections_tls_http" +
+    " proxy.process.tunnel.total_server_connections_tls" +
+    " proxy.process.tunnel.current_server_connections_tls'" +
     f" {Test.TestDirectory}/gold/tls-tunnel-metrics.gold"
 )
 # Need to copy over the environment so traffic_ctl knows where to find the unix domain socket

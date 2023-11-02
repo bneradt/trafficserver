@@ -53,6 +53,7 @@ test_certlookup_SOURCES = \
 test_certlookup_LDADD = \
 	$(top_builddir)/iocore/eventsystem/libinkevent.a \
 	$(top_builddir)/src/tscore/libtscore.a \
+	$(top_builddir)/src/api/libtsapicore.a \
 	$(top_builddir)/src/tscpp/util/libtscpputil.la \
 	$(top_builddir)/proxy/ParentSelectionStrategy.o \
 	@YAMLCPP_LIBS@ \
@@ -86,6 +87,7 @@ test_UDPNet_LDADD = \
 	$(top_builddir)/src/records/librecords_p.a \
 	$(top_builddir)/proxy/hdrs/libhdrs.a \
 	$(top_builddir)/src/tscore/libtscore.a \
+	$(top_builddir)/src/api/libtsapicore.a \
 	$(top_builddir)/src/tscpp/util/libtscpputil.la \
 	$(top_builddir)/src/api/libtsapicore.a \
 	$(top_builddir)/proxy/ParentSelectionStrategy.o \
@@ -202,12 +204,13 @@ libinknet_a_SOURCES = \
 	P_UnixUDPConnection.h \
 	PollCont.h \
 	PollCont.cc \
-	PreWarmManager.cc \
 	ProxyProtocol.h \
 	ProxyProtocol.cc \
 	ReadWriteEventIO.h \
 	ReadWriteEventIO.cc \
 	Socks.cc \
+	SSLAPIHooks.h \
+	SSLAPIHooks.cc \
 	SSLCertLookup.cc \
 	SSLClientCoordinator.cc \
 	SSLClientUtils.cc \
@@ -261,7 +264,8 @@ libinknet_a_SOURCES += \
 	QUICNetProcessor_quiche.cc \
 	QUICNetVConnection_quiche.cc \
 	QUICNextProtocolAccept_quiche.cc \
-	QUICPacketHandler_quiche.cc
+	QUICPacketHandler_quiche.cc \
+	QUICSupport.cc
 endif
 
 if BUILD_TESTS

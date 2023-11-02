@@ -143,7 +143,7 @@ AccessToken::validateTiming(time_t time)
 
   /* Validate and check not before timestamp */
   if (!_notBefore.empty()) {
-    if (0 == (t = string2int(_notBefore))) {
+    if (0 == (t = string2time(_notBefore))) {
       return _state = INVALID_FIELD_VALUE;
     } else {
       if (time <= t) {
@@ -154,7 +154,7 @@ AccessToken::validateTiming(time_t time)
 
   /* Validate and check expiration timestamp */
   if (!_expiration.empty()) {
-    if (0 == (t = string2int(_expiration))) {
+    if (0 == (t = string2time(_expiration))) {
       return _state = INVALID_FIELD_VALUE;
     } else {
       if (time > t) {
@@ -164,7 +164,7 @@ AccessToken::validateTiming(time_t time)
   }
 
   /* "issued at" time-stamp is currently only for info, so check if the time-stamp is valid only */
-  if (!_issuedAt.empty() && 0 == string2int(_issuedAt)) {
+  if (!_issuedAt.empty() && 0 == string2time(_issuedAt)) {
     return _state = INVALID_FIELD_VALUE;
   }
 
@@ -200,7 +200,7 @@ KvpAccessToken::parse(const StringView token)
       return _state = INVALID_SYNTAX;
     }
     StringView key   = kvp.substr(0, equalsign);
-    StringView value = equalsign != kvp.npos ? kvp.substr(equalsign + 1) : "";
+    StringView value = kvp.substr(equalsign + 1);
 
     DEBUG_OUT("kvp:'" << kvp << "', key:'" << key << "', value:'" << value << "'");
 

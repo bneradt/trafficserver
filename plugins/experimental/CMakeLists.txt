@@ -16,6 +16,7 @@
 #######################
 
 add_subdirectory(access_control)
+add_subdirectory(block_errors)
 add_subdirectory(cache_fill)
 add_subdirectory(cert_reporting_tool)
 add_subdirectory(cookie_remap)
@@ -34,6 +35,7 @@ add_subdirectory(money_trace)
 add_subdirectory(mp4)
 add_subdirectory(rate_limit)
 add_subdirectory(redo_cache_lookup)
+add_subdirectory(sslheaders)
 add_subdirectory(stek_share)
 add_subdirectory(stream_editor)
 add_subdirectory(system_stats)

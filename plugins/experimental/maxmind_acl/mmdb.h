@@ -47,19 +47,25 @@
 #define PLUGIN_NAME  "maxmind_acl"
 #define CONFIG_TMOUT 60000
 
-typedef struct {
+namespace maxmind_acl_ns
+{
+extern DbgCtl dbg_ctl;
+}
+using namespace maxmind_acl_ns;
+
+struct plugin_regex {
   std::string _regex_s;
   pcre *_rex;
   pcre_extra *_extra;
-} plugin_regex;
+};
 
-using ipstate = enum { ALLOW_IP, DENY_IP, UNKNOWN_IP };
+enum ipstate { ALLOW_IP, DENY_IP, UNKNOWN_IP };
 
 // Base class for all ACLs
 class Acl
 {
 public:
-  Acl() {}
+  Acl() { memset(&_mmdb, 0, sizeof(_mmdb)); }
   ~Acl()
   {
     if (db_loaded) {

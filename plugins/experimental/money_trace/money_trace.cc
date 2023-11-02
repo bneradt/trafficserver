@@ -57,7 +57,7 @@ config_from_args(int const argc, char const *argv[], PluginType const ptype)
 
   // getopt assumes args start at '1' so this hack is needed
   do {
-    int const opt = getopt_long(argc, (char *const *)argv, "a:c:h:l:p:", longopt, nullptr);
+    int const opt = getopt_long(argc, const_cast<char *const *>(argv), "a:c:h:l:p:", longopt, nullptr);
 
     if (-1 == opt) {
       break;
@@ -538,6 +538,11 @@ global_request_header_hook(TSCont const contp, TSEvent const event, void *const 
 }
 
 } // namespace
+
+namespace money_trace_ns
+{
+DbgCtl dbg_ctl{PLUGIN_NAME};
+}
 
 /**
  * Remap initialization.

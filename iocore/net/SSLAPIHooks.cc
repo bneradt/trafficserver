@@ -1,6 +1,6 @@
 /** @file
 
-  A brief file description
+  Internal SDK stuff
 
   @section license License
 
@@ -21,32 +21,12 @@
   limitations under the License.
  */
 
-#pragma once
+#include "SSLAPIHooks.h"
 
-#include <cstdio>
-#include <string>
+SSLAPIHooks *g_ssl_hooks = nullptr;
 
-namespace EsiLib
+void
+init_global_ssl_hooks()
 {
-#define DEBUG_TAG_MAX_SIZE 64
-
-/** class that has common private characteristics */
-class ComponentBase
-{
-public:
-  using Debug = void (*)(const char *, const char *, ...);
-  using Error = void (*)(const char *, ...);
-
-protected:
-  ComponentBase(const char *debug_tag, Debug debug_func, Error error_func) : _debugLog(debug_func), _errorLog(error_func)
-  {
-    snprintf(_debug_tag, sizeof(_debug_tag), "%s", debug_tag);
-  };
-
-  char _debug_tag[DEBUG_TAG_MAX_SIZE];
-  Debug _debugLog;
-  Error _errorLog;
-
-  virtual ~ComponentBase(){};
-};
-}; // namespace EsiLib
+  g_ssl_hooks = new SSLAPIHooks;
+}
