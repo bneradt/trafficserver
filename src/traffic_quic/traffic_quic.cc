@@ -23,23 +23,23 @@
 
 #include "tscore/ink_string.h"
 #include "tscore/ink_args.h"
-#include "tscore/I_Layout.h"
-#include "tscore/I_Version.h"
+#include "tscore/Layout.h"
+#include "tscore/Version.h"
 
-#include "records/I_RecordsConfig.h"
-#include "URL.h"
-#include "MIME.h"
-#include "HTTP.h"
-#include "HuffmanCodec.h"
-#include "Http3Config.h"
+#include "records/RecordsConfig.h"
+#include "proxy/hdrs/URL.h"
+#include "proxy/hdrs/MIME.h"
+#include "proxy/hdrs/HTTP.h"
+#include "proxy/hdrs/HuffmanCodec.h"
+#include "proxy/http3/Http3Config.h"
 
 #include "diags.h"
 #include "quic_client.h"
 
-#include "P_SSLUtils.h"
-#include "P_SSLConfig.h"
+#include "../iocore/net/P_SSLUtils.h"
+#include "../iocore/net/P_SSLConfig.h"
 
-#include "RecProcess.h"
+#include "iocore/eventsystem/RecProcess.h"
 
 #define THREADS 1
 
@@ -56,8 +56,7 @@ main(int argc, const char **argv)
   Layout::create();
 
   // Set up the application version info
-  AppVersionInfo appVersionInfo;
-  appVersionInfo.setup(PACKAGE_NAME, "traffic_quic", PACKAGE_VERSION, __DATE__, __TIME__, BUILD_MACHINE, BUILD_PERSON, "");
+  auto &version = AppVersionInfo::setup_version("traffic_quic");
 
   QUICClientConfig config;
 
@@ -79,7 +78,7 @@ main(int argc, const char **argv)
   };
 
   // Process command line arguments and dump into variables
-  process_args(&appVersionInfo, argument_descriptions, countof(argument_descriptions), argv);
+  process_args(&version, argument_descriptions, countof(argument_descriptions), argv);
 
   if (config.http3) {
     config.http0_9 = false;
@@ -130,8 +129,8 @@ initialize_thread_for_http_sessions(EThread *, int)
   ink_assert(false);
 }
 
-#include "P_UnixNet.h"
-#include "P_DNSConnection.h"
+#include "../iocore/net/P_UnixNet.h"
+#include "../iocore/dns/P_DNSConnection.h"
 int
 DNSConnection::close()
 {
@@ -145,14 +144,7 @@ DNSConnection::trigger()
   ink_assert(false);
 }
 
-#include "StatPages.h"
-void
-StatPagesManager::register_http(char const *, Action *(*)(Continuation *, HTTPHdr *))
-{
-  //  ink_assert(false);
-}
-
-#include "ParentSelection.h"
+#include "proxy/ParentSelection.h"
 void
 SocksServerConfig::startup()
 {
@@ -233,7 +225,7 @@ ConfigUpdateCbTable::invoke(const char * /* name ATS_UNUSED */)
   ink_release_assert(false);
 }
 
-#include "ControlMatcher.h"
+#include "proxy/ControlMatcher.h"
 char *
 HttpRequestData::get_string()
 {
@@ -264,9 +256,8 @@ HttpRequestData::get_client_ip()
 
 SslAPIHooks *ssl_hooks             = nullptr;
 LifecycleAPIHooks *lifecycle_hooks = nullptr;
-StatPagesManager statPagesManager;
 
-#include "HttpDebugNames.h"
+#include "proxy/http/HttpDebugNames.h"
 const char *
 HttpDebugNames::get_api_hook_name(TSHttpHookID t)
 {
@@ -278,7 +269,7 @@ HttpDebugNames::get_event_name(int)
   return "dummy";
 }
 
-#include "HttpSM.h"
+#include "proxy/http/HttpSM.h"
 HttpSM::HttpSM() : Continuation(nullptr), vc_table(this) {}
 
 void
@@ -324,13 +315,13 @@ HttpVCTable::HttpVCTable(HttpSM *) {}
 
 PostDataBuffers::~PostDataBuffers() {}
 
-#include "HttpTunnel.h"
+#include "proxy/http/HttpTunnel.h"
 HttpTunnel::HttpTunnel() : Continuation(nullptr) {}
 HttpTunnelConsumer::HttpTunnelConsumer() {}
 HttpTunnelProducer::HttpTunnelProducer() {}
 ChunkedHandler::ChunkedHandler() {}
 
-#include "HttpCacheSM.h"
+#include "proxy/http/HttpCacheSM.h"
 HttpCacheSM::HttpCacheSM() {}
 
 HttpCacheAction::HttpCacheAction() : sm(nullptr) {}
@@ -339,7 +330,7 @@ HttpCacheAction::cancel(Continuation *c)
 {
 }
 
-#include "PreWarmManager.h"
+#include "proxy/http/PreWarmManager.h"
 void
 PreWarmManager::reconfigure()
 {

@@ -23,7 +23,7 @@ sleep 30
 
 git branch --contains ${ghprbActualCommit} > /dev/null
 if [ $? = 0 -a ! -z "$ghprbActualCommit" ]; then
-    git diff HEAD~1 --name-only | egrep -E '^(build|iocore|proxy|tests|include|mgmt|plugins|proxy|src)/' > /dev/null
+    git diff HEAD~1 --name-only | egrep -E '^(build|tests|include|plugins|src)/' > /dev/null
     if [ $? = 1 ]; then
         echo "No relevant files changed, skipping run"
         exit 0
@@ -54,7 +54,6 @@ PROXY_VERIFIER_PREPARE="tests/prepare_proxy_verifier.sh"
 CCACHE=""
 WERROR=""
 DEBUG=""
-WCCP=""
 QUIC=""
 CURL=""
 AUTEST_DEBUG=""
@@ -64,7 +63,6 @@ PROXY_VERIFIER_ARGUMENT=""
 [ "1" == "$enable_ccache" ] && CCACHE="--enable-ccache"
 [ "1" == "$enable_werror" ] && WERROR="--enable-werror"
 [ "1" == "$enable_debug" ] && DEBUG="--enable-debug"
-[ "1" == "$enable_wccp" ] && WCCP="--enable-wccp"
 [ "1" == "$enable_quic" ] && QUIC="--with-openssl=/opt/openssl-quic"
 [ "1" == "$disable_curl" ] && CURL="--disable-curl"
 [ "1" == "$enable_autest_debug" ] && AUTEST_DEBUG="--debug"
@@ -78,7 +76,6 @@ mkdir -p ${INSTALL}
 echo "CCACHE: $CCACHE"
 echo "WERROR: $WERROR"
 echo "DEBUG: $DEBUG"
-echo "WCCP: $WCCP"
 echo "QUIC: $QUIC"
 echo "CURL: $CURL"
 
@@ -93,7 +90,6 @@ autoreconf -if
     --enable-experimental-plugins \
     --enable-example-plugins \
     ${CCACHE} \
-    ${WCCP} \
     ${QUIC} \
     ${WERROR} \
     ${DEBUG} \

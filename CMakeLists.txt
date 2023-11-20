@@ -15,6 +15,10 @@
 #
 #######################
 
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
+  message(FATAL_ERROR "In source builds are disabled.  Use a preset, -B or run from a different directory")
+endif()
+
 cmake_minimum_required(VERSION 3.20..3.27)
 project(ats VERSION 10.0.0)
 
@@ -29,13 +33,15 @@ math(EXPR TS_VERSION_NUMBER "${TS_VERSION_MAJOR} * 1000000 + ${TS_VERSION_MINOR}
 # with a newer standard than what our codebase currently has to comply with.
 set(CMAKE_CXX_STANDARD
     17
-    CACHE String "The C++ standard to compile with (default 17)"
+    CACHE STRING "The C++ standard to compile with (default 17)"
 )
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 list(APPEND CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE)
+
+include(layout)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   add_compile_definitions(DEBUG _DEBUG)
@@ -96,11 +102,13 @@ auto_option(
   HEADER_DEPENDS
   "sys/prctl.h"
 )
-auto_option(LUAJIT PACKAGE_DEPENDS LuaJIT)
+auto_option(LUAJIT PACKAGE_DEPENDS luajit)
 auto_option(UNWIND FEATURE_VAR TS_USE_REMOTE_UNWINDING PACKAGE_DEPENDS unwind)
 
 option(ENABLE_ASAN "Use address sanitizer (default OFF)")
 option(ENABLE_FUZZING "Enable fuzzing (default OFF)")
+option(ENABLE_FIPS "Enable fips compliance (default OFF)")
+option(ENABLE_EVENT_TRACKER "Enable event tracking (default OFF)")
 option(BUILD_REGRESSION_TESTING "Build regression tests (default ON)" ON)
 option(BUILD_EXPERIMENTAL_PLUGINS "Build the experimental plugins (default OFF)")
 set(DEFAULT_STACK_SIZE
@@ -117,6 +125,7 @@ endif()
 option(ENABLE_AUTEST "Setup autest (default OFF)")
 option(ENABLE_BENCHMARKS "Build benchmarks (default OFF)")
 option(EXTERNAL_YAML_CPP "Use external yaml-cpp (default OFF)")
+option(EXTERNAL_LIBSWOC "Use external libswoc (default OFF)")
 
 # Setup user
 # NOTE: this is the user trafficserver runs as
@@ -170,7 +179,6 @@ set(ENABLE_TPROXY
 )
 option(ENABLE_QUICHE "Use quiche (default OFF)")
 
-option(ENABLE_WCCP "Use WCCP v2 (default OFF)")
 option(ENABLE_EXAMPLE "Build example directory (default OFF)")
 set(TS_MAX_HOST_NAME_LEN
     256
@@ -196,7 +204,6 @@ option(ENABLE_CRIPTS "Build and install the Cripts library and headers  (default
 
 set(TS_USE_FAST_SDK ${ENABLE_FAST_SDK})
 
-set(TS_HAS_WCCP ${ENABLE_WCCP})
 set(TS_MAX_NUMBER_EVENT_THREADS ${MAX_EVENT_THREADS})
 set(TS_MAX_THREADS_IN_EACH_THREAD_TYPE ${MAX_THREADS_PER_TYPE})
 
@@ -209,12 +216,8 @@ include(CheckTypeSize)
 include(CheckSourceCompiles)
 include(CheckStructHasMember)
 
-check_include_file(alloca.h HAVE_ALLOCA_H)
-check_include_file(cpio.h HAVE_CPIO_H)
 check_include_file(dlfcn.h HAVE_DLFCN_H)
-check_include_file(float.h HAVE_FLOAT_H)
 check_include_file(stdlib.h HAVE_STDLIB_H)
-check_include_file(stdint.h HAVE_STDINT_H)
 check_include_file(ifaddrs.h HAVE_IFADDRS_H)
 check_include_file(inttypes.h HAVE_INTTYPES_H)
 check_include_file(string.h HAVE_STRING_H)
@@ -257,6 +260,12 @@ check_include_file(siginfo.h HAVE_SIGINFO_H)
 check_include_file(endian.h HAVE_ENDIAN_H)
 
 # Find libraries
+if(ENABLE_CRIPTS)
+  # needed for cripts
+  # however this might become a general requirement
+  find_package(fmt 8.1 REQUIRED)
+endif()
+
 find_package(Backtrace)
 if(Backtrace_FOUND)
   set(TS_HAS_BACKTRACE TRUE)
@@ -307,14 +316,6 @@ elseif(TS_HAS_MIMALLOC)
   link_libraries(mimalloc)
 endif()
 
-if(ENABLE_UNWIND)
-  find_package(unwind)
-  if(unwind_FOUND)
-    link_libraries(unwind::unwind)
-  endif()
-  set(TS_USE_REMOTE_UNWINDING ${unwind_FOUND})
-endif()
-
 if(ENABLE_QUICHE)
   find_package(quiche REQUIRED)
 
@@ -325,6 +326,8 @@ if(ENABLE_QUICHE)
     message(FATAL_ERROR "Use of BoringSSL is required if quiche is used.")
   endif()
 endif()
+
+find_package(maxminddb) # Header_rewrite experimental/maxmind_acl
 
 if(ENABLE_ASAN)
   add_compile_options(-fsanitize=address)
@@ -345,6 +348,15 @@ set(HAVE_NCURSES_NCURSES_H ${CURSES_HAVE_NCURSES_NCURSES_H})
 if(EXTERNAL_YAML_CPP)
   message(STATUS "Looking for external yaml-cpp")
   find_package(yaml-cpp "0.8.0" REQUIRED)
+  set(YAMLCPP_LIB_VERSION yaml-cpp_VERSION)
+  find_package_message(
+    yaml-cpp "Found yaml-cpp: ${yaml-cpp_CONFIG} (found version \"${yaml-cpp_VERSION}\")" "${yaml-cpp_CONFIG}"
+  )
+endif()
+
+if(EXTERNAL_LIBSWOC)
+  message(STATUS "Looking for external libswoc")
+  find_package(libswoc REQUIRED)
 endif()
 
 # curl is used in traffic_top
@@ -358,6 +370,7 @@ include(ConfigureTransparentProxy)
 include(find_ccache)
 
 # Check for IO faculties
+set(CMAKE_REQUIRED_FLAGS -fPIC)
 check_symbol_exists(IN6_IS_ADDR_UNSPECIFIED "netinet/in.h" TS_HAS_IN6_IS_ADDR_UNSPECIFIED)
 check_symbol_exists(IP_TOS "netinet/ip.h" TS_HAS_IP_TOS)
 check_symbol_exists(SO_MARK "sys/socket.h" TS_HAS_SO_MARK)
@@ -450,6 +463,7 @@ check_symbol_exists(SSL_get_all_async_fds openssl/ssl.h TS_USE_TLS_ASYNC)
 check_symbol_exists(TLS1_3_VERSION "openssl/ssl.h" TS_USE_TLS13)
 check_symbol_exists(MD5_Init "openssl/md5.h" HAVE_MD5_INIT)
 check_symbol_exists(sysctlbyname "sys/sysctl.h" HAVE_SYSCTLBYNAME)
+unset(CMAKE_REQUIRED_FLAGS)
 
 set(HAVE_SSL_READ_EARLY_DATA ${TS_HAS_TLS_EARLY_DATA})
 
@@ -463,6 +477,7 @@ check_struct_has_member("struct sockaddr_in" sin_len "netinet/in.h" HAVE_STRUCT_
 check_struct_has_member("struct sockaddr_in6" sin6_len "netinet/in.h" HAVE_STRUCT_SOCKADDR_IN6_SIN6_LEN)
 check_struct_has_member("struct stat" st_mtimespec "sys/stat.h" HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC)
 check_struct_has_member("struct stat" st_mtim "sys/stat.h" HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC)
+check_struct_has_member("struct mptcp_info" mptcpi_subflows "linux/mptcp.h" HAVE_STRUCT_MPTCP_INFO_SUBFLOWS)
 
 # find resolv library if available
 find_package(resolv)
@@ -533,6 +548,11 @@ if(ENABLE_FUZZING)
   endif()
 endif()
 
+set(TS_ENABLE_FIPS ${ENABLE_FIPS})
+if(ENABLE_EVENT_TRACKER)
+  add_compile_definitions(ENABLE_EVENT_TRACKER)
+endif()
+
 # Common includes for everyone
 include_directories(${CMAKE_SOURCE_DIR}/include ${CMAKE_BINARY_DIR}/include)
 
@@ -541,27 +561,16 @@ add_subdirectory(lib)
 # Keep this after lib because lib is made up of third party libraries, so if
 # there are warnings, we can't do anything about it.
 # Note: -DCMAKE_COMPILE_WARNING_AS_ERROR=ON will turn warnings into errors.
-add_compile_options(-pipe -Wall -Wextra -Wno-unused-parameter -Wno-cast-function-type)
+add_compile_options(-pipe -Wall -Wextra -Wno-unused-parameter)
 add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-Wno-noexcept-type;-Wsuggest-override>")
 add_compile_options("$<$<CXX_COMPILER_ID:GNU>:-Wno-format-truncation;-Wno-stringop-overflow>")
 
 if(NOT EXTERNAL_YAML_CPP)
   include(subproject_version)
   subproject_version(YAML_CPP YAMLCPP_LIB_VERSION)
-else()
-  set(YAMLCPP_LIB_VERSION yaml-cpp_VERSION)
 endif()
 
 set(rel_cachedir var/trafficserver)
-
-if(EXISTS "${PROJECT_SOURCE_DIR}/include/ink_autoconf.h")
-  message(STATUS "Autoconf build detected in source tree. Removing autoconf headers.")
-endif()
-
-# In-tree autoconf configuration causes duplicate definitions of some symbols
-# in generated headers. If the files don't exist, no error is emitted.
-file(REMOVE "${PROJECT_SOURCE_DIR}/include/tscore/ink_config.h")
-file(REMOVE "${PROJECT_SOURCE_DIR}/include/ink_autoconf.h")
 
 configure_file(configs/storage.config.default.in configs/storage.config.default)
 configure_file(configs/records.yaml.default.in configs/records.yaml.default)
@@ -572,10 +581,11 @@ add_subdirectory(src/tscpp/util)
 add_subdirectory(src/tscpp/api)
 add_subdirectory(src/tscore)
 add_subdirectory(src/records)
-add_subdirectory(iocore)
-add_subdirectory(proxy)
-add_subdirectory(mgmt/config)
-add_subdirectory(mgmt/rpc)
+add_subdirectory(src/iocore)
+add_subdirectory(src/proxy)
+add_subdirectory(src/shared)
+add_subdirectory(src/mgmt/config)
+add_subdirectory(src/mgmt/rpc)
 add_subdirectory(src/api)
 add_subdirectory(src/traffic_crashlog)
 add_subdirectory(src/traffic_server)
@@ -588,15 +598,8 @@ if(CURSES_FOUND)
   add_subdirectory(src/traffic_top)
 endif()
 add_subdirectory(src/traffic_via)
-if(ENABLE_WCCP)
-  add_subdirectory(src/wccp)
-  add_subdirectory(src/traffic_wccp)
-endif()
 if(ENABLE_CRIPTS)
   add_subdirectory(src/cripts)
-endif()
-if(BUILD_TESTING)
-  add_subdirectory(src/tests)
 endif()
 if(ENABLE_AUTEST)
   add_subdirectory(tests)
@@ -605,12 +608,20 @@ if(ENABLE_FUZZING)
   add_subdirectory(tests/fuzzing)
 endif()
 add_subdirectory(plugins)
+
+# set up auto options for experimental plugins
+include(ExperimentalPlugins)
+
 add_subdirectory(configs)
 if(ENABLE_EXAMPLE)
   add_subdirectory(example)
 endif()
 
 if(ENABLE_DOCS)
+  set(DOC_LANG
+      en
+      CACHE STRING "Document language option"
+  )
   add_subdirectory(doc)
 endif()
 add_subdirectory(rc)
@@ -647,11 +658,8 @@ endfunction(add_clang_format_target)
 
 add_clang_format_target(src)
 add_clang_format_target(example)
-add_clang_format_target(iocore)
 add_clang_format_target(include)
-add_clang_format_target(mgmt)
 add_clang_format_target(plugins)
-add_clang_format_target(proxy)
 add_clang_format_target(tools)
 add_clang_format_target(tests)
 
@@ -671,10 +679,18 @@ add_custom_target(
   VERBATIM
 )
 
-# Add a format target that depends upon both clang-format and autopep8.
+add_custom_target(
+  cmake-format
+  ${CMAKE_SOURCE_DIR}/tools/cmake-format.sh ${CMAKE_SOURCE_DIR}
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  COMMENT "formatting CMakeLists.txt files"
+  VERBATIM
+)
+
+# Add a format target that runs all the formatters.
 add_custom_target(
   format
-  DEPENDS clang-format autopep8
+  DEPENDS clang-format autopep8 cmake-format
   COMMENT "formatting all files"
 )
 
@@ -692,8 +708,14 @@ add_custom_target(
 )
 
 # Create an empty directories for ATS runtime
-install(DIRECTORY DESTINATION var/log/trafficserver)
-install(DIRECTORY DESTINATION var/trafficserver)
+install(DIRECTORY DESTINATION ${CMAKE_INSTALL_LOGDIR})
+install(DIRECTORY DESTINATION ${CMAKE_INSTALL_RUNSTATEDIR})
+install(DIRECTORY DESTINATION ${CMAKE_INSTALL_CACHEDIR})
+
+install(CODE "set(OWNER_USER ${TS_PKGSYSUSER})")
+install(CODE "set(OWNER_GROUP ${TS_PKGSYSGROUP})")
+install(CODE "set(CHOWN_DIRS ${CMAKE_INSTALL_LOGDIR} ${CMAKE_INSTALL_RUNSTATEDIR} ${CMAKE_INSTALL_CACHEDIR})")
+install(SCRIPT cmake/post_install.cmake)
 
 # Display build summary
 include(CMakePrintHelpers)
@@ -715,5 +737,8 @@ cmake_print_variables(TS_PKGSYSGROUP)
 cmake_print_variables(BUILD_MACHINE)
 cmake_print_variables(DEFAULT_STACK_SIZE)
 cmake_print_variables(CMAKE_INSTALL_RPATH)
+if(DEFINED DOC_LANG)
+  cmake_print_variables(DOC_LANG)
+endif(DEFINED DOC_LANG)
 
 print_auto_options_summary()

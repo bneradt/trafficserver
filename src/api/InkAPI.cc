@@ -31,59 +31,60 @@
 #include "tscore/ink_base64.h"
 #include "tscore/Encoding.h"
 #include "tscore/PluginUserArgs.h"
-#include "tscore/I_Layout.h"
-#include "tscore/I_Version.h"
+#include "tscore/Layout.h"
 #include "tscore/Diags.h"
 #include "api/Metrics.h"
 
+#include "tscore/Version.h"
 #include "api/InkAPIInternal.h"
-#include "Log.h"
-#include "URL.h"
-#include "MIME.h"
-#include "HTTP.h"
-#include "ProxySession.h"
-#include "Http2ClientSession.h"
-#include "PoolableSession.h"
-#include "HttpAPIHooks.h"
-#include "HttpSM.h"
-#include "HttpConfig.h"
-#include "P_Net.h"
-#include "P_SSLNextProtocolAccept.h"
-#include "P_SSLNetVConnection.h"
-#include "P_UDPNet.h"
-#include "P_HostDB.h"
-#include "P_Cache.h"
-#include "records/I_RecCore.h"
-#include "P_SSLConfig.h"
-#include "P_SSLClientUtils.h"
-#include "SSLAPIHooks.h"
-#include "SSLDiags.h"
-#include "SSLInternal.h"
-#include "TLSBasicSupport.h"
-#include "ConfigProcessor.h"
-#include "Plugin.h"
-#include "LogObject.h"
-#include "LogConfig.h"
-#include "PluginVC.h"
-#include "HttpSessionAccept.h"
-#include "PluginVC.h"
+#include "proxy/logging/Log.h"
+#include "proxy/hdrs/URL.h"
+#include "proxy/hdrs/MIME.h"
+#include "proxy/hdrs/HTTP.h"
+#include "proxy/ProxySession.h"
+#include "proxy/http2/Http2ClientSession.h"
+#include "proxy/PoolableSession.h"
+#include "proxy/HttpAPIHooks.h"
+#include "proxy/http/HttpSM.h"
+#include "proxy/http/HttpConfig.h"
+#include "../iocore/net/P_Net.h"
+#include "../iocore/net/P_SSLNextProtocolAccept.h"
+#include "../iocore/net/P_SSLNetVConnection.h"
+#include "../iocore/net/P_UDPNet.h"
+#include "../iocore/hostdb/P_HostDB.h"
+#include "../iocore/cache/P_Cache.h"
+#include "records/RecCore.h"
+#include "../iocore/net/P_SSLConfig.h"
+#include "../iocore/net/P_SSLClientUtils.h"
+#include "iocore/net/ConnectionTracker.h"
+#include "iocore/net/SSLAPIHooks.h"
+#include "iocore/net/SSLDiags.h"
+#include "iocore/net/SSLInternal.h"
+#include "iocore/net/TLSBasicSupport.h"
+#include "iocore/eventsystem/ConfigProcessor.h"
+#include "proxy/Plugin.h"
+#include "proxy/logging/LogObject.h"
+#include "proxy/logging/LogConfig.h"
+#include "proxy/PluginVC.h"
+#include "proxy/http/HttpSessionAccept.h"
+#include "proxy/PluginVC.h"
 #include "api/FetchSM.h"
 #include "api/LifecycleAPIHooks.h"
-#include "HttpDebugNames.h"
-#include "I_AIO.h"
-#include "I_Tasks.h"
+#include "proxy/http/HttpDebugNames.h"
+#include "iocore/aio/AIO.h"
+#include "iocore/eventsystem/Tasks.h"
 
-#include "P_OCSPStapling.h"
-#include "records/I_RecordsConfig.h"
-#include "records/I_RecDefs.h"
-#include "records/I_RecCore.h"
+#include "../iocore/net/P_OCSPStapling.h"
+#include "records/RecordsConfig.h"
+#include "records/RecDefs.h"
+#include "records/RecCore.h"
 #include "records/RecYAMLDecoder.h"
-#include "I_Machine.h"
-#include "HttpProxyServerMain.h"
+#include "iocore/utils/Machine.h"
+#include "proxy/http/HttpProxyServerMain.h"
 #include "shared/overridable_txn_vars.h"
-#include "config/FileManager.h"
+#include "mgmt/config/FileManager.h"
 
-#include "rpc/jsonrpc/JsonRPC.h"
+#include "mgmt/rpc/jsonrpc/JsonRPC.h"
 #include <swoc/bwf_base.h>
 #include "ts/ts.h"
 
@@ -104,8 +105,6 @@
   _HDR.m_heap = ((HdrHeapSDKHandle *)_BUF_PTR)->m_heap; \
   _HDR.m_http = (HTTPHdrImpl *)_OBJ_PTR;                \
   _HDR.m_mime = _HDR.m_http->m_fields_impl;
-
-extern AppVersionInfo appVersionInfo;
 
 /** Reservation for a user arg.
  */
@@ -395,7 +394,7 @@ namespace c
 } // end namespace tsapi
 
 ConfigUpdateCbTable *global_config_cbs = nullptr;
-static ts::Metrics &global_api_metrics = ts::Metrics::getInstance();
+static ts::Metrics &global_api_metrics = ts::Metrics::instance();
 
 static char traffic_server_version[128] = "";
 static int ts_major_version             = 0;
@@ -1044,91 +1043,6 @@ FileImpl::fgets(char *buf, size_t length)
 
 ////////////////////////////////////////////////////////////////////
 //
-// APIHook, APIHooks, HttpAPIHooks, HttpHookState
-//
-////////////////////////////////////////////////////////////////////
-
-void
-HttpHookState::init(TSHttpHookID id, HttpAPIHooks const *global, HttpAPIHooks const *ssn, HttpAPIHooks const *txn)
-{
-  _id = id;
-
-  if (global) {
-    _global.init(global, id);
-  } else {
-    _global.clear();
-  }
-
-  if (ssn) {
-    _ssn.init(ssn, id);
-  } else {
-    _ssn.clear();
-  }
-
-  if (txn) {
-    _txn.init(txn, id);
-  } else {
-    _txn.clear();
-  }
-}
-
-APIHook const *
-HttpHookState::getNext()
-{
-  APIHook const *zret = nullptr;
-
-#ifdef DEBUG
-  Debug("plugin", "computing next callback for hook %d", _id);
-#endif
-
-  if (zret = _global.candidate(); zret) {
-    ++_global;
-  } else if (zret = _ssn.candidate(); zret) {
-    ++_ssn;
-  } else if (zret = _txn.candidate(); zret) {
-    ++_txn;
-  }
-
-  return zret;
-}
-
-void
-HttpHookState::Scope::init(HttpAPIHooks const *feature_hooks, TSHttpHookID id)
-{
-  _hooks = (*feature_hooks)[id];
-
-  _p = nullptr;
-  _c = _hooks->head();
-}
-
-APIHook const *
-HttpHookState::Scope::candidate()
-{
-  /// Simply returns _c hook for now. Later will do priority checking here
-
-  // Check to see if a hook has been added since this was initialized empty
-  if (nullptr == _c && nullptr == _p && _hooks != nullptr) {
-    _c = _hooks->head();
-  }
-  return _c;
-}
-
-void
-HttpHookState::Scope::operator++()
-{
-  _p = _c;
-  _c = _c->next();
-}
-
-void
-HttpHookState::Scope::clear()
-{
-  _hooks = nullptr;
-  _p = _c = nullptr;
-}
-
-////////////////////////////////////////////////////////////////////
-//
 // api_init
 //
 ////////////////////////////////////////////////////////////////////
@@ -1397,7 +1311,7 @@ api_init()
     global_config_cbs = new ConfigUpdateCbTable;
 
     // Setup the version string for returning to plugins
-    ink_strlcpy(traffic_server_version, appVersionInfo.VersionStr, sizeof(traffic_server_version));
+    ink_strlcpy(traffic_server_version, AppVersionInfo::get_version().version(), sizeof(traffic_server_version));
     // Extract the elements.
     // coverity[secure_coding]
     if (sscanf(traffic_server_version, "%d.%d.%d", &ts_major_version, &ts_minor_version, &ts_patch_version) != 3) {
@@ -4096,12 +4010,12 @@ tsapi::c::TSConfigDataGet(TSConfig configp)
 ////////////////////////////////////////////////////////////////////
 
 void
-tsapi::c::TSMgmtUpdateRegister(TSCont contp, const char *plugin_name)
+tsapi::c::TSMgmtUpdateRegister(TSCont contp, const char *plugin_name, const char *plugin_file_name)
 {
   sdk_assert(sdk_sanity_check_iocore_structure(contp) == TS_SUCCESS);
   sdk_assert(sdk_sanity_check_null_ptr((void *)plugin_name) == TS_SUCCESS);
 
-  global_config_cbs->insert((INKContInternal *)contp, plugin_name);
+  global_config_cbs->insert((INKContInternal *)contp, plugin_name, plugin_file_name);
 }
 
 TSReturnCode
@@ -6251,20 +6165,20 @@ tsapi::c::TSHttpTxnLookingUpTypeGet(TSHttpTxn txnp)
 int
 tsapi::c::TSHttpCurrentClientConnectionsGet()
 {
-  return Metrics::read(http_rsb.current_client_connections);
+  return Metrics::Gauge::load(http_rsb.current_client_connections);
 }
 
 int
 tsapi::c::TSHttpCurrentActiveClientConnectionsGet()
 {
-  return Metrics::read(http_rsb.current_active_client_connections);
+  return Metrics::Gauge::load(http_rsb.current_active_client_connections);
 }
 
 int
 tsapi::c::TSHttpCurrentIdleClientConnectionsGet()
 {
-  int64_t total  = Metrics::read(http_rsb.current_client_connections);
-  int64_t active = Metrics::read(http_rsb.current_active_client_connections);
+  int64_t total  = Metrics::Gauge::load(http_rsb.current_client_connections);
+  int64_t active = Metrics::Gauge::load(http_rsb.current_active_client_connections);
 
   if (total >= active) {
     return static_cast<int>(total - active);
@@ -6276,13 +6190,13 @@ tsapi::c::TSHttpCurrentIdleClientConnectionsGet()
 int
 tsapi::c::TSHttpCurrentCacheConnectionsGet()
 {
-  return Metrics::read(http_rsb.current_cache_connections);
+  return Metrics::Gauge::load(http_rsb.current_cache_connections);
 }
 
 int
 tsapi::c::TSHttpCurrentServerConnectionsGet()
 {
-  return Metrics::read(http_rsb.current_server_connections);
+  return Metrics::Gauge::load(http_rsb.current_server_connections);
 }
 
 /* HTTP alternate selection */
@@ -7085,7 +6999,7 @@ tsapi::c::TSCacheScan(TSCont contp, TSCacheKey key, int KB_per_second)
 int
 tsapi::c::TSStatCreate(const char *the_name, TSRecordDataType the_type, TSStatPersistence persist, TSStatSync sync)
 {
-  int id = global_api_metrics.newMetric(the_name);
+  int id = Metrics::Gauge::create(the_name); // Gauges allows for all "int" operations
 
   if (id == ts::Metrics::NOT_FOUND) {
     return TS_ERROR;
@@ -7098,14 +7012,14 @@ void
 tsapi::c::TSStatIntIncrement(int id, TSMgmtInt amount)
 {
   sdk_assert(sdk_sanity_check_stat_id(id) == TS_SUCCESS);
-  global_api_metrics[id].fetch_add(amount, ts::Metrics::MEMORY_ORDER);
+  global_api_metrics.increment(id, amount);
 }
 
 void
 tsapi::c::TSStatIntDecrement(int id, TSMgmtInt amount)
 {
   sdk_assert(sdk_sanity_check_stat_id(id) == TS_SUCCESS);
-  global_api_metrics[id].fetch_sub(amount, ts::Metrics::MEMORY_ORDER);
+  global_api_metrics.decrement(id, amount);
 }
 
 tsapi::c::TSMgmtInt
@@ -8300,16 +8214,16 @@ _conf_to_memberp(TSOverridableConfigKey conf, OverridableHttpConfigParams *overr
     ret = _memberp_to_generic(&overridableHttpConfig->allow_half_open, conv);
     break;
   case TS_CONFIG_HTTP_PER_SERVER_CONNECTION_MAX:
-    ret  = &overridableHttpConfig->outbound_conntrack.max;
-    conv = &OutboundConnTrack::MAX_CONV;
+    ret  = &overridableHttpConfig->connection_tracker_config.server_max;
+    conv = &ConnectionTracker::MAX_SERVER_CONV;
     break;
   case TS_CONFIG_HTTP_SERVER_MIN_KEEP_ALIVE_CONNS:
-    ret  = &overridableHttpConfig->outbound_conntrack.min;
-    conv = &OutboundConnTrack::MIN_CONV;
+    ret  = &overridableHttpConfig->connection_tracker_config.server_min;
+    conv = &ConnectionTracker::MIN_SERVER_CONV;
     break;
   case TS_CONFIG_HTTP_PER_SERVER_CONNECTION_MATCH:
-    ret  = &overridableHttpConfig->outbound_conntrack.match;
-    conv = &OutboundConnTrack::MATCH_CONV;
+    ret  = &overridableHttpConfig->connection_tracker_config.server_match;
+    conv = &ConnectionTracker::SERVER_MATCH_CONV;
     break;
   case TS_CONFIG_HTTP_HOST_RESOLUTION_PREFERENCE:
     ret  = &overridableHttpConfig->host_res_data;

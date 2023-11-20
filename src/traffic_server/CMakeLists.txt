@@ -15,15 +15,12 @@
 #
 #######################
 
-add_executable(
-  traffic_server Crash.cc EventName.cc SocksProxy.cc traffic_server.cc RpcAdminPubHandlers.cc
-                 ${CMAKE_SOURCE_DIR}/src/shared/overridable_txn_vars.cc
-)
-target_include_directories(traffic_server PRIVATE ${IOCORE_INCLUDE_DIRS} ${PROXY_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/mgmt)
+add_executable(traffic_server Crash.cc SocksProxy.cc traffic_server.cc RpcAdminPubHandlers.cc)
 target_link_libraries(
   traffic_server
   PRIVATE ts::tscore
           ts::tsapi
+          ts::overridable_txn_vars
           ts::tsapicore
           ts::http
           ts::http_remap
@@ -41,7 +38,7 @@ target_link_libraries(
           ts::inknet
           ts::records
           ts::inkevent
-          libswoc
+          libswoc::libswoc
           ts::jsonrpc_protocol
           ts::jsonrpc_server
           ts::rpcpublichandlers

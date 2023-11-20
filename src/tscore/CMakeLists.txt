@@ -54,7 +54,6 @@ add_library(
   MatcherUtils.cc
   ParseRules.cc
   Random.cc
-  Regex.cc
   Regression.cc
   SourceLocation.cc
   TextBuffer.cc
@@ -111,7 +110,16 @@ else()
   target_sources(tscore PRIVATE HKDF_openssl.cc)
 endif()
 
-target_link_libraries(tscore PUBLIC OpenSSL::Crypto PCRE::PCRE libswoc yaml-cpp::yaml-cpp resolv::resolv)
+target_link_libraries(
+  tscore
+  PUBLIC OpenSSL::Crypto
+         PCRE::PCRE
+         libswoc::libswoc
+         yaml-cpp::yaml-cpp
+         resolv::resolv
+         ts::tsapicore
+         ts::tscpputil
+)
 
 if(TS_USE_POSIX_CAP)
   target_link_libraries(tscore PUBLIC cap::cap)
@@ -149,10 +157,8 @@ if(BUILD_TESTING)
     unit_tests/test_PriorityQueue.cc
     unit_tests/test_Ptr.cc
     unit_tests/test_Random.cc
-    unit_tests/test_Regex.cc
     unit_tests/test_Throttler.cc
     unit_tests/test_Tokenizer.cc
-    unit_tests/test_Version.cc
     unit_tests/test_arena.cc
     unit_tests/test_ink_inet.cc
     unit_tests/test_ink_memory.cc
@@ -160,10 +166,11 @@ if(BUILD_TESTING)
     unit_tests/test_layout.cc
     unit_tests/test_scoped_resource.cc
     unit_tests/unit_test_main.cc
+    unit_tests/test_Version.cc
   )
   target_link_libraries(
     test_tscore
-    PRIVATE libswoc
+    PRIVATE libswoc::libswoc
             ts::tscore
             ts::tsapicore
             yaml-cpp::yaml-cpp
@@ -176,7 +183,6 @@ if(BUILD_TESTING)
   if(TS_USE_HWLOC)
     target_link_libraries(test_tscore PRIVATE hwloc::hwloc)
   endif()
-  target_include_directories(test_tscore PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
   add_test(NAME test_tscore COMMAND $<TARGET_FILE:test_tscore>)
 endif()

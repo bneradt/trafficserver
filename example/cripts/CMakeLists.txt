@@ -28,7 +28,6 @@
 
 add_atsplugin(cripts_example1 example1.cc)
 
-target_include_directories(cripts_example1 PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(cripts_example1 PRIVATE ts::cripts)
 
 # This is a hack, but useful to run clang-tidy across all of Cripts
@@ -42,5 +41,5 @@ set(cript-includes -I${CMAKE_SOURCE_DIR}/include -I${CMAKE_SOURCE_DIR}/lib/swoc/
 
 add_custom_target(
   cripts-clang-tidy COMMAND clang-tidy --config-file ${PROJECT_SOURCE_DIR}/tools/cripts/clang-tidy.conf --fix
-                            ${PROJECT_SOURCE_DIR}/plugins/cripts/example1.cc -- -std=c++17 ${cript-includes}
+                            ${PROJECT_SOURCE_DIR}/example/cripts/example1.cc -- -std=c++17 ${cript-includes}
 )

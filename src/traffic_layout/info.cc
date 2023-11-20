@@ -23,13 +23,21 @@
 
 #include <fcntl.h>
 #include <openssl/crypto.h>
-#include "tscore/I_Layout.h"
+#include "tscore/Layout.h"
 #include "tscore/Filenames.h"
 #include "tscpp/util/ts_bw.h"
-#include "records/I_RecProcess.h"
-#include "records/I_RecordsConfig.h"
+#include "records/RecProcess.h"
+#include "records/RecordsConfig.h"
 #include "info.h"
-#include "RecProcess.h"
+#include "iocore/eventsystem/RecProcess.h"
+
+#if __has_include("pcre/pcre.h")
+#include <pcre/pcre.h>
+#elif __has_include("pcre.h")
+#include <pcre.h>
+#else
+#error "Unable to locate PCRE heeader"
+#endif
 
 #if TS_USE_HWLOC
 #include <hwloc.h>
@@ -115,7 +123,6 @@ produce_features(bool json)
   print_feature("TS_IP_TRANSPARENT", TS_IP_TRANSPARENT, json);
   print_feature("TS_HAS_128BIT_CAS", TS_HAS_128BIT_CAS, json);
   print_feature("TS_HAS_TESTS", TS_HAS_TESTS, json);
-  print_feature("TS_HAS_WCCP", TS_HAS_WCCP, json);
   print_feature("TS_MAX_THREADS_IN_EACH_THREAD_TYPE", TS_MAX_THREADS_IN_EACH_THREAD_TYPE, json);
   print_feature("TS_MAX_NUMBER_EVENT_THREADS", TS_MAX_NUMBER_EVENT_THREADS, json);
   print_feature("TS_MAX_HOST_NAME_LEN", TS_MAX_HOST_NAME_LEN, json);

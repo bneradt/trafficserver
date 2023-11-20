@@ -23,6 +23,8 @@
 
 #include "shared/overridable_txn_vars.h"
 
+#include "iocore/net/ConnectionTracker.h"
+
 const std::unordered_map<std::string_view, std::tuple<const TSOverridableConfigKey, const TSRecordDataType>>
   ts::Overridable_Txn_Vars({
     {"proxy.config.srv_enabled",                                       {TS_CONFIG_SRV_ENABLED, TS_RECORDDATATYPE_INT}                           },
@@ -85,11 +87,11 @@ const std::unordered_map<std::string_view, std::tuple<const TSOverridableConfigK
     {"proxy.config.http.negative_caching_lifetime",                    {TS_CONFIG_HTTP_NEGATIVE_CACHING_LIFETIME, TS_RECORDDATATYPE_INT}        },
     {"proxy.config.http.default_buffer_water_mark",                    {TS_CONFIG_HTTP_DEFAULT_BUFFER_WATER_MARK, TS_RECORDDATATYPE_INT}        },
     {"proxy.config.http.cache.heuristic_lm_factor",                    {TS_CONFIG_HTTP_CACHE_HEURISTIC_LM_FACTOR, TS_RECORDDATATYPE_FLOAT}      },
-    {OutboundConnTrack::CONFIG_VAR_MAX,                                {TS_CONFIG_HTTP_PER_SERVER_CONNECTION_MAX, TS_RECORDDATATYPE_INT}        },
-    {OutboundConnTrack::CONFIG_VAR_MIN,                                {TS_CONFIG_HTTP_SERVER_MIN_KEEP_ALIVE_CONNS, TS_RECORDDATATYPE_INT}      },
+    {ConnectionTracker::CONFIG_SERVER_VAR_MAX,                         {TS_CONFIG_HTTP_PER_SERVER_CONNECTION_MAX, TS_RECORDDATATYPE_INT}        },
+    {ConnectionTracker::CONFIG_SERVER_VAR_MIN,                         {TS_CONFIG_HTTP_SERVER_MIN_KEEP_ALIVE_CONNS, TS_RECORDDATATYPE_INT}      },
     {"proxy.config.http.anonymize_remove_client_ip",                   {TS_CONFIG_HTTP_ANONYMIZE_REMOVE_CLIENT_IP, TS_RECORDDATATYPE_INT}       },
     {"proxy.config.http.cache.open_read_retry_time",                   {TS_CONFIG_HTTP_CACHE_OPEN_READ_RETRY_TIME, TS_RECORDDATATYPE_INT}       },
-    {OutboundConnTrack::CONFIG_VAR_MATCH,                              {TS_CONFIG_HTTP_PER_SERVER_CONNECTION_MATCH, TS_RECORDDATATYPE_INT}      },
+    {ConnectionTracker::CONFIG_SERVER_VAR_MATCH,                       {TS_CONFIG_HTTP_PER_SERVER_CONNECTION_MATCH, TS_RECORDDATATYPE_INT}      },
     {"proxy.config.http.parent_proxy.fail_threshold",                  {TS_CONFIG_HTTP_PARENT_PROXY_FAIL_THRESHOLD, TS_RECORDDATATYPE_INT}      },
     {"proxy.config.http.cache.ignore_authentication",                  {TS_CONFIG_HTTP_CACHE_IGNORE_AUTHENTICATION, TS_RECORDDATATYPE_INT}      },
     {"proxy.config.http.anonymize_remove_user_agent",                  {TS_CONFIG_HTTP_ANONYMIZE_REMOVE_USER_AGENT, TS_RECORDDATATYPE_INT}      },

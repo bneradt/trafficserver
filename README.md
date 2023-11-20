@@ -18,6 +18,113 @@ Traffic Server is a high-performance building block for cloud services.
 It's more than just a caching proxy server; it also has support for
 plugins to build large scale web applications.
 
+# Important notice to ATS developers
+
+ATS is transitioning to cmake as its build system.  At the moment, the autotools build is broken and will soon be removed from the repository.  Below is a quick-start guide to cmake:
+
+### Step 1: Configuration
+
+With cmake, you definitely want to create an out-of-source build.  You will give that directory to every cmake command.  For these examples, it will just be `build`
+
+```
+$ cmake -B build
+```
+
+This will configure the project with defaults.
+
+If you want to customize the build, you can pass values for variables on the command line.  Or, you can interactively change them using the `ccmake` program.
+
+```
+$ cmake -B build -DCMAKE_INSTALL_PREFIX=/tmp/ats -DBUILD_EXPERIMENTAL_PLUGINS=ON
+```
+
+-- or --
+
+```
+$ ccmake build
+```
+
+#### Specifying locations of dependencies
+
+To specify the location of a dependency (like --with-*), you generally set a variable with the `ROOT`. The big exception to this is for openssl. This variable is called `OPENSSL_ROOT_DIR`
+
+```
+$ cmake -B build -Djemalloc_ROOT=/opt/jemalloc -DPCRE_ROOT=/opt/edge -DOPENSSL_ROOT_DIR=/opt/boringssl
+```
+
+#### Using presets to configure the build
+
+cmake has a feature for grouping configurations together to make configuration and reproduction easier.  The file CMakePresets.json declares presets that you can use from the command line.  You can provide your own CMakeUserPresets.json and further refine those via inheritance:
+
+```
+$ cmake --preset dev
+```
+
+You can start out your user presets by just copying `CMakePresets.json` and removing everything in `configurePresets`
+
+Here is an example user preset:
+
+```
+
+    {
+      "name": "clang",
+      "hidden": true,
+      "environment": {
+        "LDFLAGS": "-L/opt/homebrew/opt/llvm/lib -L/opt/homebrew/opt/llvm/lib/c++ -Wl,-rpath,/opt/homebrew/opt/llvm/lib/c++ -fuse-ld=/opt/homebrew/opt/llvm/bin/ld64.lld",
+        "CPPFLAGS": "-I/opt/homebrew/opt/llvm/include",
+        "CXXFLAGS": "-stdlib=libc++",
+        "CC": "/opt/homebrew/opt/llvm/bin/clang",
+        "CXX": "/opt/homebrew/opt/llvm/bin/clang++"
+      }
+    },
+    {
+      "name": "mydev",
+      "displayName": "my development",
+      "description": "My Development Presets",
+      "binaryDir": "${sourceDir}/build-dev-clang",
+      "inherits": ["clang", "dev"],
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "/opt/ats-cmake",
+        "jemalloc_ROOT": "/opt/homebrew",
+        "ENABLE_LUAJIT": false,
+        "ENABLE_JEMALLOC": true,
+        "ENABLE_MIMALLOC": false,
+        "ENABLE_MALLOC_ALLOCATOR": true,
+        "BUILD_EXPERIMENTAL_PLUGINS": true,
+        "BUILD_REGRESSION_TESTING": true
+      }
+    },
+```
+
+And then use it like:
+
+```
+cmake --preset mydev
+```
+
+## Building the project
+
+```
+$ cmake --build build
+```
+
+```
+$ cmake --build build -t traffic_server
+```
+
+## running tests
+
+```
+$ cd build
+$ ctest
+```
+
+## installing
+
+```
+$ cmake --install build
+```
+
 ## DIRECTORY STRUCTURE
 ```
 trafficserver ............. Top src dir
@@ -67,10 +174,8 @@ trafficserver ............. Top src dir
 │   ├── traffic_server .... Main proxy server
 │   ├── traffic_top ....... Top like tool for viewing Traffic Server statistics
 │   ├── traffic_via ....... Tool for decoding the Traffic Server Via header codes
-│   ├── traffic_wccp ...... Program speaking the client side of the WCCP
 │   ├── tscore ............ Base / core library
 │   ├── tscpp ............. C++ api wrapper for plugin developers
-│   └── wccp .............. WCCP implementation
 ├── tests ................. Different tests for Traffic Server
 ├── tools ................. Directory of various tools
 ├── INSTALL ............... Build and installation guide
@@ -94,9 +199,8 @@ trafficserver ............. Top src dir
 
 ### Fedora / CentOS / RHEL:
 ```
-autoconf
-automake
-libtool
+cmake
+ninja
 pkgconfig
 gcc/g++ or clang/clang++
 openssl-devel
@@ -104,14 +208,12 @@ pcre-devel
 ncurses-devel and libcurl-devel(optional, needed for traffic_top)
 libcap-devel (optional, highly recommended)
 hwloc-devel (optional, highly recommended)
-flex (optional, needed for e.g. WCCP)
 ```
 
 ### Ubuntu / Debian
 ```
-autoconf
-automake
-libtool
+cmake
+ninja
 pkg-config
 gcc/g++ or clang/clang++
 zlib1g-dev
@@ -121,7 +223,6 @@ libcap-dev (optional, highly recommended)
 libhwloc-dev (optional, highly recommended)
 libncurses5-dev (optional, required for e.g.: traffic_top)
 libcurl4-openssl-dev (optional, required for e.g.: traffic_top)
-flex (optional, required for e.g. WCCP)
 ```
 
 ### Alpine Linux
@@ -130,44 +231,30 @@ build-base
 libexecinfo-dev
 pcre-dev
 libressl-dev
-autoconf
-automake
-libtool
+cmake
+ninja
 linux-headers
 ```
 
 ### macOS (we recommend HomeBrew):
 ```
-autoconf
-automake
+cmake
+ninja
 pkg-config
-libtool
 openssl
 pcre
 ```
 
 ### FreeBSD
 ```
+cmake
+ninja
 devel/gmake
-devel/autoconf
-devel/automake
 devel/pkgconf
-devel/libtool
 security/openssl
 devel/pcre
 textproc/flex (optional, install newer version from ports, fix PATH)
 devel/hwloc (optional, highly recommended)
-```
-
-### OmniOS:
-```
-developer/gcc46
-developer/build/gnu-make
-developer/build/autoconf
-developer/build/automake-111
-developer/build/libtool
-library/security/openssl
-library/pcre
 ```
 
 ## Building from distribution
@@ -183,15 +270,15 @@ follow the instructions:
 ```
 tar jxvf trafficserver-9.1.3.tar.bz2
 cd trafficserver-9.1.3
-./configure            # configure the build environment to create Makefiles
-make                   # execute the compile
+cmake -B build
+cmake --build build
 ```
 
 This will build with a destination prefix of /usr/local. You can finish
 the installation with
 
 ```
-sudo make install
+sudo cmake --install build
 ```
 
 
@@ -200,9 +287,10 @@ sudo make install
 ```
 git clone https://github.com/apache/trafficserver.git   # get the source code from ASF Git repository
 cd trafficserver                                        # enter the checkout directory
-autoreconf -if                                          # generate the configure script and Makefile.in files
-./configure                                             # configure the build environment to create Makefiles
-make                                                    # execute the compile
+cmake --preset default                                  # configure the build
+cmake --build build-default                             # execute the compile
+cmake --build build-default -t test                     # run tests (optional)
+cmake --install build-default                           # install
 ```
 
 ## Instructions for building on EC2
@@ -214,28 +302,22 @@ mkdir -p /mnt          #EC2 Storage Mount, where storage is located
 cd /mnt
 git clone ...          # get the source code from ASF Git repo
 cd trafficserver       # enter the checkout dir
-autoreconf -i --force  # generate the configure script and Makefile.in files
-./configure
-make
+cmake --preset default                                  # configure the build
+cmake --build build-default                                   # execute the compile
+cmake --build build-default -t test
+cmake --install build-default
 ```
 
 ### As root do the following when using Fedora Core 8 kernel
 ```
-mkdir -p /mnt          #EC2 Storage Mount, where storage is located
+mkdir -p /mnt                             #EC2 Storage Mount, where storage is located
 cd /mnt
-git clone ...          # get the source code from ASF Git repo
-cd trafficserver       # enter the checkout dir
-autoreconf -i --force  # generate the configure script and Makefile.in files
-./configure --disable-eventfd
-make
-```
-
-### Instructions for building on FreeBSD
-
-The only difference is how to run configure and make:
-```
-MAKE=gmake ./configure # make sure that gmake is the make we use
-gmake
+git clone ...                             # get the source code from ASF Git repo
+cd trafficserver                          # enter the checkout dir
+cmake --preset default                    # configure the build
+cmake --build build-default               # execute the compile
+cmake --build build-default -t test       # run tests (optional)
+cmake --install build-default             # install
 ```
 
 ## INSTALLATION

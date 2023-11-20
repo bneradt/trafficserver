@@ -21,9 +21,10 @@
   limitations under the License.
  */
 
+#include "tscore/Version.h"
 #include "tscore/ink_platform.h"
 #include "tscore/ink_args.h"
-#include "tscore/I_Layout.h"
+#include "tscore/Layout.h"
 #include "tscore/runroot.h"
 
 #define PROGRAM_NAME       "traffic_logcat"
@@ -31,18 +32,18 @@
 
 #include <poll.h>
 
-#include "LogStandalone.cc"
+#include "../proxy/logging/LogStandalone.cc"
 
-#include "LogAccess.h"
-#include "LogField.h"
-#include "LogFilter.h"
-#include "LogFormat.h"
-#include "LogFile.h"
-#include "LogObject.h"
-#include "LogConfig.h"
-#include "LogBuffer.h"
-#include "LogUtils.h"
-#include "Log.h"
+#include "proxy/logging/LogAccess.h"
+#include "proxy/logging/LogField.h"
+#include "proxy/logging/LogFilter.h"
+#include "proxy/logging/LogFormat.h"
+#include "proxy/logging/LogFile.h"
+#include "proxy/logging/LogObject.h"
+#include "proxy/logging/LogConfig.h"
+#include "proxy/logging/LogBuffer.h"
+#include "proxy/logging/LogUtils.h"
+#include "proxy/logging/Log.h"
 
 // logcat-specific command-line flags
 static int squid_flag              = 0;
@@ -255,7 +256,7 @@ main(int /* argc ATS_UNUSED */, const char *argv[])
 
   // build the application information structure
   //
-  appVersionInfo.setup(PACKAGE_NAME, PROGRAM_NAME, PACKAGE_VERSION, __DATE__, __TIME__, BUILD_MACHINE, BUILD_PERSON, "");
+  auto &version = AppVersionInfo::setup_version(PROGRAM_NAME);
 
   runroot_handler(argv);
   // Before accessing file system initialize Layout engine
@@ -263,7 +264,7 @@ main(int /* argc ATS_UNUSED */, const char *argv[])
   // process command-line arguments
   //
   output_file[0] = 0;
-  process_args(&appVersionInfo, argument_descriptions, countof(argument_descriptions), argv);
+  process_args(&version, argument_descriptions, countof(argument_descriptions), argv);
 
   // check that only one of the -o and -a options was specified
   //

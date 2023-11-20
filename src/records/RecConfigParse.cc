@@ -30,11 +30,11 @@
 #include "tscore/ink_string.h"
 #include "tscore/runroot.h"
 
-#include "records/P_RecFile.h"
-#include "records/P_RecUtils.h"
-#include "records/P_RecMessage.h"
-#include "records/P_RecCore.h"
-#include "tscore/I_Layout.h"
+#include "P_RecFile.h"
+#include "P_RecUtils.h"
+#include "P_RecMessage.h"
+#include "P_RecCore.h"
+#include "tscore/Layout.h"
 
 #include "records/RecYAMLDefs.h"
 #include "records/RecYAMLDecoder.h"
