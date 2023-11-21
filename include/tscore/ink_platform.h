@@ -122,22 +122,15 @@ struct ifafilt;
 #ifdef HAVE_VALUES_H
 #include <values.h>
 #endif
-#ifdef HAVE_ALLOCA_H
+#if __has_include(<alloca.h>)
 #include <alloca.h>
-#endif
-
-#ifdef HAVE_CPIO_H
-#include <cpio.h>
-#if defined(MAGIC)
-#undef MAGIC
-#endif
 #endif
 
 #ifdef HAVE_STROPTS_H
 #include <stropts.h>
 #endif
 
-#include "ink_endian.h"
+#include "tscore/ink_endian.h"
 
 #ifdef HAVE_SYS_IOCTL_H
 #include <sys/ioctl.h>
@@ -168,9 +161,7 @@ using in_addr_t = unsigned int;
 #include <dlfcn.h>
 #endif
 
-#ifdef HAVE_FLOAT_H
 #include <float.h> // NOLINT(modernize-deprecated-headers)
-#endif
 
 #ifdef HAVE_SYS_SYSMACROS_H
 #include <sys/sysmacros.h>
@@ -197,4 +188,18 @@ using in_addr_t = unsigned int;
 #else
 #define MPTCP_ENABLED 0
 #endif
+#endif
+
+// If kernel headers do not support IPPROTO_MPTCP definition
+#ifndef IPPROTO_MPTCP
+#define IPPROTO_MPTCP 262
+#endif
+
+#ifndef SOL_MPTCP
+#define SOL_MPTCP 284
+#endif
+
+// Undefined in upstream until 5.16
+#ifndef MPTCP_INFO
+#define MPTCP_INFO 1
 #endif

@@ -25,11 +25,11 @@
 // function introduction in engine.h
 
 #include "tscore/runroot.h"
-#include "tscore/I_Layout.h"
+#include "tscore/Layout.h"
 #include "tscore/ink_error.h"
 #include "tscore/ink_defs.h"
-#include "records/I_RecProcess.h"
-#include "records/I_RecordsConfig.h"
+#include "records/RecProcess.h"
+#include "records/RecordsConfig.h"
 #include "engine.h"
 #include "file_system.h"
 #include "info.h"
@@ -41,7 +41,7 @@
 #include <grp.h>
 #include <sysexits.h>
 
-#include "RecProcess.h"
+#include "iocore/eventsystem/RecProcess.h"
 
 static const long MAX_LOGIN        = ink_login_name_max();
 static constexpr int MAX_GROUP_NUM = 32;

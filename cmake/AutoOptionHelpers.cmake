@@ -21,17 +21,20 @@ set(GLOBAL_AUTO_OPTION_VARS "")
 
 function(_REGISTER_AUTO_OPTION _NAME _FEATURE_VAR _DESCRIPTION _DEFAULT)
   add_custom_target(${_NAME}_target)
-  set_target_properties(${_NAME}_target
-    PROPERTIES
-      AUTO_OPTION_FEATURE_VAR ${_FEATURE_VAR}
-  )
+  set_target_properties(${_NAME}_target PROPERTIES AUTO_OPTION_FEATURE_VAR ${_FEATURE_VAR})
 
-  set(${_NAME} ${_DEFAULT} CACHE STRING "${_DESCRIPTION}")
+  set(${_NAME}
+      ${_DEFAULT}
+      CACHE STRING "${_DESCRIPTION}"
+  )
   set_property(CACHE ${_NAME} PROPERTY STRINGS AUTO ON OFF)
 
   set(LOCAL_AUTO_OPTION_VARS ${GLOBAL_AUTO_OPTION_VARS})
   list(APPEND LOCAL_AUTO_OPTION_VARS "${_NAME}")
-  set(GLOBAL_AUTO_OPTION_VARS ${LOCAL_AUTO_OPTION_VARS} PARENT_SCOPE)
+  set(GLOBAL_AUTO_OPTION_VARS
+      ${LOCAL_AUTO_OPTION_VARS}
+      PARENT_SCOPE
+  )
 endfunction()
 
 macro(_CHECK_PACKAGE_DEPENDS _OPTION_VAR _PACKAGE_DEPENDS _FEATURE_VAR)
@@ -40,7 +43,6 @@ macro(_CHECK_PACKAGE_DEPENDS _OPTION_VAR _PACKAGE_DEPENDS _FEATURE_VAR)
   else()
     set(STRICTNESS REQUIRED)
   endif()
-
 
   foreach(PACKAGE_NAME ${_PACKAGE_DEPENDS})
     find_package(${PACKAGE_NAME} ${STRICTNESS})
@@ -65,7 +67,9 @@ endmacro()
 #   [DESCRIPTION <description>]
 #   [DEFAULT <default>]
 #   [FEATURE_VAR <feature_var>]
+#   [WITH_SUBDIRECTORY <name>]
 #   [PACKAGE_DEPENDS <package_one> <package_two> ...]
+#   [HEADER_DEPENDS <header_one> <header_two> ...]
 # )
 #
 # This macro registers a new auto option and sets its corresponding feature
@@ -95,13 +99,16 @@ endmacro()
 # used, given the value of the option and whether the requirements for the
 # feature are satisfied. By default, it is USE_<feature_name>.
 #
+# WITH_SUBDIRECTORY is an optional subdirectory that should be added if the
+# feature is enabled.
+#
 # PACKAGE_DEPENDS is a list of packages that are required for the feature.
+#
+# HEADER_DEPENDS is a list of headers that are required for the feature.
+#
 macro(auto_option _FEATURE_NAME)
-  cmake_parse_arguments(ARG
-    ""
-    "DESCRIPTION;DEFAULT;FEATURE_VAR"
-    "PACKAGE_DEPENDS;HEADER_DEPENDS"
-    ${ARGN}
+  cmake_parse_arguments(
+    ARG "" "DESCRIPTION;DEFAULT;FEATURE_VAR;WITH_SUBDIRECTORY" "PACKAGE_DEPENDS;HEADER_DEPENDS" ${ARGN}
   )
 
   set(OPTION_VAR "ENABLE_${_FEATURE_NAME}")
@@ -130,12 +137,16 @@ macro(auto_option _FEATURE_NAME)
   else()
     set(${FEATURE_VAR} FALSE)
   endif()
+
+  if(ARG_WITH_SUBDIRECTORY AND ${${FEATURE_VAR}})
+    add_subdirectory(${ARG_WITH_SUBDIRECTORY})
+  endif()
 endmacro()
 
 # Prints a colorized summary of one auto option.
 function(PRINT_AUTO_OPTION _NAME)
   string(ASCII 27 ESC)
-  set(COLOR_RED   "${ESC}[31m")
+  set(COLOR_RED "${ESC}[31m")
   set(COLOR_GREEN "${ESC}[32m")
   set(COLOR_RESET "${ESC}[m")
 
@@ -146,21 +157,31 @@ function(PRINT_AUTO_OPTION _NAME)
 
   set(RESET ${COLOR_RESET})
   if(FEATURE_VALUE)
+    # This accounts for both the ON and AUTO cases.
     if(OPTION_VALUE)
       set(COLOR ${COLOR_GREEN})
+      set(HINT "(hint: add -D${_NAME}=OFF to disable)")
     else()
       message(WARNING "${FEATURE} truthy but ${_NAME} isn't!")
       set(COLOR ${COLOR_RED})
+      # There is no sensible hint for this case - things are
+      # on fire.
+      set(HINT "")
     endif()
   else()
+    # This should account only for the AUTO case.
+    # If the option is set to ON but dependencies were
+    # missing, then we should have errored out already.
     if(OPTION_VALUE)
       set(COLOR ${COLOR_RED})
+      set(HINT "(hint: add -D${_NAME}=ON to require)")
     else()
       set(RESET "")
+      set(HINT "(hint: add -D${_NAME}=ON to enable)")
     endif()
   endif()
 
-  message(STATUS "${FEATURE}: ${COLOR}${FEATURE_VALUE}${RESET} (${OPTION_VALUE})")
+  message(STATUS "${FEATURE}: ${COLOR}${FEATURE_VALUE}${RESET} (${OPTION_VALUE}) ${HINT}")
 endfunction()
 
 # Prints out a colorized summary of all auto options.

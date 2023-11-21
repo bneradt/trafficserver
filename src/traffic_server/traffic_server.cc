@@ -30,6 +30,7 @@
 
  ****************************************************************************/
 
+#include "tscore/Version.h"
 #include "swoc/swoc_file.h"
 
 #include "tscore/ink_platform.h"
@@ -67,55 +68,56 @@ extern "C" int plock(int);
 
 #include "Crash.h"
 #include "tscore/signals.h"
-#include "P_EventSystem.h"
-#include "P_Net.h"
-#include "P_QUICNetProcessor.h"
-#include "P_UDPNet.h"
-#include "P_DNS.h"
-#include "P_SplitDNS.h"
-#include "P_HostDB.h"
-#include "P_Cache.h"
-#include "tscore/I_Layout.h"
-#include "I_Machine.h"
-#include "records/I_RecordsConfig.h"
-#include "RecProcess.h"
-#include "Transform.h"
-#include "ConfigProcessor.h"
-#include "HttpProxyServerMain.h"
-#include "HttpBodyFactory.h"
-#include "ProxySession.h"
-#include "logging/Log.h"
-#include "CacheControl.h"
-#include "IPAllow.h"
-#include "ParentSelection.h"
-#include "HostStatus.h"
-#include "StatPages.h"
-#include "HTTP.h"
-#include "HuffmanCodec.h"
-#include "Plugin.h"
-#include "DiagsConfig.h"
-#include "RemapConfig.h"
-#include "RemapPluginInfo.h"
-#include "RemapProcessor.h"
-#include "I_Tasks.h"
+#include "../iocore/eventsystem/P_EventSystem.h"
+#include "../iocore/net/P_Net.h"
+#if TS_HAS_QUICHE
+#include "../iocore/net/P_QUICNetProcessor.h"
+#endif
+#include "../iocore/net/P_UDPNet.h"
+#include "../iocore/dns/P_DNS.h"
+#include "../iocore/dns/P_SplitDNS.h"
+#include "../iocore/hostdb/P_HostDB.h"
+#include "../iocore/cache/P_Cache.h"
+#include "tscore/Layout.h"
+#include "iocore/utils/Machine.h"
+#include "records/RecordsConfig.h"
+#include "iocore/eventsystem/RecProcess.h"
+#include "proxy/Transform.h"
+#include "iocore/eventsystem/ConfigProcessor.h"
+#include "proxy/http/HttpProxyServerMain.h"
+#include "proxy/http/HttpBodyFactory.h"
+#include "proxy/ProxySession.h"
+#include "proxy/logging/Log.h"
+#include "proxy/CacheControl.h"
+#include "proxy/IPAllow.h"
+#include "proxy/ParentSelection.h"
+#include "proxy/HostStatus.h"
+#include "proxy/hdrs/HTTP.h"
+#include "proxy/hdrs/HuffmanCodec.h"
+#include "proxy/Plugin.h"
+#include "proxy/shared/DiagsConfig.h"
+#include "proxy/http/remap/RemapConfig.h"
+#include "proxy/http/remap/RemapPluginInfo.h"
+#include "proxy/http/remap/RemapProcessor.h"
+#include "iocore/eventsystem/Tasks.h"
 #include "api/InkAPIInternal.h"
 #include "api/LifecycleAPIHooks.h"
-#include "HTTP2.h"
+#include "proxy/http2/HTTP2.h"
 #include "tscore/ink_config.h"
-#include "P_SSLClientUtils.h"
+#include "../iocore/net/P_SSLClientUtils.h"
 
 // Mgmt Admin public handlers
 #include "RpcAdminPubHandlers.h"
 
 // Json Rpc stuffs
-#include "rpc/jsonrpc/JsonRPCManager.h"
-#include "rpc/server/RPCServer.h"
+#include "mgmt/rpc/jsonrpc/JsonRPCManager.h"
+#include "mgmt/rpc/server/RPCServer.h"
 
-#include "config/FileManager.h"
+#include "mgmt/config/FileManager.h"
 
 #if TS_USE_QUIC == 1
-#include "Http3.h"
-#include "Http3Config.h"
+#include "proxy/http3/Http3.h"
+#include "proxy/http3/Http3Config.h"
 #endif
 
 #include "tscore/ink_cap.h"
@@ -195,8 +197,6 @@ static int cmd_block = 0;
 // -1: cache is already initialized, don't delay.
 static int delay_listen_for_cache = 0;
 
-AppVersionInfo appVersionInfo; // Build info for this application
-
 static ArgumentDescription argument_descriptions[] = {
   {"net_threads",       'n', "Number of Net Threads",                                                                               "I",     &num_of_net_threads,             "PROXY_NET_THREADS",       nullptr},
   {"udp_threads",       'U', "Number of UDP Threads",                                                                               "I",     &num_of_udp_threads,             "PROXY_UDP_THREADS",       nullptr},
@@ -270,8 +270,8 @@ public:
   int
   periodic(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
   {
-    ts::Metrics &intm    = ts::Metrics::getInstance();
-    static auto drain_id = intm.lookup("proxy.process.proxy.draining");
+    ts::Metrics &metrics = ts::Metrics::instance();
+    static auto drain_id = metrics.lookup("proxy.process.proxy.draining");
 
     if (signal_received[SIGUSR1]) {
       signal_received[SIGUSR1] = false;
@@ -309,7 +309,7 @@ public:
 
       RecInt timeout = 0;
       if (RecGetRecordInt("proxy.config.stop.shutdown_timeout", &timeout) == REC_ERR_OKAY && timeout) {
-        intm[drain_id] = 1;
+        metrics[drain_id].store(1);
         TSSystemState::drain(true);
         // Close listening sockets here only if TS is running standalone
         RecInt close_sockets = 0;
@@ -427,11 +427,9 @@ class MemoryLimit : public Continuation
 public:
   MemoryLimit() : Continuation(new_ProxyMutex())
   {
-    ts::Metrics &intm = ts::Metrics::getInstance();
-
     memset(&_usage, 0, sizeof(_usage));
     SET_HANDLER(&MemoryLimit::periodic);
-    memory_rss = intm.newMetricPtr("proxy.process.traffic_server.memory.rss");
+    memory_rss = Metrics::Gauge::createPtr("proxy.process.traffic_server.memory.rss");
   }
 
   ~MemoryLimit() override { mutex = nullptr; }
@@ -451,7 +449,7 @@ public:
     _memory_limit = _memory_limit >> 10; // divide by 1024
 
     if (getrusage(RUSAGE_SELF, &_usage) == 0) {
-      ts::Metrics::write(memory_rss, _usage.ru_maxrss << 10); // * 1024
+      ts::Metrics::Gauge::store(memory_rss, _usage.ru_maxrss << 10); // * 1024
       Debug("server", "memory usage - ru_maxrss: %ld memory limit: %" PRId64, _usage.ru_maxrss, _memory_limit);
       if (_memory_limit > 0) {
         if (_usage.ru_maxrss > _memory_limit) {
@@ -479,7 +477,7 @@ public:
 private:
   int64_t _memory_limit = 0;
   struct rusage _usage;
-  ts::Metrics::IntType *memory_rss;
+  Metrics::Gauge::AtomicType *memory_rss;
 };
 
 /** Gate the emission of the "Traffic Server is fuly initialized" log message.
@@ -583,7 +581,8 @@ proxy_signal_handler(int signo, siginfo_t *info, void *ctx)
     return;
   }
 
-  signal_format_siginfo(signo, info, appVersionInfo.AppStr);
+  auto &version = AppVersionInfo::get_version();
+  signal_format_siginfo(signo, info, version.application());
 
 #if TS_HAS_PROFILER
   HeapProfilerDump("/tmp/ts_end.hprof");
@@ -607,8 +606,9 @@ init_system()
   signal_register_default_handler(proxy_signal_handler);
   signal_register_crash_handler(signal_crash_handler);
 
-  syslog(LOG_NOTICE, "NOTE: --- %s Starting ---", appVersionInfo.AppStr);
-  syslog(LOG_NOTICE, "NOTE: %s Version: %s", appVersionInfo.AppStr, appVersionInfo.FullVersionInfoStr);
+  auto &version = AppVersionInfo::get_version();
+  syslog(LOG_NOTICE, "NOTE: --- %s Starting ---", version.application());
+  syslog(LOG_NOTICE, "NOTE: %s Version: %s", version.application(), version.full_version());
 
   //
   // Delimit file Descriptors
@@ -679,15 +679,14 @@ initialize_process_manager()
   //
   // Define version info records
   //
-  RecRegisterStatString(RECT_PROCESS, "proxy.process.version.server.short", appVersionInfo.VersionStr, RECP_NON_PERSISTENT);
-  RecRegisterStatString(RECT_PROCESS, "proxy.process.version.server.long", appVersionInfo.FullVersionInfoStr, RECP_NON_PERSISTENT);
-  RecRegisterStatString(RECT_PROCESS, "proxy.process.version.server.build_number", appVersionInfo.BldNumStr, RECP_NON_PERSISTENT);
-  RecRegisterStatString(RECT_PROCESS, "proxy.process.version.server.build_time", appVersionInfo.BldTimeStr, RECP_NON_PERSISTENT);
-  RecRegisterStatString(RECT_PROCESS, "proxy.process.version.server.build_date", appVersionInfo.BldDateStr, RECP_NON_PERSISTENT);
-  RecRegisterStatString(RECT_PROCESS, "proxy.process.version.server.build_machine", appVersionInfo.BldMachineStr,
-                        RECP_NON_PERSISTENT);
-  RecRegisterStatString(RECT_PROCESS, "proxy.process.version.server.build_person", appVersionInfo.BldPersonStr,
-                        RECP_NON_PERSISTENT);
+  auto &version = AppVersionInfo::get_version();
+  RecRegisterStatString(RECT_PROCESS, "proxy.process.version.server.short", version.version(), RECP_NON_PERSISTENT);
+  RecRegisterStatString(RECT_PROCESS, "proxy.process.version.server.long", version.full_version(), RECP_NON_PERSISTENT);
+  RecRegisterStatString(RECT_PROCESS, "proxy.process.version.server.build_number", version.build_number(), RECP_NON_PERSISTENT);
+  RecRegisterStatString(RECT_PROCESS, "proxy.process.version.server.build_time", version.build_time(), RECP_NON_PERSISTENT);
+  RecRegisterStatString(RECT_PROCESS, "proxy.process.version.server.build_date", version.build_date(), RECP_NON_PERSISTENT);
+  RecRegisterStatString(RECT_PROCESS, "proxy.process.version.server.build_machine", version.build_machine(), RECP_NON_PERSISTENT);
+  RecRegisterStatString(RECT_PROCESS, "proxy.process.version.server.build_person", version.build_person(), RECP_NON_PERSISTENT);
 }
 
 extern void initializeRegistry();
@@ -805,10 +804,10 @@ CB_After_Cache_Init()
     emit_fully_initialized_message();
   }
 
-  ts::Metrics &intm = ts::Metrics::getInstance();
-  auto id           = intm.lookup("proxy.process.proxy.cache_ready_time");
+  ts::Metrics &metrics = ts::Metrics::instance();
+  auto id              = metrics.lookup("proxy.process.proxy.cache_ready_time");
 
-  intm[id].store(time(nullptr));
+  metrics[id].store(time(nullptr));
 
   // Alert the plugins the cache is initialized.
   hook = g_lifecycle_hooks->get(TS_LIFECYCLE_CACHE_READY_HOOK);
@@ -1412,24 +1411,24 @@ struct ShowStats : public Continuation {
     if (!(cycle++ % 24)) {
       printf("r:rr w:ww r:rbs w:wbs open polls\n");
     }
-    int64_t d_rb  = Metrics::read(net_rsb.calls_to_readfromnet) - last_rb;
+    int64_t d_rb  = Metrics::Counter::load(net_rsb.calls_to_readfromnet) - last_rb;
     last_rb      += d_rb;
 
-    int64_t d_wb  = Metrics::read(net_rsb.calls_to_writetonet) - last_wb;
+    int64_t d_wb  = Metrics::Counter::load(net_rsb.calls_to_writetonet) - last_wb;
     last_wb      += d_wb;
 
-    int64_t d_nrb  = Metrics::read(net_rsb.read_bytes) - last_nrb;
+    int64_t d_nrb  = Metrics::Counter::load(net_rsb.read_bytes) - last_nrb;
     last_nrb      += d_nrb;
-    int64_t d_nr   = Metrics::read(net_rsb.read_bytes_count) - last_nr;
+    int64_t d_nr   = Metrics::Counter::load(net_rsb.read_bytes_count) - last_nr;
     last_nr       += d_nr;
 
-    int64_t d_nwb  = Metrics::read(net_rsb.write_bytes) - last_nwb;
+    int64_t d_nwb  = Metrics::Counter::load(net_rsb.write_bytes) - last_nwb;
     last_nwb      += d_nwb;
-    int64_t d_nw   = Metrics::read(net_rsb.write_bytes_count) - last_nw;
+    int64_t d_nw   = Metrics::Counter::load(net_rsb.write_bytes_count) - last_nw;
     last_nw       += d_nw;
 
-    int64_t d_o = Metrics::read(net_rsb.connections_currently_open);
-    int64_t d_p = Metrics::read(net_rsb.handler_run) - last_p;
+    int64_t d_o = Metrics::Gauge::load(net_rsb.connections_currently_open);
+    int64_t d_p = Metrics::Counter::load(net_rsb.handler_run) - last_p;
 
     last_p += d_p;
     printf("%" PRId64 ":%" PRId64 ":%" PRId64 ":%" PRId64 " %" PRId64 ":%" PRId64 " %" PRId64 " %" PRId64 "\n", d_rb, d_wb, d_nrb,
@@ -1590,13 +1589,14 @@ chdir_root()
 {
   std::string prefix = Layout::get()->prefix;
 
+  auto &version = AppVersionInfo::get_version();
   if (chdir(prefix.c_str()) < 0) {
-    fprintf(stderr, "%s: unable to change to root directory \"%s\" [%d '%s']\n", appVersionInfo.AppStr, prefix.c_str(), errno,
+    fprintf(stderr, "%s: unable to change to root directory \"%s\" [%d '%s']\n", version.application(), prefix.c_str(), errno,
             strerror(errno));
-    fprintf(stderr, "%s: please correct the path or set the TS_ROOT environment variable\n", appVersionInfo.AppStr);
+    fprintf(stderr, "%s: please correct the path or set the TS_ROOT environment variable\n", version.application());
     ::exit(1);
   } else {
-    printf("%s: using root directory '%s'\n", appVersionInfo.AppStr, prefix.c_str());
+    printf("%s: using root directory '%s'\n", version.application(), prefix.c_str());
   }
 }
 
@@ -1779,7 +1779,7 @@ main(int /* argc ATS_UNUSED */, const char **argv)
   pcre_free   = ats_free;
 
   // Define the version info
-  appVersionInfo.setup(PACKAGE_NAME, "traffic_server", PACKAGE_VERSION, __DATE__, __TIME__, BUILD_MACHINE, BUILD_PERSON, "");
+  auto &version = AppVersionInfo::setup_version("traffic_server");
 
   runroot_handler(argv);
   // Before accessing file system initialize Layout engine
@@ -1791,7 +1791,7 @@ main(int /* argc ATS_UNUSED */, const char **argv)
   std::sort(argument_descriptions, argument_descriptions + countof(argument_descriptions),
             [](ArgumentDescription const &a, ArgumentDescription const &b) { return 0 > strcasecmp(a.name, b.name); });
 
-  process_args(&appVersionInfo, argument_descriptions, countof(argument_descriptions), argv);
+  process_args(&version, argument_descriptions, countof(argument_descriptions), argv);
   command_flag  = command_flag || *command_string;
   command_index = find_cmd_index(command_string);
   command_valid = command_flag && command_index >= 0;
@@ -1855,19 +1855,19 @@ main(int /* argc ATS_UNUSED */, const char **argv)
   syslog_log_configure();
 
   // Register stats
-  ts::Metrics &intm = ts::Metrics::getInstance();
+  ts::Metrics &metrics = ts::Metrics::instance();
   int32_t id;
 
-  id       = intm.newMetric("proxy.process.proxy.reconfigure_time");
-  intm[id] = time(nullptr);
-  id       = intm.newMetric("proxy.process.proxy.start_time");
-  intm[id] = time(nullptr);
+  id = Metrics::Gauge::create("proxy.process.proxy.reconfigure_time");
+  metrics[id].store(time(nullptr));
+  id = Metrics::Gauge::create("proxy.process.proxy.start_time");
+  metrics[id].store(time(nullptr));
   // These all gets initialied to 0
-  intm.newMetric("proxy.process.proxy.reconfigure_required");
-  intm.newMetric("proxy.process.proxy.restart_required");
-  intm.newMetric("proxy.process.proxy.draining");
+  Metrics::Gauge::create("proxy.process.proxy.reconfigure_required");
+  Metrics::Gauge::create("proxy.process.proxy.restart_required");
+  Metrics::Gauge::create("proxy.process.proxy.draining");
   // This gets updated later (in the callback)
-  intm.newMetric("proxy.process.proxy.cache_ready_time");
+  Metrics::Gauge::create("proxy.process.proxy.cache_ready_time");
 
   // init huge pages
   int enabled;
@@ -2030,9 +2030,6 @@ main(int /* argc ATS_UNUSED */, const char **argv)
   SET_INTERVAL(RecProcess, "proxy.config.config_update_interval_ms", config_update_interval_ms);
   SET_INTERVAL(RecProcess, "proxy.config.raw_stat_sync_interval_ms", raw_stat_sync_interval_ms);
   SET_INTERVAL(RecProcess, "proxy.config.remote_sync_interval_ms", remote_sync_interval_ms);
-
-  // Initialize the stat pages manager
-  statPagesManager.init();
 
   num_of_net_threads = adjust_num_of_net_threads(num_of_net_threads);
 

@@ -32,9 +32,9 @@
 #include "swoc/TextView.h"
 #include "tscpp/util/ts_errata.h"
 
-#include "tscore/I_Version.h"
+#include "tscore/Version.h"
 #include "tscore/ink_memory.h"
-#include "tscore/Regex.h"
+#include "tscpp/util/Regex.h"
 #include "tscore/ink_file.h"
 #include "tscore/CryptoHash.h"
 
@@ -109,7 +109,7 @@ public:
 
     @note Serializable.
 
-    @internal nee @c DiskVolBlock
+    @internal nee @c DiskStripeBlock
  */
 struct CacheStripeDescriptor {
   Bytes offset;         // offset of start of stripe from start of span.
@@ -128,7 +128,7 @@ struct CacheStripeDescriptor {
 struct SpanHeader {
   static constexpr uint32_t MAGIC = 0xABCD1237;
   uint32_t magic;
-  uint32_t num_volumes;      /* number of discrete volumes (DiskVol) */
+  uint32_t num_volumes;      /* number of discrete volumes (DiskStripe) */
   uint32_t num_free;         /* number of disk volume blocks free */
   uint32_t num_used;         /* number of disk volume blocks in use */
   uint32_t num_diskvol_blks; /* number of disk volume blocks */
@@ -139,9 +139,9 @@ struct SpanHeader {
 
 /** Stripe data, serialized format.
 
-    @internal nee VolHeadFooter
+    @internal StripeHeaderFooter
  */
-// the counterpart of this structure in ATS is called VolHeaderFooter
+// the counterpart of this structure in ATS is called StripeHeaderFooter
 class StripeMeta
 {
 public:
@@ -356,18 +356,18 @@ using ts::CacheStripeDescriptor;
 using ts::CacheDirEntry;
 using ts::Doc;
 
-constexpr int ESTIMATED_OBJECT_SIZE     = 8000;
-constexpr int DEFAULT_HW_SECTOR_SIZE    = 512;
-constexpr int VOL_HASH_TABLE_SIZE       = 32707;
-constexpr unsigned short VOL_HASH_EMPTY = 65535;
-constexpr int DIR_TAG_WIDTH             = 12;
-constexpr int DIR_DEPTH                 = 4;
-constexpr int SIZEOF_DIR                = 10;
-constexpr int MAX_ENTRIES_PER_SEGMENT   = (1 << 16);
-constexpr int DIR_SIZE_WIDTH            = 6;
-constexpr int DIR_BLOCK_SIZES           = 4;
-constexpr int CACHE_BLOCK_SHIFT         = 9;
-constexpr int CACHE_BLOCK_SIZE          = (1 << CACHE_BLOCK_SHIFT); // 512, smallest sector size
+constexpr int ESTIMATED_OBJECT_SIZE        = 8000;
+constexpr int DEFAULT_HW_SECTOR_SIZE       = 512;
+constexpr int STRIPE_HASH_TABLE_SIZE       = 32707;
+constexpr unsigned short STRIPE_HASH_EMPTY = 65535;
+constexpr int DIR_TAG_WIDTH                = 12;
+constexpr int DIR_DEPTH                    = 4;
+constexpr int SIZEOF_DIR                   = 10;
+constexpr int MAX_ENTRIES_PER_SEGMENT      = (1 << 16);
+constexpr int DIR_SIZE_WIDTH               = 6;
+constexpr int DIR_BLOCK_SIZES              = 4;
+constexpr int CACHE_BLOCK_SHIFT            = 9;
+constexpr int CACHE_BLOCK_SIZE             = (1 << CACHE_BLOCK_SHIFT); // 512, smallest sector size
 
 namespace ct
 {

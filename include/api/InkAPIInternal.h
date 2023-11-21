@@ -23,20 +23,21 @@
 
 #pragma once
 
-#include "I_EventSystem.h"
-#include "URL.h"
-#include "I_Net.h"
-#include "HTTP.h"
+#include "iocore/eventsystem/EventSystem.h"
+#include "proxy/hdrs/URL.h"
+#include "iocore/net/Net.h"
+#include "proxy/hdrs/HTTP.h"
 #include "tscore/List.h"
-#include "ConfigProcessor.h"
-#include "I_Cache.h"
-#include "I_Tasks.h"
-#include "Plugin.h"
+#include "iocore/eventsystem/ConfigProcessor.h"
+#include "iocore/cache/Cache.h"
+#include "iocore/eventsystem/Tasks.h"
+#include "proxy/Plugin.h"
 
 #include "api/APIHook.h"
 #include "api/APIHooks.h"
 #include "api/FeatureAPIHooks.h"
 
+#include "swoc/swoc_file.h"
 #include "ts/InkAPIPrivateIOCore.h"
 #include "ts/experimental.h"
 
@@ -143,15 +144,15 @@ public:
   ConfigUpdateCbTable();
   ~ConfigUpdateCbTable();
 
-  void insert(INKContInternal *contp, const char *name);
-  void invoke(const char *name);
+  void insert(INKContInternal *contp, const char *name, const char *file_name = nullptr);
+  void invoke();
   void invoke(INKContInternal *contp);
 
 private:
-  std::unordered_map<std::string, INKContInternal *> cb_table;
+  std::unordered_map<std::string, std::tuple<INKContInternal *, swoc::file::path, swoc::file::file_time_type>> cb_table;
 };
 
-#include "HttpAPIHooks.h"
+#include "proxy/HttpAPIHooks.h"
 
 class HttpHookState
 {

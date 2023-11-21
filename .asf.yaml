@@ -37,6 +37,7 @@ github:
     - etapia
     - lzx404243
     - JosiahWI
+    - phongn
   protected_branches:
     master:
       required_status_checks:
@@ -50,7 +51,7 @@ github:
           - Rocky
           - CentOS
           - Clang-Analyzer
-          - Clang-Format
+          - Format
           - Debian
           - Docs
           - Fedora

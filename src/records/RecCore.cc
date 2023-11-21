@@ -21,6 +21,9 @@
   limitations under the License.
  */
 
+#include <deque>
+#include <utility>
+
 #include "swoc/swoc_file.h"
 
 #include "tscore/ink_platform.h"
@@ -28,11 +31,11 @@
 #include "tscore/ink_string.h"
 #include "tscore/Filenames.h"
 
-#include "records/I_RecordsConfig.h"
-#include "records/P_RecFile.h"
-#include "records/P_RecCore.h"
-#include "records/P_RecUtils.h"
-#include "tscore/I_Layout.h"
+#include "records/RecordsConfig.h"
+#include "P_RecFile.h"
+#include "P_RecCore.h"
+#include "P_RecUtils.h"
+#include "tscore/Layout.h"
 #include "tscpp/util/ts_errata.h"
 #include "api/Metrics.h"
 
@@ -317,7 +320,7 @@ RecLinkConfigByte(const char *name, RecByte *rec_byte)
 // RecRegisterConfigUpdateCb
 //-------------------------------------------------------------------------
 RecErrT
-RecRegisterConfigUpdateCb(const char *name, RecConfigUpdateCb update_cb, void *cookie)
+RecRegisterConfigUpdateCb(const char *name, RecConfigUpdateCb const &update_cb, void *cookie)
 {
   RecErrT err = REC_ERR_FAIL;
 
@@ -336,13 +339,7 @@ RecRegisterConfigUpdateCb(const char *name, RecConfigUpdateCb update_cb, void *c
          }
        */
 
-      RecConfigUpdateCbList *new_callback = static_cast<RecConfigUpdateCbList *>(ats_malloc(sizeof(RecConfigUpdateCbList)));
-      memset(new_callback, 0, sizeof(RecConfigUpdateCbList));
-      new_callback->update_cb     = update_cb;
-      new_callback->update_cookie = cookie;
-
-      new_callback->next = nullptr;
-
+      RecConfigUpdateCbList *new_callback = new RecConfigUpdateCbList(update_cb, cookie);
       ink_assert(new_callback);
       if (!r->config_meta.update_cb_list) {
         r->config_meta.update_cb_list = new_callback;
@@ -365,6 +362,42 @@ RecRegisterConfigUpdateCb(const char *name, RecConfigUpdateCb update_cb, void *c
   ink_rwlock_unlock(&g_records_rwlock);
 
   return err;
+}
+
+void
+Enable_Config_Var(std::string_view const &name, RecContextCb record_cb, RecConfigUpdateCb const &config_cb, void *cookie)
+{
+  // Must use this indirection because the API requires a pure function, therefore no values can
+  // be bound in the lambda. Instead this is needed to pass in the data for both the lambda and
+  // the actual callback.
+  using Context = std::tuple<decltype(record_cb), void *>;
+
+  // To deal with process termination cleanup, store the context instances in a deque where
+  // tail insertion doesn't invalidate pointers. These persist until process shutdown.
+  static std::deque<Context> storage;
+
+  Context &ctx = storage.emplace_back(record_cb, cookie);
+  // Register the call back - this handles external updates.
+  RecRegisterConfigUpdateCb(
+    name.data(),
+    [&config_cb](const char *name, RecDataT dtype, RecData data, void *ctx) -> int {
+      auto &&[context_cb, cookie] = *static_cast<Context *>(ctx);
+      if ((*context_cb)(name, dtype, data, cookie)) {
+        config_cb(name, dtype, data, cookie); // Let the caller handle the runtime config update.
+      }
+      return REC_ERR_OKAY;
+    },
+    &ctx);
+
+  // Use the record to do the initial data load.
+  // Look it up and call the updater @a cb on that data.
+  RecLookupRecord(
+    name.data(),
+    [](RecRecord const *r, void *ctx) -> void {
+      auto &&[cb, cookie] = *static_cast<Context *>(ctx);
+      (*cb)(r->name, r->data_type, r->data, cookie);
+    },
+    &ctx);
 }
 
 //-------------------------------------------------------------------------
@@ -480,11 +513,11 @@ RecGetRecordBool(const char *name, RecBool *rec_bool, bool lock)
 RecErrT
 RecLookupRecord(const char *name, void (*callback)(const RecRecord *, void *), void *data, bool lock)
 {
-  RecErrT err       = REC_ERR_FAIL;
-  ts::Metrics &intm = ts::Metrics::getInstance();
-  auto it           = intm.find(name);
+  RecErrT err          = REC_ERR_FAIL;
+  ts::Metrics &metrics = ts::Metrics::instance();
+  auto it              = metrics.find(name);
 
-  if (it != intm.end()) {
+  if (it != metrics.end()) {
     RecRecord r;
     auto &&[name, val] = *it;
 
@@ -534,7 +567,7 @@ RecLookupMatchingRecords(unsigned rec_type, const char *match, void (*callback)(
   tmp.rec_type  = RECT_ALL;
   tmp.data_type = RECD_INT;
 
-  for (auto &&[name, val] : ts::Metrics::getInstance()) {
+  for (auto &&[name, val] : ts::Metrics::instance()) {
     if (regex.match(name.data()) >= 0) {
       tmp.name         = name.data();
       tmp.data.rec_int = val;
@@ -866,7 +899,7 @@ RecDumpRecords(RecT rec_type, RecDumpEntryCb callback, void *edata)
   // Dump all new metrics as well (no "type" for them)
   RecData datum;
 
-  for (auto &&[name, val] : ts::Metrics::getInstance()) {
+  for (auto &&[name, val] : ts::Metrics::instance()) {
     datum.rec_int = val;
     callback(RECT_PLUGIN, edata, true, name.data(), TS_RECORDDATATYPE_INT, &datum);
   }

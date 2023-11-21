@@ -25,11 +25,11 @@
 #include <string_view>
 
 #include <yaml-cpp/yaml.h>
-#include <tscore/I_Layout.h>
+#include <tscore/Layout.h>
 #include <swoc/BufferWriter.h>
 
-#include "IPCSocketClient.h"
-#include "yaml_codecs.h"
+#include "shared/rpc/IPCSocketClient.h"
+#include "shared/rpc/yaml_codecs.h"
 
 namespace shared::rpc
 {

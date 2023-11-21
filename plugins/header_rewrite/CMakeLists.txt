@@ -34,9 +34,7 @@ add_atsplugin(
 
 add_library(header_rewrite_parser STATIC parser.cc)
 
-target_link_libraries(header_rewrite PRIVATE PCRE::PCRE libswoc)
-
-find_package(maxminddb QUIET)
+target_link_libraries(header_rewrite PRIVATE PCRE::PCRE libswoc::libswoc)
 
 if(maxminddb_FOUND)
   target_sources(header_rewrite PRIVATE conditions_geo_maxmind.cc)

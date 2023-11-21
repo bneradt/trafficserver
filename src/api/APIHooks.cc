@@ -26,8 +26,8 @@
 #include "tscore/Allocator.h"
 
 // inkevent
-#include "I_ProxyAllocator.h"
-#include "I_Thread.h"
+#include "iocore/eventsystem/ProxyAllocator.h"
+#include "iocore/eventsystem/Thread.h"
 
 static ClassAllocator<APIHook> apiHookAllocator("apiHookAllocator");
 

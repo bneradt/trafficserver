@@ -30,9 +30,9 @@
 
 #include "yaml-cpp/yaml.h"
 #include "tscore/Errata.h"
-#include "tscore/I_Layout.h"
+#include "tscore/Layout.h"
 #include "tscpp/util/ts_bw_format.h"
-#include "rpc/jsonrpc/JsonRPC.h"
+#include "mgmt/rpc/jsonrpc/JsonRPC.h"
 
 namespace
 {

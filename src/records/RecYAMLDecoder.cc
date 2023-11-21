@@ -21,13 +21,13 @@
   limitations under the License.
  */
 
-#include "records/P_RecCore.h"
+#include "P_RecCore.h"
 #include "records/RecYAMLDecoder.h"
 #include "records/RecYAMLDefs.h"
 
 #include "tscore/Diags.h"
 #include "tscpp/util/YamlCfg.h"
-#include "records/I_RecordsConfig.h"
+#include "records/RecordsConfig.h"
 
 #include <string_view>
 

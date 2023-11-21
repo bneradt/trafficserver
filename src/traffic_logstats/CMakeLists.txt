@@ -16,17 +16,9 @@
 #######################
 
 add_executable(traffic_logstats logstats.cc)
-target_link_libraries(
-  traffic_logstats
-  PRIVATE ts::logging
-          ts::hdrs
-          ts::tscore
-          ts::tsapicore
-          ts::records
-          ts::diagsconfig
-          ts::inkevent
-          libswoc
-)
+target_link_libraries(traffic_logstats PRIVATE ts::logging ts::tscore ts::diagsconfig)
+
+install(TARGETS traffic_logstats)
 
 if(BUILD_TESTING)
   add_test(

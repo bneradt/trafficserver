@@ -30,15 +30,15 @@
 #include "tscore/ink_atomic.h"
 
 // http_remap
-#include "RemapPluginInfo.h"
+#include "proxy/http/remap/RemapPluginInfo.h"
 
 // inkevent
-#include "I_Continuation.h"
-#include "I_EThread.h"
-#include "I_Event.h"
-#include "I_Lock.h"
-#include "I_ProxyAllocator.h"
-#include "I_VConnection.h"
+#include "iocore/eventsystem/Continuation.h"
+#include "iocore/eventsystem/EThread.h"
+#include "iocore/eventsystem/Event.h"
+#include "iocore/eventsystem/Lock.h"
+#include "iocore/eventsystem/ProxyAllocator.h"
+#include "iocore/eventsystem/VConnection.h"
 
 ClassAllocator<INKContInternal> INKContAllocator("INKContAllocator");
 
