@@ -72,6 +72,7 @@ const IpAllow::ACL IpAllow::DENY_ALL_ACL;
 
 size_t IpAllow::configid     = 0;
 bool IpAllow::accept_check_p = true; // initializing global flag for fast deny
+std::unordered_map<std::string, IPCategory> IpAllow::_ip_category_map;
 
 static ConfigUpdateHandler<IpAllow> *ipAllowUpdate;
 
