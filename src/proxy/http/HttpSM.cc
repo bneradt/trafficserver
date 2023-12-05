@@ -22,6 +22,9 @@
 
  */
 
+#include "api/APIHook.h"
+#include "proxy/HttpAPIHooks.h"
+#include "ts/apidefs.h"
 #include "tsutil/ts_bw_format.h"
 #include "proxy/ProxyTransaction.h"
 #include "proxy/http/HttpSM.h"
@@ -5109,7 +5112,9 @@ bool
 HttpSM::apply_ip_allow_filter()
 {
   // Method allowed on dest IP address check
-  IpAllow::ACL acl = IpAllow::match(this->get_server_remote_addr(), IpAllow::DST_ADDR);
+  APIHook *ip_allow_hooks        = http_global_hooks->get(TS_HTTP_IP_ALLOW_CATEGORY_HOOK);
+  Categories_t const &categories = server_txn->get_netvc()->get_ip_categories(ip_allow_hooks);
+  IpAllow::ACL acl               = IpAllow::match(this->get_server_remote_addr(), categories, IpAllow::DST_ADDR);
 
   if (ip_allow_is_request_forbidden(acl)) {
     ip_allow_deny_request(acl);

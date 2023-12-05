@@ -110,17 +110,13 @@ struct HttpAltInfo {
 };
 
 struct HttpIpAllowInfo {
-  HttpIpAllowInfo(std::string_view category, swoc::IPAddr const &addr) : category(category), addr(addr), contains{false} {}
+  HttpIpAllowInfo(swoc::IPAddr const &addr, std::unordered_set<int> &categories) : addr(addr), categories{categories} {}
 
-  /// A user-specified name for IP categories.
-  std::string_view category;
-
-  /// The IP address to query whether it is contained in @a category.
+  /// The IP address to query which categories it belongs to.
   swoc::IPAddr const &addr;
 
-  /// The result of the query: the hook sets this to true of @a addr is in @a
-  /// category, false otherwise.
-  bool contains = false;
+  /// The result of the query: the IP categories that @a addr belongs to.
+  std::unordered_set<int> &categories;
 };
 
 class ConfigUpdateCallback : public Continuation

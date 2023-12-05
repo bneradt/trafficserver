@@ -160,7 +160,7 @@ IpAllow::AskHooksAboutCategory(std::string_view category, swoc::IPAddr const &ad
 }
 
 IpAllow::ACL
-IpAllow::match(swoc::IPAddr const &addr, match_key_t key)
+IpAllow::match(swoc::IPAddr const &addr, Categories_t const &addr_categories, match_key_t key)
 {
   self_type *self                  = acquire();
   Record const *record             = nullptr;
@@ -171,9 +171,9 @@ IpAllow::match(swoc::IPAddr const &addr, match_key_t key)
   IpMap &map               = key == SRC_ADDR ? self->_src_map : self->_dst_map;
   IpCategories &categories = key == SRC_ADDR ? self->_src_categories : self->_dst_categories;
 
-  if (!categories.empty()) {
-    for (auto const &[category, r] : categories) {
-      if (AskHooksAboutCategory(category, addr)) {
+  if (!addr_categories.empty()) {
+    for (auto const &[record_category, r] : categories) {
+      if (addr_categories.find(record_category) != addr_categories.end()) {
         ip_category_record = r;
         break;
       }

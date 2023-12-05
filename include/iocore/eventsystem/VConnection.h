@@ -25,6 +25,7 @@
 #pragma once
 
 #include "tscore/ink_platform.h"
+#include "tscore/IPCategory.h"
 #include "tscore/PluginUserArgs.h"
 #include "iocore/eventsystem/EventSystem.h"
 
@@ -131,6 +132,8 @@ enum TSApiDataType {
 };
 
 typedef struct tsapi_vio *TSVIO;
+
+class APIHook;
 
 /**
   Base class for the connection classes that provide IO capabilities.
@@ -366,6 +369,22 @@ public:
   mark_as_tunnel_endpoint()
   {
   }
+
+  /** Return the IP categores that this connection is associated with.
+   *
+   * IP Categories are an optional feature that allows a user to associate IP
+   * addresses with arbitrary categories that they can use for IP Allow/Deny
+   * rules. For more information, see the ip_allow.yaml documentation.
+   *
+   * Note that IP categories always apply to the remote address from the
+   * perspective of ATS. Thus this will apply to either the client's IP or the
+   * origin's IP.
+   *
+   * @param[in] hook The hooks with which to query the IP categories.
+   *
+   * @return the IP categories that this connection is associated with.
+   */
+  virtual Categories_t const &get_ip_categories(APIHook *hook) = 0;
 
   /**
     The error code from the last error.

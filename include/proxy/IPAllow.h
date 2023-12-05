@@ -40,6 +40,7 @@
 #include "swoc/swoc_file.h"
 #include "swoc/swoc_ip.h"
 #include "swoc/Errata.h"
+#include "tscore/IPCategory.h"
 
 // forward declare in name only so it can be a friend.
 struct IpAllowUpdate;
@@ -89,7 +90,7 @@ public:
   using self_type     = IpAllow; ///< Self reference type.
   using scoped_config = ConfigProcessor::scoped_config<self_type, self_type>;
   using IpMap         = swoc::IPSpace<Record const *>;
-  using IpCategories  = std::vector<std::pair<swoc::TextView, Record const *>>;
+  using IpCategories  = std::vector<std::pair<IPCategory, Record const *>>;
 
   // indicator for whether we should be checking the acl record for src ip or dest ip
   enum match_key_t { SRC_ADDR, DST_ADDR };
@@ -169,9 +170,9 @@ public:
 
   void Print() const;
 
-  static ACL match(swoc::IPAddr const &addr, match_key_t key);
-  static ACL match(swoc::IPEndpoint const *addr, match_key_t key);
-  static ACL match(sockaddr const *sa, match_key_t key);
+  static ACL match(swoc::IPAddr const &addr, Categories_t const &categories, match_key_t key);
+  static ACL match(swoc::IPEndpoint const *addr, Categories_t const &categories, match_key_t key);
+  static ACL match(sockaddr const *sa, Categories_t const &categories, match_key_t key);
 
   static void startup();
   static void reconfigure();
@@ -360,15 +361,15 @@ IpAllow::isAcceptCheckEnabled()
 }
 
 inline auto
-IpAllow::match(swoc::IPEndpoint const *addr, match_key_t key) -> ACL
+IpAllow::match(swoc::IPEndpoint const *addr, Categories_t const &categories, match_key_t key) -> ACL
 {
-  return self_type::match(swoc::IPAddr(&addr->sa), key);
+  return self_type::match(swoc::IPAddr(&addr->sa), categories, key);
 }
 
 inline auto
-IpAllow::match(sockaddr const *sa, match_key_t key) -> ACL
+IpAllow::match(sockaddr const *sa, Categories_t const &categories, match_key_t key) -> ACL
 {
-  return self_type::match(swoc::IPAddr(sa), key);
+  return self_type::match(swoc::IPAddr(sa), categories, key);
 }
 
 inline auto

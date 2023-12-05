@@ -168,6 +168,12 @@ CacheProcessor::afterInitCallbackSet(CALLBACK_FUNC cb)
 }
 
 struct CacheVConnection : public VConnection {
+  Categories_t const &
+  get_ip_categories(APIHook *) override
+  {
+    static Categories_t empty;
+    return empty;
+  }
   VIO *do_io_read(Continuation *c, int64_t nbytes, MIOBuffer *buf) override                           = 0;
   virtual VIO *do_io_pread(Continuation *c, int64_t nbytes, MIOBuffer *buf, int64_t offset)           = 0;
   VIO *do_io_write(Continuation *c, int64_t nbytes, IOBufferReader *buf, bool owner = false) override = 0;

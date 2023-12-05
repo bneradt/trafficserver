@@ -87,7 +87,7 @@ handle_ip_category(TSHttpIpAllowInfo infop)
   TSHttpIpAllowInfoAddrGet(infop, address);
 
   bool const is_contained = is_in_category(category, address);
-  TSHttpIpAllowInfoContainsSet(infop, is_contained);
+  TSHttpIpAllowInfoCategoriesSet(infop, is_contained);
 
   swoc::LocalBufferWriter<500> w;
   w.print("Address {} is in category {}: {}", swoc::IPAddr{&address}, category, is_contained);

@@ -33,8 +33,10 @@
 #error "Must compile ATS plugin code with C++ version 17 or later."
 #endif
 
+#include <string>
 #include <type_traits>
-#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "tsutil/DbgCtl.h"
 #include "ts/apidefs.h"
@@ -1845,29 +1847,28 @@ namespace c
   /* --------------------------------------------------------------------------
      ip_allow category specification */
 
-  /** Obtain the category name being inspected.
-   * @param[in] infop The ip_allow info object.
-   * @param[out] category The category name being inspected whether it contains
-   *   the address obtained via @a TSHttpIpAllowInfoAddrGet.
-   * @return TS_SUCCESS if the category name was obtained, TS_ERROR otherwise.
+  /** Set the IP category name-to-integer map for IP Allow.
+   *
+   * This makes working with the categories more efficient by associating each
+   * name with an integer.
+   *
+   * @param[in] category_map The new map to set in core.
    */
-  TSReturnCode TSHttpIpAllowInfoCategoryGet(TSHttpIpAllowInfo infop, std::string_view &category);
+  void TSHttpIpAllowTableSet(std::unordered_map<std::string, int> const &category_map);
 
-  /** Obtain the address being queried whether it belongs to a category.
+  /** Obtain the address being queried for the IP categories to which it belongs.
    * @param[in] infop The ip_allow info object.
-   * @param[out] addr The address being queried against a category obtained via
-   *   @a TSHttpIpAllowInfoCategoryGet.
+   * @param[out] addr The address being queried.
    * @return TS_SUCCESS if the address was obtained, TS_ERROR otherwise.
    */
   TSReturnCode TSHttpIpAllowInfoAddrGet(TSHttpIpAllowInfo infop, sockaddr &addr);
 
-  /** Set whether an address applies to a category.
+  /** Set the categories associated with the provided address.
    * @param[in] infop The ip_allow info object.
-   * @param[in] contains Whether the address obtained via
-   *  @a TSHttpIpAllowInfoAddrGet is contained in the category obtained via
-   *  @a TSHttpIpAllowInfoCategoryGet.
+   * @param[out] categories The categories to associate with the address
+   * obtained via @a TSHttpIpAllowInfoAddrGet.
    */
-  void TSHttpIpAllowInfoContainsSet(TSHttpIpAllowInfo infop, bool contains);
+  void TSHttpIpAllowInfoCategoriesSet(TSHttpIpAllowInfo infop, std::unordered_set<int> const &categories);
 
   /* --------------------------------------------------------------------------
      Actions */

@@ -24,9 +24,11 @@
 #include "P_Net.h"
 
 #include "P_NetAccept.h"
+#include "api/InkAPIInternal.h"
 #include "iocore/net/ConnectionTracker.h"
 #include "tscore/ink_platform.h"
 #include "tscore/InkErrno.h"
+#include "tscore/IPCategory.h"
 
 #include <termios.h>
 
@@ -1565,4 +1567,30 @@ UnixNetVConnection::_out_context_tunnel()
 {
   Metrics::Counter::increment(net_rsb.tunnel_total_server_connections_blind_tcp);
   Metrics::Gauge::increment(net_rsb.tunnel_current_server_connections_blind_tcp);
+}
+
+Categories_t const &
+UnixNetVConnection::get_ip_categories(APIHook *hook)
+{
+  if (_ip_categories.has_value()) {
+    // Return the memoized categories.
+    return this->_ip_categories.value();
+  }
+  if (hook == nullptr) {
+    this->_ip_categories = std::unordered_set<IPCategory>{};
+    return this->_ip_categories.value();
+  }
+
+  std::unordered_set<int> categories;
+  swoc::IPAddr ip_addr{con.addr};
+  HttpIpAllowInfo info{ip_addr, categories};
+  for (; hook != nullptr; hook = hook->next()) {
+    hook->invoke(TS_EVENT_HTTP_IP_ALLOW_CATEGORY, &info);
+  }
+
+  // Now convert the int types to IPCategory for set.
+  for (auto &&category : categories) {
+    this->_ip_categories.value().emplace(category);
+  }
+  return this->_ip_categories.value();
 }

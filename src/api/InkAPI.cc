@@ -6184,15 +6184,6 @@ tsapi::c::TSHttpAltInfoQualitySet(TSHttpAltInfo infop, float quality)
 
 /* ip_allow category specification */
 TSReturnCode
-tsapi::c::TSHttpIpAllowInfoCategoryGet(TSHttpIpAllowInfo infop, std::string_view &category)
-{
-  sdk_assert(sdk_sanity_check_ip_allow_info(infop) == TS_SUCCESS);
-  HttpIpAllowInfo *info = reinterpret_cast<HttpIpAllowInfo *>(infop);
-  category              = info->category;
-  return TS_SUCCESS;
-}
-
-TSReturnCode
 tsapi::c::TSHttpIpAllowInfoAddrGet(TSHttpIpAllowInfo infop, sockaddr &addr)
 {
   sdk_assert(sdk_sanity_check_ip_allow_info(infop) == TS_SUCCESS);
@@ -6207,11 +6198,11 @@ tsapi::c::TSHttpIpAllowInfoAddrGet(TSHttpIpAllowInfo infop, sockaddr &addr)
 }
 
 void
-tsapi::c::TSHttpIpAllowInfoContainsSet(TSHttpIpAllowInfo infop, bool contains)
+tsapi::c::TSHttpIpAllowInfoCategoriesSet(TSHttpIpAllowInfo infop, std::unordered_set<int> const &categories)
 {
   sdk_assert(sdk_sanity_check_ip_allow_info(infop) == TS_SUCCESS);
   HttpIpAllowInfo *info = reinterpret_cast<HttpIpAllowInfo *>(infop);
-  info->contains        = contains;
+  info->categories      = categories;
 }
 
 extern HttpSessionAccept *plugin_http_accept;
