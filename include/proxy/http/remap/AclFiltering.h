@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include "tscore/IPCategory.h"
 #include "tscore/ink_inet.h"
 
 #include "swoc/IPAddr.h"
@@ -62,25 +63,21 @@ struct src_ip_info_t {
 };
 
 struct src_ip_category_info_t {
-  std::string category; ///< The IP category for this remap rule.
-  bool invert = false;  ///< Should we "invert" the meaning of these IP categories ("not in categories")
+  IPCategory category; ///< The IP category for this remap rule.
+  bool invert = false; ///< Should we "invert" the meaning of these IP categories ("not in categories")
 
   void
   reset()
   {
-    category.clear();
     invert = false;
   }
 
   /// @return @c true if @a ip is inside @a this categories.
   bool
-  contains(IpEndpoint const &ip) const
+  contains(Categories_t const &categories) const
   {
-    return ask_hooks_about_category(category, swoc::IPAddr{ip});
+    return categories.find(category) != categories.end();
   }
-
-private:
-  bool ask_hooks_about_category(std::string_view category, swoc::IPAddr const &addr) const;
 };
 
 /**

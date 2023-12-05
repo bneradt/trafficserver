@@ -204,10 +204,36 @@ public:
 
   const swoc::file::path &get_config_file() const;
 
+  /** Update the core's IP category map from the given map.
+   *
+   * This function will update the internal category names from the given map.
+   * It will not replace the map from the provided one because multiple plugins
+   * may call TSHttpIpAllowTableSet and they should not delete each other's
+   * names.
+   *
+   * @param[in] map The map with the new category names and values.
+   */
+  static void update_ip_category_map(std::unordered_map<std::string, int> const &map);
+
+  /** Query the core's IP category map for the value from the given name.
+   *
+   * @param[in] category_name The name of the category to get the value for.
+   * @param[out] category_value The user provided value for @a category_name.
+   *
+   * @return True if the category name was found, false otherwise.
+   */
+  static bool get_category_from_name(std::string const &category_name, IPCategory &category_value);
+
 private:
   static size_t configid;               ///< Configuration ID for update management.
   static const Record ALLOW_ALL_RECORD; ///< Static record that allows all access.
   static bool accept_check_p;           ///< @c true if deny all can be enforced during accept.
+
+  /** Map of category names to category values.
+   *
+   * The user sets this via TSHttpIpAllowTableSet.
+   */
+  static std::unordered_map<std::string, IPCategory> _ip_category_map;
 
   /** Dispatch to the TS_HTTP_IP_ALLOW_CATEGORY_HOOK.
    *

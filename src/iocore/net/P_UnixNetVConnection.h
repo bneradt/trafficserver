@@ -33,9 +33,7 @@
 
 #include <memory>
 
-#include "api/APIHook.h"
 #include "tscore/ink_sock.h"
-#include "tscore/IPCategory.h"
 #include "iocore/net/ConnectionTracker.h"
 #include "iocore/net/NetVConnection.h"
 #include "P_UnixNetState.h"
@@ -254,8 +252,6 @@ public:
     return _is_tunnel_endpoint;
   }
 
-  Categories_t const &get_ip_categories(APIHook *hook) override;
-
 private:
   virtual void *_prepareForMigration();
   virtual NetProcessor *_getNetProcessor();
@@ -274,9 +270,6 @@ private:
   /** The shared group across all connections for this IP to track incoming
    * connections for connection limiting. */
   std::shared_ptr<ConnectionTracker::Group> conn_track_group;
-
-  /** The memoized set of IP categories for the associated @a con. */
-  std::optional<Categories_t> _ip_categories;
 };
 
 extern ClassAllocator<UnixNetVConnection> netVCAllocator;

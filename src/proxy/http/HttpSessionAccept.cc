@@ -22,6 +22,8 @@
  */
 
 #include "proxy/http/HttpSessionAccept.h"
+#include "api/APIHook.h"
+#include "proxy/HttpAPIHooks.h"
 #include "proxy/IPAllow.h"
 #include "proxy/http/Http1ClientSession.h"
 #include "iocore/utils/Machine.h"
@@ -33,7 +35,8 @@ HttpSessionAccept::accept(NetVConnection *netvc, MIOBuffer *iobuf, IOBufferReade
   IpAllow::ACL acl;
   ip_port_text_buffer ipb;
 
-  acl = IpAllow::match(client_ip, IpAllow::SRC_ADDR);
+  APIHook *hooks = http_global_hooks->get(TS_HTTP_IP_ALLOW_CATEGORY_HOOK);
+  acl            = IpAllow::match(client_ip, netvc->get_ip_categories(hooks), IpAllow::SRC_ADDR);
   if (!acl.isValid()) { // if there's no ACL, it's a hard deny.
     Warning("client '%s' prohibited by ip-allow policy", ats_ip_ntop(client_ip, ipb, sizeof(ipb)));
     return false;

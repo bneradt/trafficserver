@@ -6183,6 +6183,12 @@ tsapi::c::TSHttpAltInfoQualitySet(TSHttpAltInfo infop, float quality)
 }
 
 /* ip_allow category specification */
+void
+tsapi::c::TSHttpIpAllowTableSet(std::unordered_map<std::string, int> const &category_map)
+{
+  IpAllow::update_ip_category_map(category_map);
+}
+
 TSReturnCode
 tsapi::c::TSHttpIpAllowInfoAddrGet(TSHttpIpAllowInfo infop, sockaddr &addr)
 {

@@ -35,6 +35,7 @@
 #include "iocore/eventsystem/VConnection.h"
 #include "iocore/eventsystem/Event.h"
 #include "tscore/List.h"
+#include "tscore/IPCategory.h"
 #include "iocore/eventsystem/IOBuffer.h"
 #include "iocore/net/Socks.h"
 #include "ts/apidefs.h"
@@ -53,6 +54,8 @@ typedef enum {
   NET_VCONNECTION_IN,  // Client <--> ATS, Client-Side
   NET_VCONNECTION_OUT, // ATS <--> Server, Server-Side
 } NetVConnectionContext_t;
+
+class APIHook;
 
 /**
   A VConnection for a network socket. Abstraction for a net connection.
@@ -521,6 +524,8 @@ public:
 
   template <typename S> S *get_service() const;
 
+  Categories_t const &get_ip_categories(APIHook *hook) override;
+
 protected:
   enum class Service : uint8_t {
     TLS_ALPN,
@@ -553,6 +558,8 @@ protected:
   int write_buffer_empty_event = 0;
   /// NetVConnection Context.
   NetVConnectionContext_t netvc_context = NET_VCONNECTION_UNSET;
+  /// The memoized set of IP categories for the associated @a remote_addr.
+  std::optional<Categories_t> _ip_categories;
 
   template <typename S> void _set_service(S *instance);
 

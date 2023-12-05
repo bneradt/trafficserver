@@ -76,6 +76,13 @@ public:
   */
   virtual uint64_t backlog(uint64_t limit = UINT64_MAX ///< Maximum value of interest
                            ) = 0;
+
+  Categories_t const &
+  get_ip_categories(APIHook *hook) override
+  {
+    static Categories_t empty;
+    return empty;
+  }
 };
 
 inline TransformVCChain::TransformVCChain(ProxyMutex *m) : VConnection(m) {}

@@ -28,27 +28,6 @@
 #include "proxy/hdrs/HTTP.h"
 
 // ===============================================================================
-//                           src_ip_category_info_t
-// ===============================================================================
-
-bool
-src_ip_category_info_t::ask_hooks_about_category(std::string_view category, swoc::IPAddr const &addr) const
-{
-  APIHook *hook = http_global_hooks->get(TS_HTTP_IP_ALLOW_CATEGORY_HOOK);
-  if (hook == nullptr) {
-    return false;
-  }
-  HttpIpAllowInfo info{category, addr};
-  for (; hook != nullptr; hook = hook->next()) {
-    hook->invoke(TS_EVENT_HTTP_IP_ALLOW_CATEGORY, &info);
-    if (info.contains) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// ===============================================================================
 //                              acl_filter_rule
 // ===============================================================================
 
@@ -143,7 +122,7 @@ acl_filter_rule::print()
   printf("\n");
   printf("src_ip_category_cnt=%d\n", src_ip_category_cnt);
   for (i = 0; i < src_ip_category_cnt; i++) {
-    printf("%s, ", src_ip_category_array[i].category.c_str());
+    printf("%d, ", static_cast<int>(src_ip_category_array[i].category));
   }
   printf("\n");
   printf("in_ip_cnt=%d\n", in_ip_cnt);

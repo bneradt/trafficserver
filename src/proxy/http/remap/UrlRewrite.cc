@@ -23,6 +23,7 @@
  */
 
 #include "proxy/http/remap/UrlRewrite.h"
+#include "api/APIHook.h"
 #include "iocore/eventsystem/ConfigProcessor.h"
 #include "proxy/ReverseProxy.h"
 #include "proxy/http/remap/RemapConfig.h"
@@ -448,7 +449,9 @@ UrlRewrite::PerformACLFiltering(HttpTransact::State *s, url_mapping *map)
         Debug("url_rewrite", "match was true and we have specified an src_ip_category field");
         match = false;
         for (int j = 0; j < rp->src_ip_category_cnt && !match; j++) {
-          bool in_category = rp->src_ip_category_array[j].contains(s->client_info.src_addr);
+          APIHook *hooks                 = http_global_hooks->get(TS_HTTP_IP_ALLOW_CATEGORY_HOOK);
+          Categories_t const &categories = s->state_machine->get_ua_txn()->get_netvc()->get_ip_categories(hooks);
+          bool in_category               = rp->src_ip_category_array[j].contains(categories);
           if (rp->src_ip_category_array[j].invert) {
             if (!in_category) {
               match = true;

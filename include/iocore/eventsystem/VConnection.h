@@ -428,5 +428,14 @@ struct DummyVConnection : public VConnection, public PluginUserArgs<TS_USER_ARGS
                 "cannot use default implementation");
   }
 
+  Categories_t const &
+  get_ip_categories(APIHook *hook) override
+  {
+    ink_assert(!"VConnection::do_io_shutdown -- "
+                "cannot use default implementation");
+    static Categories_t empty;
+    return empty;
+  }
+
   explicit DummyVConnection(ProxyMutex *m) : VConnection(m) {}
 };

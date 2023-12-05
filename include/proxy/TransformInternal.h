@@ -41,6 +41,13 @@ public:
 
   void reenable(VIO *vio) override;
 
+  Categories_t const &
+  get_ip_categories(APIHook *hook) override
+  {
+    static Categories_t empty;
+    return empty;
+  }
+
 public:
   TransformVConnection *m_tvc;
   VIO m_read_vio;

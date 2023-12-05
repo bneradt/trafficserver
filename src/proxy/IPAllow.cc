@@ -31,6 +31,7 @@
 #include "ts/apidefs.h"
 #include "tscore/Filenames.h"
 #include "proxy/HttpAPIHooks.h"
+#include "tscore/IPCategory.h"
 #include "tsutil/ts_errata.h"
 
 #include "swoc/Vectray.h"
@@ -140,23 +141,6 @@ void
 IpAllow::release()
 {
   configProcessor.release(configid, this);
-}
-
-bool
-IpAllow::AskHooksAboutCategory(std::string_view category, swoc::IPAddr const &addr)
-{
-  APIHook *hook = http_global_hooks->get(TS_HTTP_IP_ALLOW_CATEGORY_HOOK);
-  if (hook == nullptr) {
-    return false;
-  }
-  HttpIpAllowInfo info{category, addr};
-  for (; hook != nullptr; hook = hook->next()) {
-    hook->invoke(TS_EVENT_HTTP_IP_ALLOW_CATEGORY, &info);
-    if (info.contains) {
-      return true;
-    }
-  }
-  return false;
 }
 
 IpAllow::ACL
@@ -374,7 +358,15 @@ IpAllow::YAMLLoadIPCategory(const YAML::Node &node, IpCategories *categories, Ip
   if (!node.IsScalar()) {
     return swoc::Errata(ERRATA_ERROR, "{} Expected IP address category at {}, found non-literal.", this, node.Mark());
   }
-  categories->emplace_back(node.Scalar(), record);
+  // Convert the human readable string version of the category to the
+  // plugin-provided integer representation.
+  std::string category_name{node.Scalar()};
+  auto spot = _ip_category_map.find(category_name);
+  if (spot == _ip_category_map.end()) {
+    return swoc::Errata(ERRATA_ERROR, "{} {} - '{}' is not a recognized category.", this, node.Mark(), category_name);
+  }
+  IPCategory ip_category{spot->second};
+  categories->emplace_back(ip_category, record);
   return {};
 }
 
@@ -525,4 +517,23 @@ IpAllow::YAMLBuildTable(std::string const &content)
     return swoc::Errata("{} - root tag '{}' is not an map or sequence. All IP Addresses will be blocked", this, YAML_TAG_ROOT);
   }
   return {};
+}
+
+void
+IpAllow::update_ip_category_map(std::unordered_map<std::string, int> const &map)
+{
+  for (auto const &[name, value] : map) {
+    IpAllow::_ip_category_map[name] = IPCategory(value);
+  }
+}
+
+bool
+IpAllow::get_category_from_name(std::string const &category_name, IPCategory &category)
+{
+  auto spot = _ip_category_map.find(category_name);
+  if (spot == _ip_category_map.end()) {
+    return false;
+  }
+  category = spot->second;
+  return true;
 }

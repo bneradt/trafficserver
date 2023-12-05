@@ -33,6 +33,7 @@
 #include <swoc/TextView.h>
 
 #include "P_Net.h"
+#include "api/InkAPIInternal.h"
 #include "ts/apidefs.h"
 
 ////
@@ -88,6 +89,32 @@ NetVConnection::has_proxy_protocol(char *buffer, int64_t *bytes_r)
   }
 
   return true;
+}
+
+Categories_t const &
+NetVConnection::get_ip_categories(APIHook *hook)
+{
+  if (_ip_categories.has_value()) {
+    // Return the memoized categories.
+    return this->_ip_categories.value();
+  }
+  if (hook == nullptr) {
+    this->_ip_categories = std::unordered_set<IPCategory>{};
+    return this->_ip_categories.value();
+  }
+
+  std::unordered_set<int> categories;
+  swoc::IPAddr ip_addr{&remote_addr.sa};
+  HttpIpAllowInfo info{ip_addr, categories};
+  for (; hook != nullptr; hook = hook->next()) {
+    hook->invoke(TS_EVENT_HTTP_IP_ALLOW_CATEGORY, &info);
+  }
+
+  // Now convert the int types to IPCategory for set.
+  for (auto &&category : categories) {
+    this->_ip_categories.value().emplace(category);
+  }
+  return this->_ip_categories.value();
 }
 
 ////

@@ -35,7 +35,6 @@
 
 #include "api/APIHook.h"
 #include "api/APIHooks.h"
-#include "api/FeatureAPIHooks.h"
 
 #include "swoc/swoc_file.h"
 #include "swoc/swoc_ip.h"

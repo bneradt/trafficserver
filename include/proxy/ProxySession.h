@@ -155,6 +155,7 @@ public:
   VIO *do_io_write(Continuation *c = nullptr, int64_t nbytes = INT64_MAX, IOBufferReader *buf = 0, bool owner = false) override;
   void do_io_shutdown(ShutdownHowTo_t howto) override;
   void reenable(VIO *vio) override;
+  Categories_t const &get_ip_categories(APIHook *hook) override;
 
   virtual ProxyTransaction *
   new_transaction()
@@ -205,6 +206,9 @@ private:
 
   APIHook const *cur_hook = nullptr;
   HttpAPIHooks api_hooks;
+
+  /// The memoized set of IP categories for the associated @a get_remote_addr.
+  std::optional<Categories_t> _ip_categories;
 
   // for DI. An active connection is one that a request has
   // been successfully parsed (PARSE_DONE) and it remains to

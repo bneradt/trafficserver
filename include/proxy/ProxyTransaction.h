@@ -144,12 +144,16 @@ public:
 
   IOBufferReader *get_remote_reader();
 
+  Categories_t const &get_ip_categories(APIHook *hook) override;
+
 protected:
   ProxySession *_proxy_ssn = nullptr;
   HttpSM *_sm              = nullptr;
   IOBufferReader *_reader  = nullptr;
 
 private:
+  /// The memoized set of IP categories for the associated @a get_remote_addr.
+  std::optional<Categories_t> _ip_categories;
 };
 
 ////////////////////////////////////////////////////////////
