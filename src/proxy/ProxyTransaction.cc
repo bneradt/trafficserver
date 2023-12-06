@@ -24,6 +24,8 @@
 #include "proxy/http/HttpSM.h"
 #include "proxy/Plugin.h"
 
+#include "iocore/net/ConnectionAPIHooks.h"
+
 #define HttpTxnDebug(fmt, ...) SsnDebug(this, "http_txn", fmt, __VA_ARGS__)
 
 extern ClassAllocator<HttpSM> httpSMAllocator;
@@ -286,8 +288,9 @@ ProxyTransaction::mark_as_tunnel_endpoint()
 }
 
 Categories_t const &
-ProxyTransaction::get_ip_categories(APIHook *hook)
+ProxyTransaction::get_ip_categories()
 {
+  APIHook *hook = global_connection_hooks->get(TS_CONNECTION_IP_CATEGORY_HOOK);
   if (_ip_categories.has_value()) {
     // Return the memoized categories.
     return this->_ip_categories.value();
@@ -301,7 +304,7 @@ ProxyTransaction::get_ip_categories(APIHook *hook)
   swoc::IPAddr ip_addr{this->get_remote_addr()};
   HttpIpAllowInfo info{ip_addr, categories};
   for (; hook != nullptr; hook = hook->next()) {
-    hook->invoke(TS_EVENT_HTTP_IP_ALLOW_CATEGORY, &info);
+    hook->invoke(TS_EVENT_CONNECTION_IP_CATEGORY, &info);
   }
 
   // Now convert the int types to IPCategory for set.

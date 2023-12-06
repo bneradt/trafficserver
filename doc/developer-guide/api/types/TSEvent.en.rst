@@ -165,7 +165,7 @@ Enumeration Members
 
 .. c:macro:: TS_EVENT_HTTP_CACHE_LOOKUP_COMPLETE
 
-.. c:macro:: TS_EVENT_HTTP_IP_ALLOW_CATEGORY
+.. c:macro:: TS_EVENT_CONNECTION_IP_CATEGORY
 
 .. c:macro:: TS_EVENT_HTTP_PRE_REMAP
 

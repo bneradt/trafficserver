@@ -87,7 +87,7 @@ The keys in a rule are:
 ``ip_category``
    An arbitrary string identifying a category of IP addresses. Whether a given
    IP address applies to this category is implemented in a user plugin via a
-   handler for the TS_HTTP_IP_ALLOW_CATEGORY_HOOK. This can be either a single
+   handler for the TS_CONNECTION_IP_CATEGORY_HOOK. This can be either a single
    category or an array of categories. IP categories are helpful in situations
    where the IP addresses for a rule are not easily specified using IP address
    ranges. An organization may, for instance, implement categories of IP
@@ -250,7 +250,7 @@ the ``ip_category`` is ``ACME_INTERNAL`` which is presumably associated with
 trusted internal IP addresses and thus are allowed to ``POST`` and ``DELETE``
 resources.  |TS| core queries which IP addresses are associated with
 ``ACME_INTERNAL`` via a plugin which implement the
-``TS_HTTP_IP_ALLOW_CATEGORY_HOOK`` callback. See the example
+``TS_CONNECTION_IP_CATEGORY_HOOK`` callback. See the example
 `ip_allow <https://github.com/apache/trafficserver/blob/master/example/plugins/c-api/ip_category/ip_category.cc>`_
 plugin for a demonstration of a plugin that implements the required interface.
 

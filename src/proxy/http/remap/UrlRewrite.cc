@@ -449,8 +449,7 @@ UrlRewrite::PerformACLFiltering(HttpTransact::State *s, url_mapping *map)
         Debug("url_rewrite", "match was true and we have specified an src_ip_category field");
         match = false;
         for (int j = 0; j < rp->src_ip_category_cnt && !match; j++) {
-          APIHook *hooks                 = http_global_hooks->get(TS_HTTP_IP_ALLOW_CATEGORY_HOOK);
-          Categories_t const &categories = s->state_machine->get_ua_txn()->get_netvc()->get_ip_categories(hooks);
+          Categories_t const &categories = s->state_machine->get_ua_txn()->get_netvc()->get_ip_categories();
           bool in_category               = rp->src_ip_category_array[j].contains(categories);
           if (rp->src_ip_category_array[j].invert) {
             if (!in_category) {

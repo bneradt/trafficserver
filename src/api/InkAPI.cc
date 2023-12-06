@@ -59,6 +59,7 @@
 #include "../iocore/net/P_SSLConfig.h"
 #include "../iocore/net/P_SSLClientUtils.h"
 #include "iocore/net/ConnectionTracker.h"
+#include "iocore/net/ConnectionAPIHooks.h"
 #include "iocore/net/SSLAPIHooks.h"
 #include "iocore/net/SSLDiags.h"
 #include "iocore/net/TLSBasicSupport.h"
@@ -744,6 +745,12 @@ sdk_sanity_check_hook_id(TSHttpHookID id)
 }
 
 TSReturnCode
+sdk_sanity_check_connection_hook_id(TSConnectionHookID id)
+{
+  return ConnectionAPIHooks::is_valid(id) ? TS_SUCCESS : TS_ERROR;
+}
+
+TSReturnCode
 sdk_sanity_check_lifecycle_hook_id(TSLifecycleHookID id)
 {
   return LifecycleAPIHooks::is_valid(id) ? TS_SUCCESS : TS_ERROR;
@@ -1315,6 +1322,7 @@ api_init()
     TS_HTTP_LEN_PUBLIC           = HTTP_LEN_PUBLIC;
     TS_HTTP_LEN_S_MAXAGE         = HTTP_LEN_S_MAXAGE;
 
+    init_global_connection_hooks();
     init_global_http_hooks();
     init_global_ssl_hooks();
     init_global_lifecycle_hooks();
@@ -4365,6 +4373,17 @@ tsapi::c::TSContMutexGet(TSCont contp)
 
   Continuation *c = (Continuation *)contp;
   return (TSMutex)(c->mutex.get());
+}
+
+/* Connection hooks */
+void
+tsapi::c::TSConnectionHookAdd(TSConnectionHookID id, TSCont contp)
+{
+  sdk_assert(sdk_sanity_check_continuation(contp) == TS_SUCCESS);
+  sdk_assert(sdk_sanity_check_connection_hook_id(id) == TS_SUCCESS);
+
+  auto *icontp = reinterpret_cast<INKContInternal *>(contp);
+  global_connection_hooks->append(id, icontp);
 }
 
 /* HTTP hooks */

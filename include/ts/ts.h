@@ -1293,6 +1293,9 @@ namespace c
   TSMutex TSContMutexGet(TSCont contp);
 
   /* --------------------------------------------------------------------------
+     Connection hooks */
+  void TSConnectionHookAdd(TSConnectionHookID id, TSCont contp);
+  /* --------------------------------------------------------------------------
      Plugin lifecycle  hooks */
   void TSLifecycleHookAdd(TSLifecycleHookID id, TSCont contp);
   /* --------------------------------------------------------------------------

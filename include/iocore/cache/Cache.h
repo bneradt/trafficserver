@@ -169,7 +169,7 @@ CacheProcessor::afterInitCallbackSet(CALLBACK_FUNC cb)
 
 struct CacheVConnection : public VConnection {
   Categories_t const &
-  get_ip_categories(APIHook *) override
+  get_ip_categories() override
   {
     static Categories_t empty;
     return empty;

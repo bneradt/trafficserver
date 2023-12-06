@@ -36,6 +36,19 @@ countof(const T (&)[N])
 }
 
 static int
+ConnectionHookTracer(TSCont contp, TSEvent event, void *edata)
+{
+  switch (event) {
+  case TS_EVENT_CONNECTION_IP_CATEGORY:
+    Dbg(dbg_ctl, "Received CONNECTION_IP_CATEGORY data %p", edata);
+    break;
+  default:
+    Dbg(dbg_ctl, "Received unsupported connection event %d data %p", event, edata);
+    break;
+  }
+  return TS_EVENT_NONE;
+}
+static int
 HttpHookTracer(TSCont contp, TSEvent event, void *edata)
 {
   union {
@@ -118,11 +131,6 @@ HttpHookTracer(TSCont contp, TSEvent event, void *edata)
     TSHttpTxnReenable(ev.txn, TS_EVENT_HTTP_CONTINUE);
     break;
 
-  case TS_EVENT_HTTP_IP_ALLOW_CATEGORY:
-    Dbg(dbg_ctl, "Received IP_ALLOW_CATEGORY with ip_allow_info %p", ev.allow_info);
-    TSHttpTxnReenable(ev.txn, TS_EVENT_HTTP_CONTINUE);
-    break;
-
   default:
     break;
   }
@@ -170,6 +178,10 @@ void
 TSPluginInit(int argc, const char *argv[])
 {
   // clang-format off
+  static const TSConnectionHookID connection[] = {
+    TS_CONNECTION_IP_CATEGORY_HOOK,
+  };
+
   static const TSHttpHookID http[] = {
     TS_HTTP_READ_REQUEST_HDR_HOOK,
     TS_HTTP_OS_DNS_HOOK,
@@ -185,7 +197,6 @@ TSPluginInit(int argc, const char *argv[])
     TS_HTTP_CACHE_LOOKUP_COMPLETE_HOOK,
     TS_HTTP_PRE_REMAP_HOOK,
     TS_HTTP_POST_REMAP_HOOK,
-    TS_HTTP_IP_ALLOW_CATEGORY_HOOK,
   };
 
   static const TSLifecycleHookID lifecycle[] = {
@@ -214,6 +225,10 @@ TSPluginInit(int argc, const char *argv[])
 
   for (unsigned i = 0; i < countof(lifecycle); ++i) {
     TSLifecycleHookAdd(lifecycle[i], TSContCreate(LifecycleHookTracer, TSMutexCreate()));
+  }
+
+  for (unsigned i = 0; i < countof(connection); ++i) {
+    TSConnectionHookAdd(connection[i], TSContCreate(ConnectionHookTracer, TSMutexCreate()));
   }
 
   TSReleaseAssert(TSPluginRegister(&info) == TS_SUCCESS);

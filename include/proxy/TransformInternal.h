@@ -42,7 +42,7 @@ public:
   void reenable(VIO *vio) override;
 
   Categories_t const &
-  get_ip_categories(APIHook *hook) override
+  get_ip_categories() override
   {
     static Categories_t empty;
     return empty;

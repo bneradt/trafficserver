@@ -93,7 +93,7 @@ int rand_read_size            = 0;
 // We need this defined to satisfy the abtract interface since we don't link
 // against the NetVConnection definitions.
 Categories_t const &
-NetVConnection::get_ip_categories(APIHook *)
+NetVConnection::get_ip_categories()
 {
   static Categories_t empty;
   return empty;

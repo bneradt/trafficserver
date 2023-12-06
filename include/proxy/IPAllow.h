@@ -235,9 +235,9 @@ private:
    */
   static std::unordered_map<std::string, IPCategory> _ip_category_map;
 
-  /** Dispatch to the TS_HTTP_IP_ALLOW_CATEGORY_HOOK.
+  /** Dispatch to the TS_CONNECTION_IP_CATEGORY_HOOK.
    *
-   * This asks the registered TS_HTTP_IP_ALLOW_CATEGORY_HOOK callbacks whether
+   * This asks the registered TS_CONNECTION_IP_CATEGORY_HOOK callbacks whether
    * @a addr belongs to @a category.
    *
    * @param[in] category The category name to check.

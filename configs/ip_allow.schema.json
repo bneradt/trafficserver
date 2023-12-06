@@ -23,7 +23,7 @@
       "type": "string"
     },
     "category": {
-      "description": "An IP category whose set of IPs is determined by a TS_HTTP_IP_ALLOW_CATEGORY_HOOK plugin.",
+      "description": "An IP category whose set of IPs is determined by a TS_CONNECTION_IP_CATEGORY_HOOK plugin.",
       "type": "string"
     },
     "filter": {

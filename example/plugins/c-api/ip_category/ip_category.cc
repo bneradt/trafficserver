@@ -1,6 +1,6 @@
 /** @file
 
-  Demonstrate a TS_HTTP_IP_ALLOW_CATEGORY_HOOK plugin.
+  Demonstrate a TS_CONNECTION_IP_CATEGORY_HOOK plugin.
 
   @section license License
 
@@ -105,7 +105,7 @@ int
 ip_category_callback(TSCont contp, TSEvent event, void *edata)
 {
   switch (event) {
-  case tsapi::c::TS_EVENT_HTTP_IP_ALLOW_CATEGORY: {
+  case tsapi::c::TS_EVENT_CONNECTION_IP_CATEGORY: {
     TSHttpIpAllowInfo infop = static_cast<TSHttpIpAllowInfo>(edata);
     handle_ip_category(infop);
     break;
@@ -142,5 +142,5 @@ TSPluginInit(int argc, const char *argv[])
 
   // Populate the callback for dynamic category queries from the core.
   auto cont = TSContCreate(ip_category_callback, nullptr);
-  TSHttpHookAdd(TS_HTTP_IP_ALLOW_CATEGORY_HOOK, cont);
+  TSConnectionHookAdd(TS_CONNECTION_IP_CATEGORY_HOOK, cont);
 }

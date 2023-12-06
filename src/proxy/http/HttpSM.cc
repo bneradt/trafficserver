@@ -5112,8 +5112,7 @@ bool
 HttpSM::apply_ip_allow_filter()
 {
   // Method allowed on dest IP address check
-  APIHook *ip_allow_hooks        = http_global_hooks->get(TS_HTTP_IP_ALLOW_CATEGORY_HOOK);
-  Categories_t const &categories = server_txn->get_netvc()->get_ip_categories(ip_allow_hooks);
+  Categories_t const &categories = server_txn->get_netvc()->get_ip_categories();
   IpAllow::ACL acl               = IpAllow::match(this->get_server_remote_addr(), categories, IpAllow::DST_ADDR);
 
   if (ip_allow_is_request_forbidden(acl)) {

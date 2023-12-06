@@ -74,8 +74,8 @@ getEventName(TSEvent event)
     return "TS_EVENT_HTTP_PRE_REMAP";
   case TS_EVENT_HTTP_POST_REMAP:
     return "TS_EVENT_HTTP_POST_REMAP";
-  case TS_EVENT_HTTP_IP_ALLOW_CATEGORY:
-    return "TS_EVENT_HTTP_IP_ALLOW_CATEGORY";
+  case TS_EVENT_CONNECTION_IP_CATEGORY:
+    return "TS_EVENT_CONNECTION_IP_CATEGORY";
   default:
     return "UNHANDLED";
   }

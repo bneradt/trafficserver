@@ -35,8 +35,7 @@ HttpSessionAccept::accept(NetVConnection *netvc, MIOBuffer *iobuf, IOBufferReade
   IpAllow::ACL acl;
   ip_port_text_buffer ipb;
 
-  APIHook *hooks = http_global_hooks->get(TS_HTTP_IP_ALLOW_CATEGORY_HOOK);
-  acl            = IpAllow::match(client_ip, netvc->get_ip_categories(hooks), IpAllow::SRC_ADDR);
+  acl = IpAllow::match(client_ip, netvc->get_ip_categories(), IpAllow::SRC_ADDR);
   if (!acl.isValid()) { // if there's no ACL, it's a hard deny.
     Warning("client '%s' prohibited by ip-allow policy", ats_ip_ntop(client_ip, ipb, sizeof(ipb)));
     return false;

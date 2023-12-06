@@ -24,7 +24,9 @@
 #include "proxy/http/HttpConfig.h"
 #include "proxy/http/HttpDebugNames.h"
 #include "proxy/ProxySession.h"
+#include "iocore/net/ConnectionAPIHooks.h"
 #include "iocore/net/TLSBasicSupport.h"
+#include "ts/apidefs.h"
 
 std::map<int, std::function<PoolableSession *()>> ProtocolSessionCreateMap;
 
@@ -82,7 +84,7 @@ static const TSEvent eventmap[TS_HTTP_LAST_HOOK + 1] = {
   TS_EVENT_HTTP_RESPONSE_CLIENT,       // TS_HTTP_RESPONSE_CLIENT_HOOK
   TS_EVENT_HTTP_REQUEST_CLIENT,        // TS_HTTP_REQUEST_CLIENT_HOOK
   TS_EVENT_HTTP_TUNNEL_START,          // TS_HTTP_TUNNEL_START_HOOK
-  TS_EVENT_HTTP_IP_ALLOW_CATEGORY,     // TS_HTTP_IP_ALLOW_CATEGORY_HOOK
+  TS_EVENT_CONNECTION_IP_CATEGORY,     // TS_CONNECTION_IP_CATEGORY_HOOK
   TS_EVENT_NONE,                       // TS_HTTP_LAST_HOOK
 };
 
@@ -335,8 +337,9 @@ ProxySession::create_outbound_session(int protocol_index)
 }
 
 Categories_t const &
-ProxySession::get_ip_categories(APIHook *hook)
+ProxySession::get_ip_categories()
 {
+  APIHook *hook = global_connection_hooks->get(TS_CONNECTION_IP_CATEGORY_HOOK);
   if (_ip_categories.has_value()) {
     // Return the memoized categories.
     return this->_ip_categories.value();
@@ -350,7 +353,7 @@ ProxySession::get_ip_categories(APIHook *hook)
   swoc::IPAddr ip_addr{this->get_remote_addr()};
   HttpIpAllowInfo info{ip_addr, categories};
   for (; hook != nullptr; hook = hook->next()) {
-    hook->invoke(TS_EVENT_HTTP_IP_ALLOW_CATEGORY, &info);
+    hook->invoke(TS_EVENT_CONNECTION_IP_CATEGORY, &info);
   }
 
   // Now convert the int types to IPCategory for set.

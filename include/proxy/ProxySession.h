@@ -155,7 +155,7 @@ public:
   VIO *do_io_write(Continuation *c = nullptr, int64_t nbytes = INT64_MAX, IOBufferReader *buf = 0, bool owner = false) override;
   void do_io_shutdown(ShutdownHowTo_t howto) override;
   void reenable(VIO *vio) override;
-  Categories_t const &get_ip_categories(APIHook *hook) override;
+  Categories_t const &get_ip_categories() override;
 
   virtual ProxyTransaction *
   new_transaction()

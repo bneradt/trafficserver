@@ -144,7 +144,7 @@ public:
 
   IOBufferReader *get_remote_reader();
 
-  Categories_t const &get_ip_categories(APIHook *hook) override;
+  Categories_t const &get_ip_categories() override;
 
 protected:
   ProxySession *_proxy_ssn = nullptr;

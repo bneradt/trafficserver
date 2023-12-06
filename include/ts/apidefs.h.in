@@ -356,7 +356,6 @@ char const TS_VERSION_STRING[] = "@TS_VERSION_STRING@";
     TS_EVENT_HTTP_RESPONSE_CLIENT              = 60019,
     TS_EVENT_HTTP_REQUEST_CLIENT               = 60020,
     TS_EVENT_HTTP_TUNNEL_START                 = 60021,
-    TS_EVENT_HTTP_IP_ALLOW_CATEGORY            = 60022,
 
     TS_EVENT_LIFECYCLE_PORTS_INITIALIZED          = 60100,
     TS_EVENT_LIFECYCLE_PORTS_READY                = 60101,
@@ -378,6 +377,8 @@ char const TS_VERSION_STRING[] = "@TS_VERSION_STRING@";
     TS_EVENT_SSL_SECRET        = 60208,
 
     TS_EVENT_MGMT_UPDATE = 60300,
+
+    TS_EVENT_CONNECTION_IP_CATEGORY = 60400,
   };
   TSEvent const TS_EVENT_HTTP_READ_REQUEST_PRE_REMAP = TS_EVENT_HTTP_PRE_REMAP; /* backwards compat */
 
@@ -396,7 +397,6 @@ char const TS_VERSION_STRING[] = "@TS_VERSION_STRING@";
       The following hooks can ONLY be added globally:
        - TS_HTTP_SELECT_ALT_HOOK
        - TS_HTTP_SSN_START_HOOK
-       - TS_HTTP_IP_ALLOW_CATEGORY
 
       TSHttpSsnHookAdd: adds a transaction hook to each transaction
       within a session. You can only use transaction hooks with this call:
@@ -474,7 +474,6 @@ char const TS_VERSION_STRING[] = "@TS_VERSION_STRING@";
     DERIVE_HOOK_VALUE_FROM_EVENT(RESPONSE_CLIENT),              // TS_HTTP_RESPONSE_CLIENT_HOOK
     DERIVE_HOOK_VALUE_FROM_EVENT(REQUEST_CLIENT),               // TS_HTTP_REQUEST_CLIENT_HOOK
     DERIVE_HOOK_VALUE_FROM_EVENT(TUNNEL_START),                 // TS_HTTP_TUNNEL_START_HOOK
-    DERIVE_HOOK_VALUE_FROM_EVENT(IP_ALLOW_CATEGORY),            // TS_HTTP_IP_ALLOW_CATEGORY_HOOK
 
 // NOTE:
 // If adding any TS_HTTP hooks, be sure to understand the note above in the
@@ -586,6 +585,22 @@ char const TS_VERSION_STRING[] = "@TS_VERSION_STRING@";
     TS_LIFECYCLE_SHUTDOWN_HOOK,
     TS_LIFECYCLE_SSL_SECRET_HOOK,
     TS_LIFECYCLE_LAST_HOOK,
+  };
+
+  /** Connection level hooks.
+
+      Hooks that apply for low level connections rather than TLS session or HTTP
+      transactions.
+
+      TS_CONNECTION_IP_CATEGORY_HOOK
+
+        Called at most once per connection when IP categorization is helpful for
+        the connection. IP categorization is currently used for IP allow
+        filtering. See the documentation for ip_allow.yaml for more details.
+  */
+  enum TSConnectionHookID {
+    TS_CONNECTION_IP_CATEGORY_HOOK,
+    TS_CONNECTION_LAST_HOOK, // Keep last in the list.
   };
 
   enum TSServerState {

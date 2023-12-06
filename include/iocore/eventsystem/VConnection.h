@@ -370,7 +370,8 @@ public:
   {
   }
 
-  /** Return the IP categores that this connection is associated with.
+  /** Return the IP categories that this connection's remote address is
+   * associated with.
    *
    * IP Categories are an optional feature that allows a user to associate IP
    * addresses with arbitrary categories that they can use for IP Allow/Deny
@@ -380,11 +381,9 @@ public:
    * perspective of ATS. Thus this will apply to either the client's IP or the
    * origin's IP.
    *
-   * @param[in] hook The hooks with which to query the IP categories.
-   *
    * @return the IP categories that this connection is associated with.
    */
-  virtual Categories_t const &get_ip_categories(APIHook *hook) = 0;
+  virtual Categories_t const &get_ip_categories() = 0;
 
   /**
     The error code from the last error.
@@ -429,7 +428,7 @@ struct DummyVConnection : public VConnection, public PluginUserArgs<TS_USER_ARGS
   }
 
   Categories_t const &
-  get_ip_categories(APIHook *hook) override
+  get_ip_categories() override
   {
     ink_assert(!"VConnection::do_io_shutdown -- "
                 "cannot use default implementation");

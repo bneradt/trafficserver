@@ -524,7 +524,7 @@ public:
 
   template <typename S> S *get_service() const;
 
-  Categories_t const &get_ip_categories(APIHook *hook) override;
+  Categories_t const &get_ip_categories() override;
 
 protected:
   enum class Service : uint8_t {

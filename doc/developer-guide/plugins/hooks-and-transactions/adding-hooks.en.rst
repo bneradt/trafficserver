@@ -119,7 +119,7 @@ values for ``TSHttpHookID`` are:
     See :file:`ip_allow.yaml` for
     information about the alternate selection mechanism.
 
-``TS_HTTP_IP_ALLOW_CATEGORY_HOOK``
+``TS_CONNECTION_IP_CATEGORY_HOOK``
     See :file:`ip_allow.yaml` for information about the ip_allow
     mechanism.
 
