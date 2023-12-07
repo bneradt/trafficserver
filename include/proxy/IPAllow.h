@@ -90,7 +90,19 @@ public:
   using self_type     = IpAllow; ///< Self reference type.
   using scoped_config = ConfigProcessor::scoped_config<self_type, self_type>;
   using IpMap         = swoc::IPSpace<Record const *>;
-  using IpCategories  = std::vector<std::pair<IPCategory, Record const *>>;
+
+  /** The categories as the human readable strings.
+   *
+   * Ideally we'd convert this on parse to the IPCategory type as provided by
+   * TSHttpIpAllowTableSet, but ip_allow.yaml configuration processing happens
+   * before plugin loading, so that map is not processed yet. We have to settle
+   * storing these as the raw strings on load, then convert to integers later
+   * when traffic is processed.
+   */
+  using IpCategories_strings = std::vector<std::pair<std::string, Record const *>>;
+
+  /** The categories as identified by their int-types. */
+  using IpCategories = std::vector<std::pair<IPCategory, Record const *>>;
 
   // indicator for whether we should be checking the acl record for src ip or dest ip
   enum match_key_t { SRC_ADDR, DST_ADDR };
@@ -252,17 +264,31 @@ private:
   swoc::Errata YAMLBuildTable(const std::string &);
   swoc::Errata YAMLLoadEntry(const YAML::Node &);
   swoc::Errata YAMLLoadIPAddrRange(const YAML::Node &, IpMap *map, Record const *mark);
-  swoc::Errata YAMLLoadIPCategory(const YAML::Node &, IpCategories *categories, Record const *mark);
+  swoc::Errata YAMLLoadIPCategory(const YAML::Node &, IpCategories_strings *categories, Record const *mark);
   swoc::Errata YAMLLoadMethod(const YAML::Node &node, Record &rec);
+
+  /// Convert the human readable IP categories to IPCategory types.
+  void ConvertCategories();
+
+  /** Convert the human readable IP categories to IPCategory types.
+   * This is a helper function for @a ConvertCategories.
+   * @param[in] src The categories as string to convert to IPCategory types.
+   * @param[out] dst The categories as IPCategory types from @a src.
+   */
+  void ConvertCategoriesHelper(IpAllow::IpCategories_strings const &src, IpAllow::IpCategories &dst);
 
   /// Copy @a src to the local arena and return a view of the copy.
   swoc::TextView localize(swoc::TextView src);
 
   swoc::file::path config_file; ///< Path to configuration file.
   IpMap _src_map;
+  IpCategories_strings _src_categories_strings;
   IpCategories _src_categories;
   IpMap _dst_map;
+  IpCategories_strings _dst_categories_strings;
   IpCategories _dst_categories;
+
+  bool _have_converted_categories{false}; ///< Whether we have converted the categories to integers yet.
   /// Storage for records.
   swoc::MemArena _arena;
 

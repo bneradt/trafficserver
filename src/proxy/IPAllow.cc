@@ -153,7 +153,12 @@ IpAllow::match(swoc::IPAddr const &addr, Categories_t const &addr_categories, ma
   Record const *ip_addrs_record    = nullptr;
   Record const *potential_record   = nullptr;
 
-  IpMap &map               = key == SRC_ADDR ? self->_src_map : self->_dst_map;
+  IpMap &map = key == SRC_ADDR ? self->_src_map : self->_dst_map;
+
+  if (!self->_have_converted_categories) {
+    self->ConvertCategories();
+    self->_have_converted_categories = true;
+  }
   IpCategories &categories = key == SRC_ADDR ? self->_src_categories : self->_dst_categories;
 
   if (!addr_categories.empty()) {
@@ -274,7 +279,7 @@ IpAllow::BuildTable()
       return errata;
     }
 
-    if (_src_map.count() == 0 && _dst_map.count() == 0) {
+    if (_src_map.count() == 0 && _dst_map.count() == 0 && _src_categories_strings.empty() && _dst_categories_strings.empty()) {
       return swoc::Errata(ERRATA_ERROR, "{} - No entries found. All IP Addresses will be blocked", this);
     }
 
@@ -354,20 +359,12 @@ IpAllow::YAMLLoadIPAddrRange(const YAML::Node &node, IpMap *map, IpAllow::Record
 }
 
 swoc::Errata
-IpAllow::YAMLLoadIPCategory(const YAML::Node &node, IpCategories *categories, IpAllow::Record const *record)
+IpAllow::YAMLLoadIPCategory(const YAML::Node &node, IpCategories_strings *categories, IpAllow::Record const *record)
 {
   if (!node.IsScalar()) {
     return swoc::Errata(ERRATA_ERROR, "{} Expected IP address category at {}, found non-literal.", this, node.Mark());
   }
-  // Convert the human readable string version of the category to the
-  // plugin-provided integer representation.
-  std::string category_name{node.Scalar()};
-  auto spot = _ip_category_map.find(category_name);
-  if (spot == _ip_category_map.end()) {
-    return swoc::Errata(ERRATA_ERROR, "{} {} - '{}' is not a recognized category.", this, node.Mark(), category_name);
-  }
-  IPCategory ip_category{spot->second};
-  categories->emplace_back(ip_category, record);
+  categories->emplace_back(node.Scalar(), record);
   return {};
 }
 
@@ -376,9 +373,9 @@ IpAllow::YAMLLoadEntry(const YAML::Node &entry)
 {
   AclOp op = ACL_OP_DENY; // "shut up", I explained to the compiler.
   YAML::Node node;
-  auto record              = _arena.make<Record>();
-  IpMap *map               = nullptr; // src or dst map.
-  IpCategories *categories = nullptr; // src or dst IP categories.
+  auto record                      = _arena.make<Record>();
+  IpMap *map                       = nullptr; // src or dst map.
+  IpCategories_strings *categories = nullptr; // src or dst IP categories.
 
   if (!entry.IsMap()) {
     return swoc::Errata(ERRATA_ERROR, "{} {} - ACL items must be maps.", this, entry.Mark());
@@ -389,10 +386,10 @@ IpAllow::YAMLLoadEntry(const YAML::Node &entry)
       swoc::TextView value{apply_node.Scalar()};
       if (0 == strcasecmp(value, YAML_VALUE_APPLY_IN)) {
         map        = &_src_map;
-        categories = &_src_categories;
+        categories = &_src_categories_strings;
       } else if (0 == strcasecmp(value, YAML_VALUE_APPLY_OUT)) {
         map        = &_dst_map;
-        categories = &_dst_categories;
+        categories = &_dst_categories_strings;
       } else {
         return swoc::Errata(ERRATA_ERROR, R"("{}" value at {} must be "{}" or "{}")", YAML_TAG_APPLY, entry.Mark(),
                             YAML_VALUE_APPLY_IN, YAML_VALUE_APPLY_OUT);
@@ -518,6 +515,30 @@ IpAllow::YAMLBuildTable(std::string const &content)
     return swoc::Errata("{} - root tag '{}' is not an map or sequence. All IP Addresses will be blocked", this, YAML_TAG_ROOT);
   }
   return {};
+}
+
+void
+IpAllow::ConvertCategoriesHelper(IpAllow::IpCategories_strings const &src, IpAllow::IpCategories &dst)
+{
+  for (auto const &[name, record] : src) {
+    // Look up the name from the map
+    auto spot = IpAllow::_ip_category_map.find(name);
+    if (spot == IpAllow::_ip_category_map.end()) {
+      Error("Unknown category name '%s', add it via TSHttpIpAllowTableSet", name.c_str());
+      continue;
+    }
+    dst.emplace_back(spot->second, record);
+  }
+}
+
+void
+IpAllow::ConvertCategories()
+{
+  if (_have_converted_categories) {
+    return;
+  }
+  ConvertCategoriesHelper(_src_categories_strings, _src_categories);
+  ConvertCategoriesHelper(_dst_categories_strings, _dst_categories);
 }
 
 void

@@ -30,21 +30,26 @@
  *     ip_category.so
  */
 
+#include <getopt.h>
 #include <string>
 #include <sys/socket.h>
+#include <system_error>
 
 #include "swoc/bwf_ip.h"
 #include "swoc/BufferWriter.h"
 #include "swoc/IPAddr.h"
 #include "swoc/IPRange.h"
+#include "swoc/TextView.h"
+#include "swoc/swoc_file.h"
+
 #include "ts/apidefs.h"
 #include "ts/ts.h"
 
 namespace
 {
 
-std::string const PLUGIN_NAME = "ip_category";
-DbgCtl dbg_ctl{"ip_category"};
+std::string const PLUGIN_NAME = "categories_from_file";
+DbgCtl dbg_ctl{"categories_from_file"};
 
 enum Category {
   ALL = 1,       // Literaly all addresses.
@@ -60,8 +65,8 @@ std::unordered_map<std::string, int> const global_category_map = {
   {"ACME_ALL",      ACME_ALL     }, // All ACME addresses.
 };
 
-swoc::IPSpace<int> global_internal_space;
-swoc::IPSpace<int> global_external_space;
+std::string global_category_file;
+const std::string TS_CONFIG_DIR{TSConfigDirGet()};
 
 /** Return the IP cagories associated with the given address.
  *
@@ -72,18 +77,36 @@ std::unordered_set<int>
 get_ip_categories(sockaddr const &addr)
 {
   std::unordered_set<int> categories;
-  // The following implementation provides a simple stub for this example. In a
-  // real environment, this function could perform a library call to a database,
-  // parse a configuration file, or the like.
-  swoc::IPAddr ip_addr{&addr};
-  if (global_internal_space.find(ip_addr) != global_internal_space.end()) {
-    categories.emplace(ACME_INTERNAL);
-    categories.emplace(ACME_ALL);
-  } else if (global_external_space.find(ip_addr) != global_external_space.end()) {
-    categories.emplace(ACME_EXTERNAL);
-    categories.emplace(ACME_ALL);
+  swoc::file::path fp{global_category_file};
+  if (!fp.is_absolute()) {
+    fp = swoc::file::path{TS_CONFIG_DIR} / fp; // slap the config dir on it to make it absolute.
   }
-  categories.emplace(ALL);
+  // bulk load the file.
+  std::error_code ec;
+  std::string content{swoc::file::load(fp, ec)};
+  if (ec) {
+    TSError("[%s] unable to read file '%s' : %s.", PLUGIN_NAME.c_str(), fp.c_str(), ec.message().c_str());
+    return categories;
+  }
+  // walk the lines.
+  int line_no = 0;
+  swoc::TextView src{content};
+  while (!src.empty()) {
+    swoc::TextView line{src.take_prefix_at('\n').trim_if(&isspace)};
+    ++line_no;
+    if (line.empty() || '#' == *line) {
+      continue; // empty or comment, ignore.
+    }
+
+    std::string category{line};
+    // Check that the category is in our map.
+    if (global_category_map.find(category) == global_category_map.end()) {
+      TSError("[%s] In '%s', unknown category '%.*s' on line %d.", PLUGIN_NAME.c_str(), fp.c_str(),
+              static_cast<int>(category.size()), category.data(), line_no);
+      continue;
+    }
+    categories.emplace(global_category_map.at(category));
+  }
   return categories;
 }
 
@@ -122,15 +145,41 @@ ip_category_callback(TSCont contp, TSEvent event, void *edata)
   return TS_SUCCESS;
 }
 
-/** Populate our relevant IP spaces with their associated IP ranges. */
-void
-populate_ip_spaces()
+bool
+parse_arguments(int argc, const char *argv[], std::string &category_file)
 {
-  swoc::IPRange internal_range{"172.27.0.0/16"};
-  global_internal_space.mark(internal_range, 1);
+  // Construct longopts for a single option that takes a filename.
+  const struct option longopts[] = {
+    {"category_file", required_argument, nullptr, 1},
+    {nullptr,         0,                 nullptr, 0}
+  };
 
-  swoc::IPRange external_range{"10.1.0.0/24"};
-  global_external_space.mark(external_range, 1);
+  int opt = 0;
+  std::string local_category_file;
+  while ((opt = getopt_long(argc, const_cast<char *const *>(argv), "", longopts, nullptr)) >= 0) {
+    switch (opt) {
+    case 1:
+      local_category_file = optarg;
+      break;
+    case '?':
+      TSError("[%s] Unknown option '%c'", PLUGIN_NAME.c_str(), optopt);
+    case 0:
+    case -1:
+      break;
+    default:
+      TSError("[%s] Unexpected option parsing error", PLUGIN_NAME.c_str());
+      return false;
+    }
+  }
+
+  if (local_category_file.empty()) {
+    TSError("[%s] Missing required option @param=--category_file", PLUGIN_NAME.c_str());
+    return false;
+  }
+  category_file = local_category_file;
+
+  Dbg(dbg_ctl, "parse_arguments(): category_file: %s", category_file.c_str());
+  return true;
 }
 
 } // anonymous namespace
@@ -146,10 +195,14 @@ TSPluginInit(int argc, const char *argv[])
     TSError("[%s]: failure calling TSPluginRegister.", PLUGIN_NAME.c_str());
     return;
   }
+
+  if (!parse_arguments(argc, argv, global_category_file)) {
+    TSError("[%s] Unable to parse arguments, plugin not engaged.", PLUGIN_NAME.c_str());
+    return;
+  }
+
   // Inform the core what the categories are.
   TSHttpIpAllowTableSet(global_category_map);
-
-  populate_ip_spaces();
 
   // Populate the callback for dynamic category queries from the core.
   auto cont = TSContCreate(ip_category_callback, nullptr);
