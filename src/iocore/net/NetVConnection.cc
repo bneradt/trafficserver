@@ -107,7 +107,7 @@ NetVConnection::get_ip_categories()
 
   std::unordered_set<int> categories;
   swoc::IPAddr ip_addr{&remote_addr.sa};
-  HttpIpAllowInfo info{ip_addr, categories};
+  IpCategoryInfo info{ip_addr, categories};
   for (; hook != nullptr; hook = hook->next()) {
     hook->invoke(TS_EVENT_CONNECTION_IP_CATEGORY, &info);
   }

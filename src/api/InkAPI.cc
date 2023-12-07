@@ -730,7 +730,7 @@ sdk_sanity_check_alt_info(TSHttpAltInfo info)
 }
 
 TSReturnCode
-sdk_sanity_check_ip_allow_info(TSHttpIpAllowInfo info)
+sdk_sanity_check_ip_category_info(TSIpCategoryInfo info)
 {
   if (info == nullptr) {
     return TS_ERROR;
@@ -6209,10 +6209,10 @@ tsapi::c::TSHttpIpAllowTableSet(std::unordered_map<std::string, int> const &cate
 }
 
 TSReturnCode
-tsapi::c::TSHttpIpAllowInfoAddrGet(TSHttpIpAllowInfo infop, sockaddr &addr)
+tsapi::c::TSIpCategoryInfoAddrGet(TSIpCategoryInfo infop, sockaddr &addr)
 {
-  sdk_assert(sdk_sanity_check_ip_allow_info(infop) == TS_SUCCESS);
-  HttpIpAllowInfo *info = reinterpret_cast<HttpIpAllowInfo *>(infop);
+  sdk_assert(sdk_sanity_check_ip_category_info(infop) == TS_SUCCESS);
+  IpCategoryInfo *info = reinterpret_cast<IpCategoryInfo *>(infop);
 
   // swoc::IPAddr::copy_to is currently accidentally not marked as a const
   // method. Its implementation does not in fact modify the IPAddr. Marking the
@@ -6223,11 +6223,11 @@ tsapi::c::TSHttpIpAllowInfoAddrGet(TSHttpIpAllowInfo infop, sockaddr &addr)
 }
 
 void
-tsapi::c::TSHttpIpAllowInfoCategoriesSet(TSHttpIpAllowInfo infop, std::unordered_set<int> const &categories)
+tsapi::c::TSIpCategoryInfoCategoriesSet(TSIpCategoryInfo infop, std::unordered_set<int> const &categories)
 {
-  sdk_assert(sdk_sanity_check_ip_allow_info(infop) == TS_SUCCESS);
-  HttpIpAllowInfo *info = reinterpret_cast<HttpIpAllowInfo *>(infop);
-  info->categories      = categories;
+  sdk_assert(sdk_sanity_check_ip_category_info(infop) == TS_SUCCESS);
+  IpCategoryInfo *info = reinterpret_cast<IpCategoryInfo *>(infop);
+  info->categories     = categories;
 }
 
 extern HttpSessionAccept *plugin_http_accept;

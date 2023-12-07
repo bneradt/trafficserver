@@ -88,13 +88,13 @@ get_ip_categories(sockaddr const &addr)
 }
 
 void
-handle_ip_category(TSHttpIpAllowInfo infop)
+handle_ip_category(TSIpCategoryInfo infop)
 {
   sockaddr address;
-  TSHttpIpAllowInfoAddrGet(infop, address);
+  TSIpCategoryInfoAddrGet(infop, address);
 
   std::unordered_set<int> categories = get_ip_categories(address);
-  TSHttpIpAllowInfoCategoriesSet(infop, categories);
+  TSIpCategoryInfoCategoriesSet(infop, categories);
 
   swoc::LocalBufferWriter<500> w;
   w.print("Address {} is in categories: {}", swoc::IPAddr{&address}, categories);
@@ -106,7 +106,7 @@ ip_category_callback(TSCont contp, TSEvent event, void *edata)
 {
   switch (event) {
   case tsapi::c::TS_EVENT_CONNECTION_IP_CATEGORY: {
-    TSHttpIpAllowInfo infop = static_cast<TSHttpIpAllowInfo>(edata);
+    TSIpCategoryInfo infop = static_cast<TSIpCategoryInfo>(edata);
     handle_ip_category(infop);
     break;
   }

@@ -108,8 +108,8 @@ struct HttpAltInfo {
   float m_qvalue;
 };
 
-struct HttpIpAllowInfo {
-  HttpIpAllowInfo(swoc::IPAddr const &addr, std::unordered_set<int> &categories) : addr(addr), categories{categories} {}
+struct IpCategoryInfo {
+  IpCategoryInfo(swoc::IPAddr const &addr, std::unordered_set<int> &categories) : addr(addr), categories{categories} {}
 
   /// The IP address to query which categories it belongs to.
   swoc::IPAddr const &addr;

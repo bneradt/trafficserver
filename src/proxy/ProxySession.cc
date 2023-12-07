@@ -84,7 +84,6 @@ static const TSEvent eventmap[TS_HTTP_LAST_HOOK + 1] = {
   TS_EVENT_HTTP_RESPONSE_CLIENT,       // TS_HTTP_RESPONSE_CLIENT_HOOK
   TS_EVENT_HTTP_REQUEST_CLIENT,        // TS_HTTP_REQUEST_CLIENT_HOOK
   TS_EVENT_HTTP_TUNNEL_START,          // TS_HTTP_TUNNEL_START_HOOK
-  TS_EVENT_CONNECTION_IP_CATEGORY,     // TS_CONNECTION_IP_CATEGORY_HOOK
   TS_EVENT_NONE,                       // TS_HTTP_LAST_HOOK
 };
 
@@ -351,7 +350,7 @@ ProxySession::get_ip_categories()
 
   std::unordered_set<int> categories;
   swoc::IPAddr ip_addr{this->get_remote_addr()};
-  HttpIpAllowInfo info{ip_addr, categories};
+  IpCategoryInfo info{ip_addr, categories};
   for (; hook != nullptr; hook = hook->next()) {
     hook->invoke(TS_EVENT_CONNECTION_IP_CATEGORY, &info);
   }

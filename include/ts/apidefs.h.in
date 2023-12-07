@@ -1045,20 +1045,20 @@ char const TS_VERSION_STRING[] = "@TS_VERSION_STRING@";
 
   using TSFile = struct tsapi_file *;
 
-  using TSMLoc            = struct tsapi_mloc *;
-  using TSMBuffer         = struct tsapi_mbuffer *;
-  using TSHttpSsn         = struct tsapi_httpssn *;
-  using TSHttpTxn         = struct tsapi_httptxn *;
-  using TSSslConnection   = struct tsapi_ssl_obj *;
-  using TSSslSession      = struct tsapi_ssl_session *;
-  using TSHttpAltInfo     = struct tsapi_httpaltinfo *;
-  using TSHttpIpAllowInfo = struct tsapi_httpipallowinfo *;
-  using TSMimeParser      = struct tsapi_mimeparser *;
-  using TSHttpParser      = struct tsapi_httpparser *;
-  using TSCacheKey        = struct tsapi_cachekey *;
-  using TSCacheHttpInfo   = struct tsapi_cachehttpinfo *;
-  using TSCacheTxn        = struct tsapi_cachetxn *;
-  using TSSslVerifyCTX    = struct tsapi_x509_store_ctx *;
+  using TSMLoc           = struct tsapi_mloc *;
+  using TSMBuffer        = struct tsapi_mbuffer *;
+  using TSHttpSsn        = struct tsapi_httpssn *;
+  using TSHttpTxn        = struct tsapi_httptxn *;
+  using TSSslConnection  = struct tsapi_ssl_obj *;
+  using TSSslSession     = struct tsapi_ssl_session *;
+  using TSHttpAltInfo    = struct tsapi_httpaltinfo *;
+  using TSIpCategoryInfo = struct tsapi_httpipallowinfo *;
+  using TSMimeParser     = struct tsapi_mimeparser *;
+  using TSHttpParser     = struct tsapi_httpparser *;
+  using TSCacheKey       = struct tsapi_cachekey *;
+  using TSCacheHttpInfo  = struct tsapi_cachehttpinfo *;
+  using TSCacheTxn       = struct tsapi_cachetxn *;
+  using TSSslVerifyCTX   = struct tsapi_x509_store_ctx *;
 
   using TSPortDescriptor   = struct tsapi_port *;
   using TSVIO              = struct tsapi_vio *;

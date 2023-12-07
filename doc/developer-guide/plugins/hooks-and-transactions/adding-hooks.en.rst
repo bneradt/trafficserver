@@ -116,7 +116,7 @@ values for ``TSHttpHookID`` are:
     for information about transformation hooks.
 
 ``TS_HTTP_SELECT_ALT_HOOK``
-    See :file:`ip_allow.yaml` for
+    See :doc:`"HTTP Alternate Selection" <http-alternate-selection.en>` for
     information about the alternate selection mechanism.
 
 ``TS_CONNECTION_IP_CATEGORY_HOOK``

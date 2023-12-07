@@ -55,8 +55,6 @@ typedef enum {
   NET_VCONNECTION_OUT, // ATS <--> Server, Server-Side
 } NetVConnectionContext_t;
 
-class APIHook;
-
 /**
   A VConnection for a network socket. Abstraction for a net connection.
   Similar to a socket descriptor VConnections are IO handles to

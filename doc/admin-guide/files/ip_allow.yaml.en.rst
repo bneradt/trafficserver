@@ -87,14 +87,15 @@ The keys in a rule are:
 ``ip_category``
    An arbitrary string identifying a category of IP addresses. Whether a given
    IP address applies to this category is implemented in a user plugin via a
-   handler for the TS_CONNECTION_IP_CATEGORY_HOOK. This can be either a single
-   category or an array of categories. IP categories are helpful in situations
-   where the IP addresses for a rule are not easily specified using IP address
-   ranges. An organization may, for instance, implement categories of IP
-   addresses via an internal library's API that queries a database or parses a
-   separate config file to determine whether any particular IP is identified by
-   a category. ``ACME_INTERNAL``, ``ACME_EXTERNAL``, ``ANY_IP``, etc., are
-   example category names. See the example below for how to use ``ip_category``.
+   handler for the ``TS_CONNECTION_IP_CATEGORY_HOOK`` registered using the
+   ``TSConnectionHookAdd`` API. This can be either a single category or an array of
+   categories. IP categories are helpful in situations where the IP addresses
+   for a rule are not easily specified using IP address ranges. An organization
+   may, for instance, implement categories of IP addresses via an internal
+   library's API that queries a database or parses a separate config file to
+   determine whether any particular IP is identified by a category.
+   ``ACME_INTERNAL``, ``ACME_EXTERNAL``, ``ANY_IP``, etc., are example category
+   names. See the example below for how to use ``ip_category``.
 
    Either this or ``ip_addrs`` are required keys for a rule.
 

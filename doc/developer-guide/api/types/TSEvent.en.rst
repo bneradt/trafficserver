@@ -45,6 +45,12 @@ Enumeration Members
 
 .. c:macro:: TS_EVENT_CONTINUE
 
+.. c:macro:: TS_EVENT_CONNECTION_IP_CATEGORY
+
+   The event dispatched from the core for a plugin to provide IP
+   categorization. See :file:`ip_allow.yaml` for more information
+   about IP categoriziation.
+
 .. c:macro:: TS_EVENT_VCONN_READ_READY
 
 .. c:macro:: TS_EVENT_VCONN_WRITE_READY
@@ -164,8 +170,6 @@ Enumeration Members
 .. c:macro:: TS_EVENT_HTTP_SSN_CLOSE
 
 .. c:macro:: TS_EVENT_HTTP_CACHE_LOOKUP_COMPLETE
-
-.. c:macro:: TS_EVENT_CONNECTION_IP_CATEGORY
 
 .. c:macro:: TS_EVENT_HTTP_PRE_REMAP
 

@@ -22,7 +22,6 @@
  */
 
 // Turn off -Wdeprecated so that we can still test our own deprecated APIs.
-#include "ts/apidefs.h"
 #if defined(__GNUC__) && (__GNUC__ >= 4) && (__GNUC_MINOR__ >= 3)
 #pragma GCC diagnostic ignored "-Wdeprecated"
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -1152,8 +1151,6 @@ DbgCtl dbg_ctl_sdk_ut_transform{"sdk_ut_transform"};
     case TS_EVENT_TIMEOUT:                                           \
       return TS_EVENT_NONE;                                          \
     case TS_EVENT_HTTP_SELECT_ALT:                                   \
-      return TS_EVENT_NONE;                                          \
-    case TS_EVENT_CONNECTION_IP_CATEGORY:                            \
       return TS_EVENT_NONE;                                          \
     case TS_EVENT_HTTP_READ_REQUEST_HDR:                             \
     case TS_EVENT_HTTP_OS_DNS:                                       \
@@ -6733,7 +6730,6 @@ enum ORIG_TSHttpHookID {
   ORIG_TS_HTTP_RESPONSE_CLIENT_HOOK,
   ORIG_TS_HTTP_REQUEST_CLIENT_HOOK,
   ORIG_TS_HTTP_TUNNEL_START_HOOK,
-  ORIG_TS_CONNECTION_IP_CATEGORY_HOOK,
   ORIG_TS_SSL_FIRST_HOOK,
   ORIG_TS_VCONN_START_HOOK = ORIG_TS_SSL_FIRST_HOOK,
   ORIG_TS_VCONN_CLOSE_HOOK,
@@ -6798,7 +6794,6 @@ enum ORIG_TSEvent {
   ORIG_TS_EVENT_HTTP_SSN_START             = 60013,
   ORIG_TS_EVENT_HTTP_SSN_CLOSE             = 60014,
   ORIG_TS_EVENT_HTTP_CACHE_LOOKUP_COMPLETE = 60015,
-  ORIG_TS_EVENT_CONNECTION_IP_CATEGORY     = 60022,
 
   ORIG_TS_EVENT_MGMT_UPDATE = 60300
 };
@@ -6902,7 +6897,6 @@ REGRESSION_TEST(SDK_API_TSConstant)(RegressionTest *test, int /* atype ATS_UNUSE
   PRINT_DIFF(TS_HTTP_SSN_START_HOOK);
   PRINT_DIFF(TS_HTTP_SSN_CLOSE_HOOK);
   PRINT_DIFF(TS_HTTP_CACHE_LOOKUP_COMPLETE_HOOK);
-  PRINT_DIFF(TS_CONNECTION_IP_CATEGORY_HOOK);
   PRINT_DIFF(TS_HTTP_LAST_HOOK);
 
   PRINT_DIFF(TS_EVENT_NONE);
@@ -6953,7 +6947,6 @@ REGRESSION_TEST(SDK_API_TSConstant)(RegressionTest *test, int /* atype ATS_UNUSE
   PRINT_DIFF(TS_EVENT_HTTP_SSN_START);
   PRINT_DIFF(TS_EVENT_HTTP_SSN_CLOSE);
   PRINT_DIFF(TS_EVENT_HTTP_CACHE_LOOKUP_COMPLETE);
-  PRINT_DIFF(TS_EVENT_CONNECTION_IP_CATEGORY);
 
   PRINT_DIFF(TS_EVENT_MGMT_UPDATE);
 

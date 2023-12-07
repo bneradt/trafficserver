@@ -48,6 +48,7 @@ ConnectionHookTracer(TSCont contp, TSEvent event, void *edata)
   }
   return TS_EVENT_NONE;
 }
+
 static int
 HttpHookTracer(TSCont contp, TSEvent event, void *edata)
 {
@@ -55,7 +56,6 @@ HttpHookTracer(TSCont contp, TSEvent event, void *edata)
     TSHttpTxn txn;
     TSHttpSsn ssn;
     TSHttpAltInfo alt;
-    TSHttpIpAllowInfo allow_info;
     void *ptr;
   } ev;
 

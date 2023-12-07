@@ -66,8 +66,6 @@ Enumeration Members
 
    .. c:enumerator:: TS_HTTP_CACHE_LOOKUP_COMPLETE_HOOK
 
-   .. c:enumerator:: TS_CONNECTION_IP_CATEGORY_HOOK
-
    .. c:enumerator:: TS_HTTP_PRE_REMAP_HOOK
 
    .. c:enumerator:: TS_HTTP_POST_REMAP_HOOK

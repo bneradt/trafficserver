@@ -87,7 +87,6 @@ Event                                         Event Sender                      
 :macro:`TS_EVENT_HTTP_READ_RESPONSE_HDR`      :macro:`TS_HTTP_READ_RESPONSE_HDR_HOOK`      :type:`TSHttpTxn`
 :macro:`TS_EVENT_HTTP_SEND_RESPONSE_HDR`      :macro:`TS_HTTP_SEND_RESPONSE_HDR_HOOK`      :type:`TSHttpTxn`
 :macro:`TS_EVENT_HTTP_SELECT_ALT`             :macro:`TS_HTTP_SELECT_ALT_HOOK`             :type:`TSHttpAltInfo`
-:macro:`TS_EVENT_CONNECTION_IP_CATEGORY`      :macro:`TS_CONNECTION_IP_CATEGORY_HOOK`      :type:`TSHttpIpAllowInfo`
 :macro:`TS_EVENT_HTTP_TXN_START`              :macro:`TS_HTTP_TXN_START_HOOK`              :type:`TSHttpTxn`
 :macro:`TS_EVENT_HTTP_TXN_CLOSE`              :macro:`TS_HTTP_TXN_CLOSE_HOOK`              :type:`TSHttpTxn`
 :macro:`TS_EVENT_HTTP_SSN_START`              :macro:`TS_HTTP_SSN_START_HOOK`              :type:`TSHttpSsn`
@@ -126,6 +125,7 @@ Event                                         Event Sender                      
 :macro:`TS_EVENT_HTTP_CONTINUE`
 :macro:`TS_EVENT_HTTP_ERROR`
 :macro:`TS_EVENT_MGMT_UPDATE`                 :func:`TSMgmtUpdateRegister`
+:macro:`TS_EVENT_CONNECTION_IP_CATEGORY`      :macro:`TS_CONNECTION_IP_CATEGORY_HOOK`      :type:`TSIpCategoryInfo`
 ============================================= ============================================ ==========================
 
 The continuation functions are listed below:

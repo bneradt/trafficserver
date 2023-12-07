@@ -97,10 +97,10 @@ HTTP Transaction State Diagram
    :alt: HTTP Transaction State Diagram
 
    digraph http_txn_state_diagram{
-     accept -> "TS_CONNECTION_IP_CATEGORY_HOOK inbound";
-     "TS_CONNECTION_IP_CATEGORY_HOOK inbound" -> TS_HTTP_TXN_START_HOOK [label = "allow"];
+     accept -> TS_HTTP_TXN_START_HOOK;
      TS_HTTP_TXN_START_HOOK -> "read req hdrs";
-     "read req hdrs" -> TS_HTTP_READ_REQUEST_HDR_HOOK;
+     "read req hdrs" -> "TS_CONNECTION_IP_CATEGORY_HOOK inbound";
+     "TS_CONNECTION_IP_CATEGORY_HOOK inbound" -> TS_HTTP_READ_REQUEST_HDR_HOOK;
      TS_HTTP_READ_REQUEST_HDR_HOOK -> TS_HTTP_PRE_REMAP_HOOK;
      TS_HTTP_PRE_REMAP_HOOK -> "remap request";
      "remap request" -> TS_HTTP_POST_REMAP_HOOK;

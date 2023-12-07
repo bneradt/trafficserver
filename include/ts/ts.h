@@ -1864,14 +1864,14 @@ namespace c
    * @param[out] addr The address being queried.
    * @return TS_SUCCESS if the address was obtained, TS_ERROR otherwise.
    */
-  TSReturnCode TSHttpIpAllowInfoAddrGet(TSHttpIpAllowInfo infop, sockaddr &addr);
+  TSReturnCode TSIpCategoryInfoAddrGet(TSIpCategoryInfo infop, sockaddr &addr);
 
   /** Set the categories associated with the provided address.
    * @param[in] infop The ip_allow info object.
    * @param[out] categories The categories to associate with the address
-   * obtained via @a TSHttpIpAllowInfoAddrGet.
+   * obtained via @a TSIpCategoryInfoAddrGet.
    */
-  void TSHttpIpAllowInfoCategoriesSet(TSHttpIpAllowInfo infop, std::unordered_set<int> const &categories);
+  void TSIpCategoryInfoCategoriesSet(TSIpCategoryInfo infop, std::unordered_set<int> const &categories);
 
   /* --------------------------------------------------------------------------
      Actions */
