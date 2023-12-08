@@ -5137,7 +5137,11 @@ bool
 HttpSM::apply_ip_allow_filter()
 {
   // Method allowed on dest IP address check
-  sockaddr *sa                  = this->get_server_remote_addr();
+  sockaddr *sa = this->get_server_remote_addr();
+
+  // TODO: Is there something we can do to make this more efficient? No NetVConnection
+  // exists yet, we just have the address. Is there a way to cache this across requests
+  // of the same connection?
   Categories_t const categories = get_categores_from_plugin(sa);
   IpAllow::ACL acl              = IpAllow::match(sa, categories, IpAllow::DST_ADDR);
 
