@@ -112,6 +112,7 @@ NetVConnection::get_ip_categories()
     hook->invoke(TS_EVENT_CONNECTION_IP_CATEGORY, &info);
   }
 
+  this->_ip_categories = std::unordered_set<IPCategory>{};
   // Now convert the int types to IPCategory for set.
   for (auto &&category : categories) {
     this->_ip_categories.value().emplace(category);

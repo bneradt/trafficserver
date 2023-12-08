@@ -23,8 +23,10 @@
  */
 
 #include "api/APIHook.h"
+#include "iocore/net/ConnectionAPIHooks.h"
 #include "proxy/HttpAPIHooks.h"
 #include "ts/apidefs.h"
+#include "tscore/IPCategory.h"
 #include "tsutil/ts_bw_format.h"
 #include "proxy/ProxyTransaction.h"
 #include "proxy/http/HttpSM.h"
@@ -5108,12 +5110,36 @@ HttpSM::get_outbound_sni() const
   return zret;
 }
 
+static Categories_t
+get_categores_from_plugin(sockaddr const *sa)
+{
+  Categories_t categories;
+  APIHook *hook = global_connection_hooks->get(TS_CONNECTION_IP_CATEGORY_HOOK);
+  if (hook == nullptr) {
+    return categories;
+  }
+
+  std::unordered_set<int> categories_ints;
+  swoc::IPAddr const ip_addr{sa};
+  IpCategoryInfo info{ip_addr, categories_ints};
+  for (; hook != nullptr; hook = hook->next()) {
+    hook->invoke(TS_EVENT_CONNECTION_IP_CATEGORY, &info);
+  }
+
+  // Now convert the int types to IPCategory for set.
+  for (auto &&category : categories) {
+    categories.emplace(category);
+  }
+  return categories;
+}
+
 bool
 HttpSM::apply_ip_allow_filter()
 {
   // Method allowed on dest IP address check
-  Categories_t const &categories = server_txn->get_netvc()->get_ip_categories();
-  IpAllow::ACL acl               = IpAllow::match(this->get_server_remote_addr(), categories, IpAllow::DST_ADDR);
+  sockaddr *sa                  = this->get_server_remote_addr();
+  Categories_t const categories = get_categores_from_plugin(sa);
+  IpAllow::ACL acl              = IpAllow::match(sa, categories, IpAllow::DST_ADDR);
 
   if (ip_allow_is_request_forbidden(acl)) {
     ip_allow_deny_request(acl);

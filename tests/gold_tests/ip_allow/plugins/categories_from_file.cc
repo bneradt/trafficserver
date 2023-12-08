@@ -121,9 +121,9 @@ handle_ip_category(TSIpCategoryInfo infop)
 
   swoc::LocalBufferWriter<500> w;
   w.print("Address {} is in categories:", swoc::IPAddr{&address});
-  for (auto &&category : categories) {
-    w.print(" {}", category);
-  }
+  // for (auto &&category : categories) {
+  // w.print(" {}", category);
+  //}
   Dbg(dbg_ctl, "%s", w.data());
 }
 

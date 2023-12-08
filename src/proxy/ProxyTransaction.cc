@@ -308,6 +308,7 @@ ProxyTransaction::get_ip_categories()
   }
 
   // Now convert the int types to IPCategory for set.
+  this->_ip_categories = std::unordered_set<IPCategory>{};
   for (auto &&category : categories) {
     this->_ip_categories.value().emplace(category);
   }
