@@ -23,7 +23,7 @@
 
 #include "P_AIO.h"
 #include "api/InkAPIInternal.h"
-#include "tscore/IPCategory.h"
+#include "iocore/net/IPCategory.h"
 #include "tscore/ink_hw.h"
 #include "tscore/Layout.h"
 #include "tscore/TSSystemState.h"
@@ -90,8 +90,8 @@ int seq_read_size             = 0;
 int seq_write_size            = 0;
 int rand_read_size            = 0;
 
-// We need this defined to satisfy the abtract interface since we don't link
-// against the NetVConnection definitions.
+// We need this stub defined to satisfy the abtract interface since we don't
+// link against the NetVConnection definitions.
 Categories_t const &
 NetVConnection::get_ip_categories()
 {

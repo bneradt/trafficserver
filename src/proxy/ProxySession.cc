@@ -24,7 +24,6 @@
 #include "proxy/http/HttpConfig.h"
 #include "proxy/http/HttpDebugNames.h"
 #include "proxy/ProxySession.h"
-#include "iocore/net/ConnectionAPIHooks.h"
 #include "iocore/net/TLSBasicSupport.h"
 #include "ts/apidefs.h"
 
@@ -338,27 +337,8 @@ ProxySession::create_outbound_session(int protocol_index)
 Categories_t const &
 ProxySession::get_ip_categories()
 {
-  APIHook *hook = global_connection_hooks->get(TS_CONNECTION_IP_CATEGORY_HOOK);
-  if (_ip_categories.has_value()) {
-    // Return the memoized categories.
-    return this->_ip_categories.value();
-  }
-  if (hook == nullptr) {
-    this->_ip_categories = std::unordered_set<IPCategory>{};
-    return this->_ip_categories.value();
-  }
-
-  std::unordered_set<int> categories;
-  swoc::IPAddr ip_addr{this->get_remote_addr()};
-  IpCategoryInfo info{ip_addr, categories};
-  for (; hook != nullptr; hook = hook->next()) {
-    hook->invoke(TS_EVENT_CONNECTION_IP_CATEGORY, &info);
-  }
-
-  // Now convert the int types to IPCategory for set.
-  this->_ip_categories = std::unordered_set<IPCategory>{};
-  for (auto &&category : categories) {
-    this->_ip_categories.value().emplace(category);
-  }
+  sockaddr const *addr = this->get_remote_addr();
+  ink_release_assert(addr != nullptr);
+  populate_ip_categories(*addr, this->_ip_categories);
   return this->_ip_categories.value();
 }

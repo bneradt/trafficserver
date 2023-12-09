@@ -34,7 +34,6 @@
 
 #include "P_Net.h"
 #include "api/InkAPIInternal.h"
-#include "iocore/net/ConnectionAPIHooks.h"
 #include "ts/apidefs.h"
 
 ////
@@ -95,28 +94,7 @@ NetVConnection::has_proxy_protocol(char *buffer, int64_t *bytes_r)
 Categories_t const &
 NetVConnection::get_ip_categories()
 {
-  APIHook *hook = global_connection_hooks->get(TS_CONNECTION_IP_CATEGORY_HOOK);
-  if (_ip_categories.has_value()) {
-    // Return the memoized categories.
-    return this->_ip_categories.value();
-  }
-  if (hook == nullptr) {
-    this->_ip_categories = std::unordered_set<IPCategory>{};
-    return this->_ip_categories.value();
-  }
-
-  std::unordered_set<int> categories;
-  swoc::IPAddr ip_addr{&remote_addr.sa};
-  IpCategoryInfo info{ip_addr, categories};
-  for (; hook != nullptr; hook = hook->next()) {
-    hook->invoke(TS_EVENT_CONNECTION_IP_CATEGORY, &info);
-  }
-
-  this->_ip_categories = std::unordered_set<IPCategory>{};
-  // Now convert the int types to IPCategory for set.
-  for (auto &&category : categories) {
-    this->_ip_categories.value().emplace(category);
-  }
+  populate_ip_categories(remote_addr.sa, this->_ip_categories);
   return this->_ip_categories.value();
 }
 

@@ -26,6 +26,8 @@
 
 #include <cstddef>
 #include <functional>
+#include <optional>
+#include <sys/socket.h>
 #include <unordered_set>
 
 /** A custom type representing an IP Category. */
@@ -69,3 +71,19 @@ template <> struct hash<IPCategory> {
 } // namespace std
 
 using Categories_t = std::unordered_set<IPCategory>;
+
+/** Retrieve the categories for the given IP.
+ *
+ * This is a helper function for the various VConnection::get_ip_categories
+ * implementations that asssumes that @a categories has the cached categories if
+ * the optional is not empty. Otherwise it dispatches to the
+ * TS_EVENT_CONNECTION_IP_CATEGORY handlers to populate categories with those
+ * appropriate for @a addr.
+ *
+ * @param[in] addr The IP address to get the categories for.
+ * @param[in,out] categories The optional to populate with the categories.
+ *
+ * @return @c true if the categories were populated, @c false if an error was
+ * encountered.
+ */
+bool populate_ip_categories(sockaddr const &addr, std::optional<Categories_t> &categories);

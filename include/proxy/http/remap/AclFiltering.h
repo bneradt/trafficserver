@@ -23,7 +23,7 @@
 
 #pragma once
 
-#include "tscore/IPCategory.h"
+#include "iocore/net/IPCategory.h"
 #include "tscore/ink_inet.h"
 
 #include "swoc/IPAddr.h"

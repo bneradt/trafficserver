@@ -36,11 +36,11 @@
 
 #include "proxy/hdrs/HTTP.h"
 #include "iocore/eventsystem/ConfigProcessor.h"
+#include "iocore/net/IPCategory.h"
 #include "swoc/TextView.h"
 #include "swoc/swoc_file.h"
 #include "swoc/swoc_ip.h"
 #include "swoc/Errata.h"
-#include "tscore/IPCategory.h"
 
 // forward declare in name only so it can be a friend.
 struct IpAllowUpdate;

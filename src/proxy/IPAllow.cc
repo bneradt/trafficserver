@@ -26,12 +26,12 @@
 
 #include <sstream>
 
+#include "iocore/net/IPCategory.h"
 #include "proxy/IPAllow.h"
 #include "api/InkAPIInternal.h"
 #include "ts/apidefs.h"
 #include "tscore/Filenames.h"
 #include "proxy/HttpAPIHooks.h"
-#include "tscore/IPCategory.h"
 #include "tsutil/ts_errata.h"
 
 #include "swoc/Vectray.h"

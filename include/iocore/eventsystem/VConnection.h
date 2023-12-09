@@ -25,9 +25,9 @@
 #pragma once
 
 #include "tscore/ink_platform.h"
-#include "tscore/IPCategory.h"
 #include "tscore/PluginUserArgs.h"
 #include "iocore/eventsystem/EventSystem.h"
+#include "iocore/net/IPCategory.h"
 
 #if !defined(I_VIO_h)
 #error "include VIO.h"
