@@ -5114,6 +5114,11 @@ static Categories_t
 get_categores_from_plugin(sockaddr const *sa)
 {
   Categories_t categories;
+  if (!IpAllow::has_outbound_category_filtering()) {
+    // No need to spend time querying the plugins if none of the outbound rules
+    // use categories.
+    return categories;
+  }
   APIHook *hook = global_connection_hooks->get(TS_CONNECTION_IP_CATEGORY_HOOK);
   if (hook == nullptr) {
     return categories;

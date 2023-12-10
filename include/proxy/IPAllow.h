@@ -186,6 +186,14 @@ public:
   static ACL match(swoc::IPEndpoint const *addr, Categories_t const &categories, match_key_t key);
   static ACL match(sockaddr const *sa, Categories_t const &categories, match_key_t key);
 
+  /** Indicate whether the user has enabled outbound (origin side) filtering by
+   * IP category.
+   *
+   * @return @c true if the user has enabled outbound filtering by IP category,
+   * @c false otherwise.
+   */
+  static bool has_outbound_category_filtering();
+
   static void startup();
   static void reconfigure();
   /// @return The global instance.
@@ -422,6 +430,15 @@ inline auto
 IpAllow::match(sockaddr const *sa, Categories_t const &categories, match_key_t key) -> ACL
 {
   return self_type::match(swoc::IPAddr(sa), categories, key);
+}
+
+inline bool
+IpAllow::has_outbound_category_filtering()
+{
+  // Keep in mind that the strings categories are populated on config load,
+  // while _dst_categories is populated later on plugin load. So for a query
+  // like this, _dst_categories_strings is more reliable.
+  return !acquire()->_dst_categories_strings.empty();
 }
 
 inline auto
