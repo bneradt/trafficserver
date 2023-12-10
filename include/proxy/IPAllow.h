@@ -194,6 +194,22 @@ public:
    */
   static bool has_outbound_category_filtering();
 
+  /** Indicate whether the user has enabled inbound (client side) filtering by
+   * IP category.
+   *
+   * @return @c true if the user has enabled inbound filtering by IP category,
+   * @c false otherwise.
+   */
+  static bool has_inbound_category_filtering();
+
+  /** Indicate whether any category filtering has been enabled by the user.
+   *
+   * @return @c true if the user has enabled any category filtering, @c false
+   * otherwise.
+   */
+  static bool has_category_filtering();
+
+  /** Initialization of the IPAllow system called at ATS process initialization. */
   static void startup();
   static void reconfigure();
   /// @return The global instance.
@@ -439,6 +455,21 @@ IpAllow::has_outbound_category_filtering()
   // while _dst_categories is populated later on plugin load. So for a query
   // like this, _dst_categories_strings is more reliable.
   return !acquire()->_dst_categories_strings.empty();
+}
+
+inline bool
+IpAllow::has_inbound_category_filtering()
+{
+  // Keep in mind that the strings categories are populated on config load,
+  // while _dst_categories is populated later on plugin load. So for a query
+  // like this, _dst_categories_strings is more reliable.
+  return !acquire()->_src_categories_strings.empty();
+}
+
+inline bool
+IpAllow::has_category_filtering()
+{
+  return has_outbound_category_filtering() || has_inbound_category_filtering();
 }
 
 inline auto

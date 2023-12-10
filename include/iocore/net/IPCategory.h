@@ -51,6 +51,12 @@ public:
     return value_ == rhs.value_;
   }
 
+  /** Initialize the IP Category syste.
+   *
+   * This is done if needed at process startup.
+   */
+  static void initialize();
+
 private:
   /// The underlying IP Category value.
   int value_;

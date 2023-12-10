@@ -104,6 +104,10 @@ IpAllow::startup()
     configid = configProcessor.set(configid, new self_type("proxy.config.cache.ip_allow.filename"));
     Warning("%s not loaded; All IP Addresses will be blocked.", ts::filename::IP_ALLOW);
   }
+
+  if (has_category_filtering()) {
+    IPCategory::initialize();
+  }
 }
 
 void

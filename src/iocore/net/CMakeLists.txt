@@ -27,6 +27,7 @@ add_library(
   EventIO.cc
   Inline.cc
   IPCategory.cc
+  IPCategoryCache.cc
   YamlSNIConfig.cc
   Net.cc
   NetHandler.cc

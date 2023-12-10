@@ -27,13 +27,24 @@
 #include "api/InkAPIInternal.h"
 #include "iocore/net/ConnectionAPIHooks.h"
 
+#include "P_IPCategoryCache.h"
+
+void
+IPCategory::initialize()
+{
+  // TOO: Make these values configurable.
+  IPCategoryCache::initialize(1'000, 10, std::chrono::seconds{60});
+}
+
 bool
 populate_ip_categories(sockaddr const &addr, std::optional<Categories_t> &categories)
 {
   if (categories.has_value()) {
-    // Nothing to do. The categories cache is already set.
+    // Nothing to do. The VConnection's categories cache is already set.
     return true;
   }
+
+  // Do we have any plugins registered to set categories?
   APIHook *hook = global_connection_hooks->get(TS_CONNECTION_IP_CATEGORY_HOOK);
   if (hook == nullptr) {
     // No plugins registered setting categories. Thus there are none to set.
@@ -41,6 +52,14 @@ populate_ip_categories(sockaddr const &addr, std::optional<Categories_t> &catego
     return true;
   }
 
+  // We have to retrieve the categories. First try the cache.
+  std::optional<Categories_t> cached_categories = IPCategoryCache::get(addr);
+  if (cached_categories.has_value()) {
+    categories = cached_categories.value();
+    return true;
+  }
+
+  // Not in the cache. Resort to calling the plugins.
   std::unordered_set<int> local_categories;
   swoc::IPAddr ip_addr{&addr};
   IpCategoryInfo info{ip_addr, local_categories};
@@ -53,5 +72,8 @@ populate_ip_categories(sockaddr const &addr, std::optional<Categories_t> &catego
   for (auto &&category : local_categories) {
     categories.value().emplace(category);
   }
+
+  // Populate the cache for next time.
+  IPCategoryCache::put(addr, categories.value());
   return true;
 }
