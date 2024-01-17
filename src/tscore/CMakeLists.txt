@@ -55,7 +55,6 @@ add_library(
   ParseRules.cc
   Random.cc
   Regression.cc
-  SourceLocation.cc
   TextBuffer.cc
   Throttler.cc
   Tokenizer.cc
@@ -111,14 +110,7 @@ else()
 endif()
 
 target_link_libraries(
-  tscore
-  PUBLIC OpenSSL::Crypto
-         PCRE::PCRE
-         libswoc::libswoc
-         yaml-cpp::yaml-cpp
-         resolv::resolv
-         ts::tsapicore
-         ts::tscpputil
+  tscore PUBLIC OpenSSL::Crypto PCRE::PCRE libswoc::libswoc yaml-cpp::yaml-cpp resolv::resolv ts::tsutil
 )
 
 if(TS_USE_POSIX_CAP)
@@ -136,6 +128,14 @@ add_dependencies(tscore ParseRules)
 target_include_directories(tscore PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 if(TS_HAS_128BIT_CAS AND TS_NEEDS_MCX16_FOR_CAS)
   target_compile_options(tscore PUBLIC "-mcx16")
+endif()
+
+if(BUILD_SHARED_LIBS)
+  install(
+    TARGETS tscore
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  )
 endif()
 
 if(BUILD_TESTING)
@@ -172,10 +172,9 @@ if(BUILD_TESTING)
     test_tscore
     PRIVATE libswoc::libswoc
             ts::tscore
-            ts::tsapicore
+            ts::tsutil
             yaml-cpp::yaml-cpp
             resolv::resolv
-            ts::tscpputil
             OpenSSL::Crypto
             OpenSSL::SSL
             catch2::catch2

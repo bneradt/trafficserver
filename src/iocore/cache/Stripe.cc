@@ -693,9 +693,9 @@ Stripe::dir_init_done(int /* event ATS_UNUSED */, void * /* data ATS_UNUSED */)
     eventProcessor.schedule_in(this, HRTIME_MSECONDS(5), ET_CALL);
     return EVENT_CONT;
   } else {
-    int vol_no = gnvol++;
-    ink_assert(!gvol[vol_no]);
-    gvol[vol_no] = this;
+    int i = gnstripes++;
+    ink_assert(!gstripes[i]);
+    gstripes[i] = this;
     SET_HANDLER(&Stripe::aggWrite);
     cache->vol_initialized(fd != -1);
     return EVENT_DONE;
@@ -916,6 +916,33 @@ Stripe::_init_data()
   this->_init_data_internal();
   this->_init_data_internal();
   this->_init_data_internal();
+}
+
+bool
+Stripe::add_writer(CacheVC *vc)
+{
+  ink_assert(vc);
+  this->_write_buffer.add_bytes_pending_aggregation(vc->agg_len);
+  bool agg_error =
+    (vc->agg_len > AGG_SIZE || vc->header_len + sizeof(Doc) > MAX_FRAG_SIZE ||
+     (!vc->f.readers && (this->_write_buffer.get_bytes_pending_aggregation() > cache_config_agg_write_backlog + AGG_SIZE) &&
+      vc->write_len));
+#ifdef CACHE_AGG_FAIL_RATE
+  agg_error = agg_error || ((uint32_t)vc->mutex->thread_holding->generator.random() < (uint32_t)(UINT_MAX * CACHE_AGG_FAIL_RATE));
+#endif
+
+  if (agg_error) {
+    this->_write_buffer.add_bytes_pending_aggregation(-vc->agg_len);
+  } else {
+    ink_assert(vc->agg_len <= AGG_SIZE);
+    if (vc->f.evac_vector) {
+      this->get_pending_writers().push(vc);
+    } else {
+      this->get_pending_writers().enqueue(vc);
+    }
+  }
+
+  return !agg_error;
 }
 
 bool

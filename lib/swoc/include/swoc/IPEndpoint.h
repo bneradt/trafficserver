@@ -6,15 +6,13 @@
 
 #pragma once
 
-#include <netinet/in.h>
-#include <sys/socket.h>
-
 #include <stdexcept>
 
 #include "swoc/swoc_version.h"
 #include "swoc/MemSpan.h"
 #include "swoc/TextView.h"
 #include "swoc/string_view_util.h"
+#include "swoc/swoc_ip_util.h"
 
 namespace swoc { inline namespace SWOC_VERSION_NS {
 
@@ -36,7 +34,7 @@ class IP6Srv;
     for an IP endpoint is present.
  */
 union IPEndpoint {
-  using self_type = IPEndpoint; ///< Self reference type.
+  using self_type   = IPEndpoint; ///< Self reference type.
   using string_view = std::string_view;
 
   struct sockaddr sa;      ///< Generic address.
@@ -55,16 +53,16 @@ union IPEndpoint {
   explicit IPEndpoint(IPAddr const &addr);
 
   /// Construct from address and port.
-  explicit IPEndpoint(IPSrv const& srv);
+  explicit IPEndpoint(IPSrv const &srv);
 
   /// Construct from generic socket address.
   IPEndpoint(sockaddr const *addr);
 
   /// Construct from @a sockaddr_in
-  IPEndpoint(sockaddr_in const* sin);
+  IPEndpoint(sockaddr_in const *sin);
 
   /// Construct from @a sockaddr_in6
-  IPEndpoint(sockaddr_in6 const * sin6);
+  IPEndpoint(sockaddr_in6 const *sin6);
 
   /// Copy assignment.
   self_type &operator=(self_type const &that);
@@ -120,34 +118,34 @@ union IPEndpoint {
    * @param sin IPv4 socket address.
    * @return @a this
    */
-  self_type &assign(sockaddr_in const * sin);
+  self_type &assign(sockaddr_in const *sin);
 
   /** Assign from IPv6 socket address.
    *
    * @param sin6 IPv6 socket address.
    * @return @a this
    */
-  self_type &assign(sockaddr_in6 const * sin6);
+  self_type &assign(sockaddr_in6 const *sin6);
 
   /// Assign from IP address.
   self_type &assign(IPAddr const &addr);
 
-  [[deprecated("Use IPSrv")]] self_type &assign(IPAddr const& addr, in_port_t port);
+  [[deprecated("Use IPSrv")]] self_type &assign(IPAddr const &addr, in_port_t port);
 
   /// Assign from IPv4 address.
-  self_type &assign(IP4Addr const& addr);
+  self_type &assign(IP4Addr const &addr);
 
   /// Assign from IPv4 address.
-  self_type &assign(IP6Addr const& addr);
+  self_type &assign(IP6Addr const &addr);
 
   /// Assign from IPv4 service.
-  self_type &assign(IP4Srv const& srv);
+  self_type &assign(IP4Srv const &srv);
 
   /// Assign from IPv6 service.
-  self_type &assign(IP6Srv const& srv);
+  self_type &assign(IP6Srv const &srv);
 
   /// Assign from IP service.
-  self_type &assign(IPSrv const& srv);
+  self_type &assign(IPSrv const &srv);
 
   /// Copy to @a sa.
   const self_type &copy_to(sockaddr *addr) const;
@@ -171,16 +169,16 @@ union IPEndpoint {
   sa_family_t family() const;
 
   /// @return A pointer to a @c sockaddr_in or @c nullptr if not IPv4.
-  sockaddr_in * ip4();
+  sockaddr_in *ip4();
 
   /// @return A pointer to a @c sockaddr_in or @c nullptr if not IPv4.
-  sockaddr_in const * ip4() const;
+  sockaddr_in const *ip4() const;
 
   /// @return A pointer to a @c sockaddr_in6 or @c nullptr if not IPv6.
-  sockaddr_in6 * ip6();
+  sockaddr_in6 *ip6();
 
   /// @return A pointer to a @c sockaddr_in6 or @c nullptr if not IPv6.
-  sockaddr_in6 const * ip6() const;
+  sockaddr_in6 const *ip6() const;
 
   /// Set to be the ANY address for family @a family.
   /// @a family must be @c AF_INET or @c AF_INET6.
@@ -197,6 +195,24 @@ union IPEndpoint {
 
   /// @return @c true if this is a loopback address, @c false if not.
   bool is_loopback() const;
+
+  /// @return @c true if the address is in the link local network.
+  bool is_link_local() const;
+
+  /// @return @c true if the address is in the link local network.
+  static bool is_link_local(sockaddr const * sa);
+
+  /// @return @c true if the address is private.
+  bool is_private() const;
+
+  /// @return @c true if the address is private.
+  static bool is_private(sockaddr const * sa);
+
+  /// @return @c true if the address is multicast.
+  bool is_multicast() const;
+
+  /// @return @c true if the address is multicast.
+  static bool is_multicast(sockaddr const * sa);
 
   /** Port in network order.
    *
@@ -217,8 +233,9 @@ union IPEndpoint {
   static bool is_valid(sockaddr const *sa);
 
   /// Direct access to port.
-  /// @return Refernec to the port in the socket address.
+  /// @return Reference to the port in the socket address.
   /// @note If @a sa is not a valid IP address an assertion is thrown.
+  /// @note The raw port is in network order.
   /// @a is_valid
   static in_port_t &port(sockaddr *sa);
 
@@ -237,10 +254,16 @@ union IPEndpoint {
   static in_port_t host_order_port(sockaddr const *sa);
 
   /// Automatic conversion to @c sockaddr.
-  operator sockaddr *() { return &sa; }
+  operator sockaddr *();
 
   /// Automatic conversion to @c sockaddr.
-  operator sockaddr const *() const { return &sa; }
+  operator sockaddr const *() const;
+
+  /// Size of the sockaddr variant based on the family.
+  size_t sa_size() const;
+
+  /// Size of the sockaddr based on the family.
+  static size_t sa_size(sockaddr const* sa);
 
   /** The address as a byte sequence.
    *
@@ -262,7 +285,7 @@ inline IPEndpoint::IPEndpoint(IPAddr const &addr) {
   this->assign(addr);
 }
 
-inline IPEndpoint::IPEndpoint(IPSrv const& srv) {
+inline IPEndpoint::IPEndpoint(IPSrv const &srv) {
   this->assign(srv);
 }
 
@@ -295,13 +318,13 @@ IPEndpoint::operator=(self_type const &that) {
 }
 
 inline IPEndpoint &
-IPEndpoint::assign(sockaddr_in const * sin) {
+IPEndpoint::assign(sockaddr_in const *sin) {
   std::memcpy(&sa4, sin, sizeof(sockaddr_in));
   return *this;
 }
 
 inline IPEndpoint &
-IPEndpoint::assign(sockaddr_in6 const * sin6) {
+IPEndpoint::assign(sockaddr_in6 const *sin6) {
   std::memcpy(&sa6, sin6, sizeof(sockaddr_in6));
   return *this;
 }
@@ -355,7 +378,7 @@ IPEndpoint::ip6() const {
 
 inline in_port_t
 IPEndpoint::network_order_port() const {
-  return this->is_valid() ? this->port(const_cast<sockaddr*>(&sa)) : 0;
+  return this->is_valid() ? this->port(const_cast<sockaddr *>(&sa)) : 0;
 }
 
 inline in_port_t
@@ -373,8 +396,8 @@ IPEndpoint::port(sockaddr *sa) {
   switch (sa->sa_family) {
   case AF_INET:
     return reinterpret_cast<sockaddr_in *>(sa)->sin_port;
-    case AF_INET6:
-      return reinterpret_cast<sockaddr_in6 *>(sa)->sin6_port;
+  case AF_INET6:
+    return reinterpret_cast<sockaddr_in6 *>(sa)->sin6_port;
   }
   // Force a failure upstream by returning a null reference.
   throw std::domain_error("sockaddr does not contain a valid IP address");
@@ -382,21 +405,59 @@ IPEndpoint::port(sockaddr *sa) {
 
 inline in_port_t
 IPEndpoint::network_order_port(sockaddr const *sa) {
-  return self_type::is_valid(sa) ? self_type::port(const_cast<sockaddr*>(sa)) : 0;
+  return self_type::is_valid(sa) ? self_type::port(const_cast<sockaddr *>(sa)) : 0;
 }
 
 inline in_port_t
 IPEndpoint::host_order_port(sockaddr const *sa) {
-  return self_type::is_valid(sa) ? ntohs(self_type::port(const_cast<sockaddr*>(sa))) : 0;
+  return self_type::is_valid(sa) ? ntohs(self_type::port(const_cast<sockaddr *>(sa))) : 0;
 }
 
 inline swoc::MemSpan<void const>
 IPEndpoint::raw_addr() const {
   switch (sa.sa_family) {
-  case AF_INET: return { &sa4.sin_addr , sizeof(sa4.sin_addr) };
-  case AF_INET6: return { &sa6.sin6_addr, sizeof(sa6.sin6_addr) };
+  case AF_INET:
+    return {&sa4.sin_addr, sizeof(sa4.sin_addr)};
+  case AF_INET6:
+    return {&sa6.sin6_addr, sizeof(sa6.sin6_addr)};
   }
   return {};
+}
+
+inline bool IPEndpoint::is_link_local() const {
+  return swoc::ip::is_link_local(&sa);
+}
+
+inline bool IPEndpoint::is_link_local(sockaddr const * sa) {
+  return swoc::ip::is_link_local(sa);
+}
+
+inline bool IPEndpoint::is_private() const {
+  return swoc::ip::is_private(&sa);
+}
+
+inline bool IPEndpoint::is_private(sockaddr const * sa) {
+  return swoc::ip::is_private(sa);
+}
+
+inline bool IPEndpoint::is_multicast() const {
+  return swoc::ip::is_multicast(&sa);
+}
+
+inline bool IPEndpoint::is_multicast(sockaddr const * sa) {
+  return swoc::ip::is_multicast(sa);
+}
+
+inline IPEndpoint::operator sockaddr *() { return &sa; }
+
+inline IPEndpoint::operator sockaddr const *() const { return &sa; }
+
+inline size_t IPEndpoint::sa_size() const {
+  return sa_size(&sa);
+}
+
+inline size_t IPEndpoint::sa_size(sockaddr const* sa) {
+  return AF_INET == sa->sa_family ? sizeof(sockaddr_in) : AF_INET6 == sa->sa_family ? sizeof(sockaddr_in6) : sizeof(sockaddr);
 }
 
 }} // namespace swoc::SWOC_VERSION_NS

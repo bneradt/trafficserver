@@ -27,7 +27,7 @@
 #include "../P_CacheHosting.h"
 
 #include "tscore/Diags.h"
-#include "tscpp/util/PostScript.h"
+#include "tsutil/PostScript.h"
 
 // Required by main.h
 int cache_vols            = 1;
@@ -58,7 +58,7 @@ static int configs = 4;
 Queue<CacheVol> saved_cp_list;
 int saved_cp_list_len;
 ConfigVolumes saved_config_volumes;
-int saved_gnvol;
+int saved_gnstripes;
 
 int ClearConfigVol(ConfigVolumes *configp);
 int ClearCacheVolList(Queue<CacheVol> *cpl, int len);
@@ -254,8 +254,8 @@ execute_and_verify()
         int d_no;
         int m_vols = 0;
         for (d_no = 0; d_no < gndisks; d_no++) {
-          if (cachep->disk_vols[d_no]) {
-            DiskStripe *dp = cachep->disk_vols[d_no];
+          if (cachep->disk_stripes[d_no]) {
+            DiskStripe *dp = cachep->disk_stripes[d_no];
             // DiskStripes and CacheVols should match
             REQUIRE(dp->vol_number == cachep->vol_number);
 
@@ -289,7 +289,7 @@ execute_and_verify()
       Dbg(dbg_ctl_cache_hosting, "Disk: %d: Stripe Blocks: %u: Free space: %" PRIu64, i, d->header->num_diskvol_blks,
           d->free_space);
       for (int j = 0; j < static_cast<int>(d->header->num_volumes); j++) {
-        Dbg(dbg_ctl_cache_hosting, "\tStripe: %d Size: %" PRIu64, d->disk_vols[j]->vol_number, d->disk_vols[j]->size);
+        Dbg(dbg_ctl_cache_hosting, "\tStripe: %d Size: %" PRIu64, d->disk_stripes[j]->vol_number, d->disk_stripes[j]->size);
       }
       for (int j = 0; j < static_cast<int>(d->header->num_diskvol_blks); j++) {
         Dbg(dbg_ctl_cache_hosting, "\tBlock No: %d Size: %" PRIu64 " Free: %u", d->header->vol_info[j].number,
@@ -323,8 +323,8 @@ ClearCacheVolList(Queue<CacheVol> *cpl, int len)
   int i        = 0;
   CacheVol *cp = nullptr;
   while ((cp = cpl->dequeue())) {
-    ats_free(cp->disk_vols);
-    ats_free(cp->vols);
+    ats_free(cp->disk_stripes);
+    ats_free(cp->stripes);
     delete (cp);
     i++;
   }
@@ -342,10 +342,10 @@ save_state()
   saved_cp_list     = cp_list;
   saved_cp_list_len = cp_list_len;
   memcpy(&saved_config_volumes, &config_volumes, sizeof(ConfigVolumes));
-  saved_gnvol = gnvol;
+  saved_gnstripes = gnstripes;
   memset(static_cast<void *>(&cp_list), 0, sizeof(Queue<CacheVol>));
   memset(static_cast<void *>(&config_volumes), 0, sizeof(ConfigVolumes));
-  gnvol = 0;
+  gnstripes = 0;
 }
 
 void
@@ -354,7 +354,7 @@ restore_state()
   cp_list     = saved_cp_list;
   cp_list_len = saved_cp_list_len;
   memcpy(&config_volumes, &saved_config_volumes, sizeof(ConfigVolumes));
-  gnvol = saved_gnvol;
+  gnstripes = saved_gnstripes;
 }
 } // end anonymous namespace
 

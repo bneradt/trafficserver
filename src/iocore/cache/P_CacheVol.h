@@ -280,8 +280,25 @@ public:
   char *get_agg_buffer();
   int get_agg_buf_pos() const;
   int get_agg_todo_size() const;
-  void add_agg_todo(int size);
 
+  /**
+   * Add a virtual connection waiting to write to this stripe.
+   *
+   * If vc->f.evac_vector is set, it will be queued before any regular writes.
+   *
+   * This operation may fail for any one of the following reasons:
+   *   - The write would overflow the internal aggregation buffer.
+   *   - Adding a Doc to the virtual connection header would exceed the
+   *       maximum fragment size.
+   *   - vc->f.readers is not set (this virtual connection is not an evacuator),
+   *       the internal aggregation buffer is full, the writes waiting to be
+   *       aggregated exceed the maximum backlog, and the virtual connection
+   *       has a non-zero write length.
+   *
+   * @param vc: The virtual connection.
+   * @return: Returns true if the operation was successfull, otherwise false.
+   */
+  bool add_writer(CacheVC *vc);
   bool flush_aggregate_write_buffer();
 
 private:
@@ -300,13 +317,13 @@ struct AIO_failure_handler : public Continuation {
 };
 
 struct CacheVol {
-  int vol_number         = -1;
-  int scheme             = 0;
-  off_t size             = 0;
-  int num_vols           = 0;
-  bool ramcache_enabled  = true;
-  Stripe **vols          = nullptr;
-  DiskStripe **disk_vols = nullptr;
+  int vol_number            = -1;
+  int scheme                = 0;
+  off_t size                = 0;
+  int num_vols              = 0;
+  bool ramcache_enabled     = true;
+  Stripe **stripes          = nullptr;
+  DiskStripe **disk_stripes = nullptr;
   LINK(CacheVol, link);
   // per volume stats
   CacheStatsBlock vol_rsb;
@@ -350,8 +367,8 @@ struct Doc {
 
 // Global Data
 
-extern Stripe **gvol;
-extern std::atomic<int> gnvol;
+extern Stripe **gstripes;
+extern std::atomic<int> gnstripes;
 extern ClassAllocator<OpenDirEntry> openDirEntryAllocator;
 extern ClassAllocator<EvacuationBlock> evacuationBlockAllocator;
 extern ClassAllocator<EvacuationKey> evacuationKeyAllocator;
@@ -473,14 +490,16 @@ Doc::data()
 // inline Functions
 
 inline EvacuationBlock *
-evacuation_block_exists(Dir *dir, Stripe *p)
+evacuation_block_exists(Dir *dir, Stripe *stripe)
 {
   auto bucket = dir_evac_bucket(dir);
-  if (p->evac_bucket_valid(bucket)) {
-    EvacuationBlock *b = p->evacuate[bucket].head;
-    for (; b; b = b->link.next)
-      if (dir_offset(&b->dir) == dir_offset(dir))
+  if (stripe->evac_bucket_valid(bucket)) {
+    EvacuationBlock *b = stripe->evacuate[bucket].head;
+    for (; b; b = b->link.next) {
+      if (dir_offset(&b->dir) == dir_offset(dir)) {
         return b;
+      }
+    }
   }
   return nullptr;
 }
@@ -582,10 +601,4 @@ inline int
 Stripe::get_agg_todo_size() const
 {
   return this->_write_buffer.get_bytes_pending_aggregation();
-}
-
-inline void
-Stripe::add_agg_todo(int size)
-{
-  this->_write_buffer.add_bytes_pending_aggregation(size);
 }

@@ -28,25 +28,22 @@
  *
  ****************************************************************************/
 
-#include <sys/types.h>
-
 #include "swoc/bwf_ip.h"
 #include "swoc/swoc_file.h"
 
-#include "tscore/ink_config.h"
 #include "tscore/MatcherUtils.h"
 #include "tscore/Tokenizer.h"
-#include "iocore/eventsystem/ConfigProcessor.h"
 #include "proxy/ControlMatcher.h"
 #include "proxy/CacheControl.h"
 #include "proxy/ParentSelection.h"
 #include "tscore/HostLookup.h"
 #include "proxy/hdrs/HTTP.h"
-#include "proxy/hdrs/URL.h"
-#include "../iocore/eventsystem/P_EventSystem.h"
-#include "../iocore/net/P_Net.h"
-#include "../iocore/cache/P_Cache.h"
-#include "../iocore/dns/P_SplitDNS.h"
+#include "../iocore/dns/P_SplitDNSProcessor.h"
+
+namespace
+{
+DbgCtl dbg_ctl_matcher("matcher");
+}
 
 /****************************************************************
  *   Place all template instantiations at the bottom of the file
@@ -356,7 +353,7 @@ UrlMatcher<Data, MatchResult>::Match(RequestData *rdata, MatchResult *result) co
   }
 
   if (auto it = url_ht.find(url_str); it != url_ht.end()) {
-    Debug("matcher", "%s Matched %s with url at line %d", matcher_name, url_str, data_array[it->second].line_num);
+    Dbg(dbg_ctl_matcher, "%s Matched %s with url at line %d", matcher_name, url_str, data_array[it->second].line_num);
     data_array[it->second].UpdateMatch(result, rdata);
   }
 
@@ -510,7 +507,7 @@ RegexMatcher<Data, MatchResult>::Match(RequestData *rdata, MatchResult *result) 
   for (int i = 0; i < num_el; i++) {
     r = pcre_exec(re_array[i], nullptr, url_str, strlen(url_str), 0, 0, nullptr, 0);
     if (r > -1) {
-      Debug("matcher", "%s Matched %s with regex at line %d", matcher_name, url_str, data_array[i].line_num);
+      Dbg(dbg_ctl_matcher, "%s Matched %s with regex at line %d", matcher_name, url_str, data_array[i].line_num);
       data_array[i].UpdateMatch(result, rdata);
     } else if (r < -1) {
       // An error has occurred
@@ -558,8 +555,8 @@ HostRegexMatcher<Data, MatchResult>::Match(RequestData *rdata, MatchResult *resu
   for (int i = 0; i < this->num_el; i++) {
     r = pcre_exec(this->re_array[i], nullptr, url_str, strlen(url_str), 0, 0, nullptr, 0);
     if (r != -1) {
-      Debug("matcher", "%s Matched %s with regex at line %d", const_cast<char *>(this->matcher_name), url_str,
-            this->data_array[i].line_num);
+      Dbg(dbg_ctl_matcher, "%s Matched %s with regex at line %d", const_cast<char *>(this->matcher_name), url_str,
+          this->data_array[i].line_num);
       this->data_array[i].UpdateMatch(result, rdata);
     } else {
       // An error has occurred
@@ -923,7 +920,7 @@ ControlMatcher<Data, MatchResult>::BuildTableFromString(char *file_buf)
 
   ink_assert(second_pass == numEntries);
 
-  if (is_debug_tag_set("matcher")) {
+  if (dbg_ctl_matcher.on()) {
     Print();
   }
   return numEntries;

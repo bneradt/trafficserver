@@ -34,7 +34,7 @@
 #include "P_SSLConfig.h"
 #include "P_SSLUtils.h"
 #include "SSLStats.h"
-#include "api/FetchSM.h"
+#include "proxy/FetchSM.h"
 
 // Macros for ASN1 and the code in TS_OCSP_* functions were borrowed from OpenSSL 3.1.0 (a92271e03a8d0dee507b6f1e7f49512568b2c7ad),
 // and were modified to make them compilable with BoringSSL and C++ compiler.
@@ -53,6 +53,9 @@ extern ClassAllocator<FetchSM> FetchSMAllocator;
 // clang-format off
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
+#ifndef GENERAL_NAME_it
+DECLARE_ASN1_ITEM(GENERAL_NAME)
+#endif
 // RFC 6960
 using TS_OCSP_CERTID = struct ocsp_cert_id {
   X509_ALGOR *hashAlgorithm;
@@ -751,13 +754,8 @@ stapling_get_issuer(SSL_CTX *ssl_ctx, X509 *x)
   for (int i = 0; i < static_cast<int>(sk_X509_num(extra_certs)); i++) {
     issuer = sk_X509_value(extra_certs, i);
     if (X509_check_issued(issuer, x) == X509_V_OK) {
-#if OPENSSL_VERSION_NUMBER < 0x10100000
-      CRYPTO_add(&issuer->references, 1, CRYPTO_LOCK_X509);
-      return issuer;
-#else
       X509_up_ref(issuer);
       goto end;
-#endif
     }
   }
 
@@ -1261,33 +1259,40 @@ ocsp_update()
   time_t current_time;
 
   SSLCertificateConfig::scoped_config certLookup;
-  const unsigned ctxCount = certLookup ? certLookup->count() : 0;
 
   Debug("ssl_ocsp", "updating OCSP data");
-  for (unsigned i = 0; i < ctxCount; i++) {
-    SSLCertContext *cc = certLookup->get(i);
-    if (cc) {
-      ctx = cc->getCtx();
-      if (ctx) {
-        certinfo *cinf    = nullptr;
-        certinfo_map *map = stapling_get_cert_info(ctx.get());
-        if (map) {
-          // Walk over all certs associated with this CTX
-          for (auto &iter : *map) {
-            cinf = iter.second;
-            ink_mutex_acquire(&cinf->stapling_mutex);
-            current_time = time(nullptr);
-            if (cinf->resp_derlen == 0 || cinf->is_expire || cinf->expire_time < current_time) {
-              ink_mutex_release(&cinf->stapling_mutex);
-              if (stapling_refresh_response(cinf, &resp)) {
-                Debug("ssl_ocsp", "Successfully refreshed OCSP for %s certificate. url=%s", cinf->certname, cinf->uri);
-                Metrics::Counter::increment(ssl_rsb.ocsp_refreshed_cert);
+#ifndef OPENSSL_IS_BORINGSSL
+  const SSLCertContextType ctxTypes[] = {SSLCertContextType::GENERIC};
+#else
+  const SSLCertContextType ctxTypes[] = {SSLCertContextType::RSA, SSLCertContextType::EC};
+#endif
+  for (const auto &ctxType : ctxTypes) {
+    const unsigned ctxCount = certLookup ? certLookup->count(ctxType) : 0;
+    for (unsigned i = 0; i < ctxCount; i++) {
+      SSLCertContext *cc = certLookup->get(i, ctxType);
+      if (cc) {
+        ctx = cc->getCtx();
+        if (ctx) {
+          certinfo *cinf    = nullptr;
+          certinfo_map *map = stapling_get_cert_info(ctx.get());
+          if (map) {
+            // Walk over all certs associated with this CTX
+            for (auto &iter : *map) {
+              cinf = iter.second;
+              ink_mutex_acquire(&cinf->stapling_mutex);
+              current_time = time(nullptr);
+              if (cinf->resp_derlen == 0 || cinf->is_expire || cinf->expire_time < current_time) {
+                ink_mutex_release(&cinf->stapling_mutex);
+                if (stapling_refresh_response(cinf, &resp)) {
+                  Debug("ssl_ocsp", "Successfully refreshed OCSP for %s certificate. url=%s", cinf->certname, cinf->uri);
+                  Metrics::Counter::increment(ssl_rsb.ocsp_refreshed_cert);
+                } else {
+                  Error("Failed to refresh OCSP for %s certificate. url=%s", cinf->certname, cinf->uri);
+                  Metrics::Counter::increment(ssl_rsb.ocsp_refresh_cert_failure);
+                }
               } else {
-                Error("Failed to refresh OCSP for %s certificate. url=%s", cinf->certname, cinf->uri);
-                Metrics::Counter::increment(ssl_rsb.ocsp_refresh_cert_failure);
+                ink_mutex_release(&cinf->stapling_mutex);
               }
-            } else {
-              ink_mutex_release(&cinf->stapling_mutex);
             }
           }
         }

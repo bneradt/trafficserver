@@ -46,7 +46,7 @@
 
 #include "swoc/swoc_ip.h"
 
-#include <tscpp/util/ts_ip.h>
+#include <tsutil/ts_ip.h>
 
 #include "tscore/ink_config.h"
 #if HAVE_BROTLI_ENCODE_H
@@ -743,7 +743,9 @@ init:
     TSMgmtUpdateRegister(config_cont, PLUGIN_NAME);
   }
 
-  Dbg(dbg_ctl, "stats module registered with path %s", config_holder->config->stats_path.c_str());
+  if (config_holder->config != nullptr) {
+    Dbg(dbg_ctl, "stats module registered with path %s", config_holder->config->stats_path.c_str());
+  }
 
 done:
   return;

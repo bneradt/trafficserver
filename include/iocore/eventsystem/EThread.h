@@ -24,13 +24,15 @@
 
 #pragma once
 
+#include <atomic>
+
 #include "tscore/ink_platform.h"
 #include "tscore/ink_rand.h"
 #include "tscore/Version.h"
 #include "iocore/eventsystem/Thread.h"
 #include "iocore/eventsystem/PriorityEventQueue.h"
 #include "iocore/eventsystem/ProtectedQueue.h"
-#include "tscpp/util/Histogram.h"
+#include "tsutil/Histogram.h"
 
 // TODO: This would be much nicer to have "run-time" configurable (or something)
 #define PER_THREAD_DATA (1024 * 1024)
@@ -479,7 +481,7 @@ public:
     /// The slices.
     std::array<Slice, N_SLICES> _slice;
 
-    Slice *volatile current_slice = nullptr; ///< The current slice.
+    std::atomic<Slice *> current_slice{nullptr}; ///< The current slice.
 
     /** The number of time scales used in the event statistics.
         Currently these are 10s, 100s, 1000s.
@@ -547,6 +549,9 @@ public:
   };
 
   Metrics metrics;
+
+private:
+  void cons_common();
 };
 
 // --- Inline implementation
@@ -599,7 +604,7 @@ inline auto
 EThread::Metrics::record_loop_time(ink_hrtime delta) -> self_type &
 {
   static auto constexpr DIVISOR = std::chrono::duration_cast<ts_nanoseconds>(LOOP_HISTOGRAM_BUCKET_SIZE).count();
-  current_slice->record_loop_duration(delta);
+  current_slice.load(std::memory_order_acquire)->record_loop_duration(delta);
   _loop_timing(delta / DIVISOR);
   return *this;
 }

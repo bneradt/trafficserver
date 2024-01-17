@@ -44,7 +44,7 @@ namespace fs = swoc::file;
 
 #include "tscore/Ptr.h"
 #include "iocore/eventsystem/EventSystem.h"
-#include "tscpp/util/IntrusiveDList.h"
+#include "tsutil/IntrusiveDList.h"
 
 #include "proxy/Plugin.h"
 

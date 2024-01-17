@@ -29,9 +29,7 @@
 
 #include <stdint.h> // NOLINT(modernize-deprecated-headers)
 
-#ifdef HAVE_INTTYPES_H
 #include <inttypes.h> // NOLINT(modernize-deprecated-headers)
-#endif
 
 #ifndef INT64_MIN
 #define INT64_MAX (9223372036854775807LL)
@@ -39,9 +37,6 @@
 #define INT32_MAX (2147483647)
 #define INT32_MIN (-2147483647 - 1)
 #endif
-
-#define POSIX_THREAD
-#define POSIX_THREAD_10031c
 
 #ifndef ETIME
 #ifdef ETIMEDOUT

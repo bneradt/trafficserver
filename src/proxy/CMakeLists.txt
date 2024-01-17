@@ -35,6 +35,8 @@ add_library(
   ProxyTransaction.cc
   ReverseProxy.cc
   Transform.cc
+  FetchSM.cc
+  PluginHttpConnect.cc
 )
 add_library(ts::proxy ALIAS proxy)
 
@@ -44,7 +46,7 @@ endif()
 
 target_link_libraries(
   proxy
-  PUBLIC ts::inkcache ts::inkevent ts::tsapicore ts::tscore
+  PUBLIC ts::inkcache ts::inkevent ts::tsutil ts::tscore
   PRIVATE ts::jsonrpc_protocol ts::inkutils ts::tsapibackend
 )
 

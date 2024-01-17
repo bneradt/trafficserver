@@ -23,11 +23,7 @@
 
 #include "P_SSLCertLookup.h"
 
-#include "tscore/ink_config.h"
-#include "tscore/Layout.h"
 #include "tscore/MatcherUtils.h"
-#include "tscpp/util/Regex.h"
-#include "tscore/Trie.h"
 #include "tscore/ink_config.h"
 
 #include "swoc/BufferWriter.h"
@@ -35,18 +31,14 @@
 
 #include "tscore/TestBox.h"
 
-#include "tscpp/util/Convert.h"
-
-#include "iocore/eventsystem/EventSystem.h"
+#include "tsutil/Convert.h"
 
 #include "P_SSLUtils.h"
-#include "P_SSLConfig.h"
-#include "SSLSessionTicket.h"
 
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include <algorithm>
+#include <openssl/rand.h>
 
 struct SSLAddressLookupKey {
   explicit SSLAddressLookupKey(const IpEndpoint &ip)
@@ -379,15 +371,31 @@ SSLCertLookup::insert(const IpEndpoint &address, SSLCertContext const &cc)
 }
 
 unsigned
-SSLCertLookup::count() const
+SSLCertLookup::count(SSLCertContextType ctxType) const
 {
-  return ssl_storage->count();
+  switch (ctxType) {
+  case SSLCertContextType::EC:
+#ifdef OPENSSL_IS_BORINGSSL
+    return ec_storage->count();
+#endif
+  case SSLCertContextType::RSA:
+  default:
+    return ssl_storage->count();
+  }
 }
 
 SSLCertContext *
-SSLCertLookup::get(unsigned i) const
+SSLCertLookup::get(unsigned i, SSLCertContextType ctxType) const
 {
-  return ssl_storage->get(i);
+  switch (ctxType) {
+  case SSLCertContextType::EC:
+#ifdef OPENSSL_IS_BORINGSSL
+    return ec_storage->get(i);
+#endif
+  case SSLCertContextType::RSA:
+  default:
+    return ssl_storage->get(i);
+  }
 }
 
 void

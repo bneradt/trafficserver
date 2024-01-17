@@ -16,14 +16,12 @@
 #######################
 
 # plugin api *only*
-add_library(tsapi SHARED InkAPI.cc InkIOCoreAPI.cc FetchSM.cc # OSCP stapling
-)
+add_library(tsapi SHARED InkAPI.cc InkIOCoreAPI.cc)
 add_library(ts::tsapi ALIAS tsapi)
 
 set(TSAPI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/ts/ts.h
     ${PROJECT_SOURCE_DIR}/include/ts/remap.h
-    ${PROJECT_SOURCE_DIR}/include/ts/DbgCtl.h
     ${PROJECT_SOURCE_DIR}/include/ts/TsException.h
     ${PROJECT_SOURCE_DIR}/include/ts/parentselectdefs.h
     ${PROJECT_SOURCE_DIR}/include/ts/parentselectdefs.h
@@ -36,7 +34,7 @@ set_target_properties(tsapi PROPERTIES PUBLIC_HEADER "${TSAPI_PUBLIC_HEADERS}")
 
 # Items common between api and other ts libraries
 add_library(
-  tsapibackend
+  tsapibackend STATIC # need to fix circular dep to remove this
   ConfigUpdateCbTable.cc # configmanager
   InkContInternal.cc # proxy, http
   InkVConnInternal.cc # proxy, http
@@ -52,22 +50,19 @@ target_link_libraries(
   PRIVATE ts::proxy ts::hdrs ts::tscore
 )
 
-# Items that even tscore can depend on
-add_library(tsapicore Metrics.cc DbgCtl.cc)
-add_library(ts::tsapicore ALIAS tsapicore)
-target_link_libraries(tsapicore PRIVATE ts::tscore)
-set_target_properties(tsapicore PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
+install(
+  TARGETS tsapi
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ts
+)
 
-install(TARGETS tsapi tsapicore tsapibackend PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ts)
+install(
+  TARGETS tsapibackend
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
 
 if(APPLE)
   target_link_options(tsapi PRIVATE -undefined dynamic_lookup)
-endif()
-
-if(BUILD_TESTING)
-  add_executable(test_ApiCore unit_tests/test_Metrics.cc)
-
-  target_link_libraries(test_ApiCore PRIVATE tsapicore tscore catch2::catch2)
-
-  add_test(NAME test_ApiCore COMMAND $<TARGET_FILE:test_ApiCore>)
 endif()
