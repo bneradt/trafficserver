@@ -27,6 +27,7 @@
 #include "P_CacheTest.h"
 
 #include "tscore/Filenames.h"
+#include "tscore/Layout.h"
 
 #include "../../records/P_RecProcess.h"
 
@@ -35,6 +36,11 @@
 #endif
 
 #include <atomic>
+#include <unordered_set>
+#include <fstream>
+#include <string>
+#include <system_error>
+#include <filesystem>
 
 constexpr ts::VersionNumber CACHE_DB_VERSION(CACHE_DB_MAJOR_VERSION, CACHE_DB_MINOR_VERSION);
 
@@ -67,6 +73,7 @@ int cache_config_read_while_writer             = 0;
 int cache_config_mutex_retry_delay             = 2;
 int cache_read_while_writer_retry_delay        = 50;
 int cache_config_read_while_writer_max_retries = 10;
+int cache_config_persist_bad_disks             = false;
 
 // Globals
 
@@ -87,13 +94,14 @@ bool CacheProcessor::check               = false;
 int CacheProcessor::start_internal_flags = 0;
 int CacheProcessor::auto_clear_flag      = 0;
 CacheProcessor cacheProcessor;
-Stripe **gvol          = nullptr;
-std::atomic<int> gnvol = 0;
+Stripe **gstripes          = nullptr;
+std::atomic<int> gnstripes = 0;
 ClassAllocator<CacheVC> cacheVConnectionAllocator("cacheVConnection");
 ClassAllocator<CacheEvacuateDocVC> cacheEvacuateDocVConnectionAllocator("cacheEvacuateDocVC");
 ClassAllocator<EvacuationBlock> evacuationBlockAllocator("evacuationBlock");
 ClassAllocator<CacheRemoveCont> cacheRemoveContAllocator("cacheRemoveCont");
 ClassAllocator<EvacuationKey> evacuationKeyAllocator("evacuationKey");
+std::unordered_set<std::string> known_bad_disks;
 
 namespace
 {
@@ -193,13 +201,13 @@ register_cache_stats(CacheStatsBlock *rsb, const std::string prefix)
 
 // ToDo: This gets called as part of librecords collection continuation, probably change this later.
 inline int64_t
-cache_bytes_used(int vol_ix)
+cache_bytes_used(int index)
 {
-  if (!DISK_BAD(gvol[vol_ix]->disk)) {
-    if (!gvol[vol_ix]->header->cycle) {
-      return gvol[vol_ix]->header->write_pos - gvol[vol_ix]->start;
+  if (!DISK_BAD(gstripes[index]->disk)) {
+    if (!gstripes[index]->header->cycle) {
+      return gstripes[index]->header->write_pos - gstripes[index]->start;
     } else {
-      return gvol[vol_ix]->len - gvol[vol_ix]->dirlen() - EVACUATION_SIZE;
+      return gstripes[index]->len - gstripes[index]->dirlen() - EVACUATION_SIZE;
     }
   }
 
@@ -214,14 +222,14 @@ CachePeriodicMetricsUpdate()
   // Make sure the bytes_used per volume is always reset to zero, this can update the
   // volume metric more than once (once per disk). This happens once every sync
   // period (5s), and nothing else modifies these metrics.
-  for (int vol_ix = 0; vol_ix < gnvol; ++vol_ix) {
-    Metrics::Gauge::store(gvol[vol_ix]->cache_vol->vol_rsb.bytes_used, 0);
+  for (int i = 0; i < gnstripes; ++i) {
+    Metrics::Gauge::store(gstripes[i]->cache_vol->vol_rsb.bytes_used, 0);
   }
 
   if (cacheProcessor.initialized == CACHE_INITIALIZED) {
-    for (int vol_ix = 0; vol_ix < gnvol; ++vol_ix) {
-      Stripe *v    = gvol[vol_ix];
-      int64_t used = cache_bytes_used(vol_ix);
+    for (int i = 0; i < gnstripes; ++i) {
+      Stripe *v    = gstripes[i];
+      int64_t used = cache_bytes_used(i);
 
       Metrics::Gauge::increment(v->cache_vol->vol_rsb.bytes_used, used); // This assumes they start at zero
       total_sum += used;
@@ -302,7 +310,7 @@ CacheProcessor::start_internal(int flags)
   start_done           = 0;
 
   /* Read the config file and create the data structures corresponding to the file. */
-  gndisks = theCacheStore.n_disks;
+  gndisks = theCacheStore.n_spans;
   gdisks  = static_cast<CacheDisk **>(ats_malloc(gndisks * sizeof(CacheDisk *)));
 
   // Temporaries to carry values between loops
@@ -323,8 +331,8 @@ CacheProcessor::start_internal(int flags)
   /*
    create CacheDisk objects for each span in the configuration file and store in gdisks
    */
-  for (unsigned i = 0; i < theCacheStore.n_disks; i++) {
-    Span *sd = theCacheStore.disk[i];
+  for (unsigned i = 0; i < theCacheStore.n_spans; i++) {
+    Span *sd = theCacheStore.spans[i];
     int opts = DEFAULT_CACHE_OPTIONS;
 
     if (!paths[gndisks]) {
@@ -334,6 +342,15 @@ CacheProcessor::start_internal(int flags)
     if (!sd->file_pathname) {
       ink_strlcat(paths[gndisks], "/cache.db", PATH_NAME_MAX);
       opts |= O_CREAT;
+    }
+
+    // Check if the disk is known to be bad.
+    if (cache_config_persist_bad_disks && !known_bad_disks.empty()) {
+      if (known_bad_disks.find(paths[gndisks]) != known_bad_disks.end()) {
+        Warning("%s is a known bad disk.  Skipping.", paths[gndisks]);
+        Metrics::Gauge::increment(cache_rsb.span_offline);
+        continue;
+      }
     }
 
 #ifdef O_DIRECT
@@ -440,15 +457,15 @@ CacheProcessor::start_internal(int flags)
       Warning("unable to open cache disk(s): Cache Disabled\n");
       return -1; // pointless, AFAICT this is ignored.
     }
-  } else if (this->waitForCache() == 3 && static_cast<unsigned int>(gndisks) < theCacheStore.n_disks_in_config) {
+  } else if (this->waitForCache() == 3 && static_cast<unsigned int>(gndisks) < theCacheStore.n_spans_in_config) {
     CacheProcessor::initialized = CACHE_INIT_FAILED;
     if (cb_after_init) {
       cb_after_init();
     }
     Emergency("Cache initialization failed - only %d out of %d disks were valid and all were required.", gndisks,
-              theCacheStore.n_disks_in_config);
-  } else if (this->waitForCache() == 2 && static_cast<unsigned int>(gndisks) < theCacheStore.n_disks_in_config) {
-    Warning("Cache initialization incomplete - only %d out of %d disks were valid.", gndisks, theCacheStore.n_disks_in_config);
+              theCacheStore.n_spans_in_config);
+  } else if (this->waitForCache() == 2 && static_cast<unsigned int>(gndisks) < theCacheStore.n_spans_in_config) {
+    Warning("Cache initialization incomplete - only %d out of %d disks were valid.", gndisks, theCacheStore.n_spans_in_config);
   }
 
   // If we got here, we have enough disks to proceed
@@ -500,9 +517,9 @@ CacheProcessor::diskInitialized()
       if (cb_after_init) {
         cb_after_init();
       }
-      Emergency("Cache initialization failed - only %d of %d disks were available.", gndisks, theCacheStore.n_disks_in_config);
+      Emergency("Cache initialization failed - only %d of %d disks were available.", gndisks, theCacheStore.n_spans_in_config);
     } else if (this->waitForCache() == 2) {
-      Warning("Cache initialization incomplete - only %d of %d disks were available.", gndisks, theCacheStore.n_disks_in_config);
+      Warning("Cache initialization incomplete - only %d of %d disks were available.", gndisks, theCacheStore.n_spans_in_config);
     }
   }
 
@@ -526,7 +543,7 @@ CacheProcessor::diskInitialized()
 
   if (res == -1) {
     /* problems initializing the volume.config. Punt */
-    gnvol = 0;
+    gnstripes = 0;
     cacheInitialized();
     return;
   } else {
@@ -539,9 +556,9 @@ CacheProcessor::diskInitialized()
     }
   }
 
-  gvol = static_cast<Stripe **>(ats_malloc(gnvol * sizeof(Stripe *)));
-  memset(gvol, 0, gnvol * sizeof(Stripe *));
-  gnvol = 0;
+  gstripes = static_cast<Stripe **>(ats_malloc(gnstripes * sizeof(Stripe *)));
+  memset(gstripes, 0, gnstripes * sizeof(Stripe *));
+  gnstripes = 0;
   for (i = 0; i < gndisks; i++) {
     CacheDisk *d = gdisks[i];
     if (dbg_ctl_cache_hosting.on()) {
@@ -549,7 +566,7 @@ CacheProcessor::diskInitialized()
       DbgPrint(dbg_ctl_cache_hosting, "Disk: %d:%s: Stripe Blocks: %u: Free space: %" PRIu64, i, d->path,
                d->header->num_diskvol_blks, d->free_space);
       for (j = 0; j < static_cast<int>(d->header->num_volumes); j++) {
-        DbgPrint(dbg_ctl_cache_hosting, "\tStripe: %d Size: %" PRIu64, d->disk_vols[j]->vol_number, d->disk_vols[j]->size);
+        DbgPrint(dbg_ctl_cache_hosting, "\tStripe: %d Size: %" PRIu64, d->disk_stripes[j]->vol_number, d->disk_stripes[j]->size);
       }
       for (j = 0; j < static_cast<int>(d->header->num_diskvol_blks); j++) {
         DbgPrint(dbg_ctl_cache_hosting, "\tBlock No: %d Size: %" PRIu64 " Free: %u", d->header->vol_info[j].number,
@@ -593,7 +610,7 @@ CacheProcessor::cacheInitialized()
   uint64_t vol_total_cache_bytes = 0;
   uint64_t vol_total_direntries  = 0;
   uint64_t vol_used_direntries   = 0;
-  Stripe *vol;
+  Stripe *stripe;
 
   if (theCache) {
     total_size += theCache->cache_size;
@@ -612,12 +629,12 @@ CacheProcessor::cacheInitialized()
   }
 
   // Update stripe version data.
-  if (gnvol) { // start with whatever the first stripe is.
-    cacheProcessor.min_stripe_version = cacheProcessor.max_stripe_version = gvol[0]->header->version;
+  if (gnstripes) { // start with whatever the first stripe is.
+    cacheProcessor.min_stripe_version = cacheProcessor.max_stripe_version = gstripes[0]->header->version;
   }
   // scan the rest of the stripes.
-  for (i = 1; i < gnvol; i++) {
-    Stripe *v = gvol[i];
+  for (i = 1; i < gnstripes; i++) {
+    Stripe *v = gstripes[i];
     if (v->header->version < cacheProcessor.min_stripe_version) {
       cacheProcessor.min_stripe_version = v->header->version;
     }
@@ -628,49 +645,49 @@ CacheProcessor::cacheInitialized()
 
   if (caches_ready) {
     Dbg(dbg_ctl_cache_init, "CacheProcessor::cacheInitialized - caches_ready=0x%0X, gnvol=%d", (unsigned int)caches_ready,
-        gnvol.load());
+        gnstripes.load());
 
     int64_t ram_cache_bytes = 0;
 
-    if (gnvol) {
+    if (gnstripes) {
       // new ram_caches, with algorithm from the config
-      for (i = 0; i < gnvol; i++) {
+      for (i = 0; i < gnstripes; i++) {
         switch (cache_config_ram_cache_algorithm) {
         default:
         case RAM_CACHE_ALGORITHM_CLFUS:
-          gvol[i]->ram_cache = new_RamCacheCLFUS();
+          gstripes[i]->ram_cache = new_RamCacheCLFUS();
           break;
         case RAM_CACHE_ALGORITHM_LRU:
-          gvol[i]->ram_cache = new_RamCacheLRU();
+          gstripes[i]->ram_cache = new_RamCacheLRU();
           break;
         }
       }
       // let us calculate the Size
       if (cache_config_ram_cache_size == AUTO_SIZE_RAM_CACHE) {
         Dbg(dbg_ctl_cache_init, "CacheProcessor::cacheInitialized - cache_config_ram_cache_size == AUTO_SIZE_RAM_CACHE");
-        for (i = 0; i < gnvol; i++) {
-          vol = gvol[i];
+        for (i = 0; i < gnstripes; i++) {
+          stripe = gstripes[i];
 
-          if (gvol[i]->cache_vol->ramcache_enabled) {
-            gvol[i]->ram_cache->init(vol->dirlen() * DEFAULT_RAM_CACHE_MULTIPLIER, vol);
-            ram_cache_bytes += gvol[i]->dirlen();
+          if (gstripes[i]->cache_vol->ramcache_enabled) {
+            gstripes[i]->ram_cache->init(stripe->dirlen() * DEFAULT_RAM_CACHE_MULTIPLIER, stripe);
+            ram_cache_bytes += gstripes[i]->dirlen();
             Dbg(dbg_ctl_cache_init, "CacheProcessor::cacheInitialized - ram_cache_bytes = %" PRId64 " = %" PRId64 "Mb",
                 ram_cache_bytes, ram_cache_bytes / (1024 * 1024));
-            Metrics::Gauge::increment(vol->cache_vol->vol_rsb.ram_cache_bytes_total, gvol[i]->dirlen());
+            Metrics::Gauge::increment(stripe->cache_vol->vol_rsb.ram_cache_bytes_total, gstripes[i]->dirlen());
           }
-          vol_total_cache_bytes  = gvol[i]->len - gvol[i]->dirlen();
+          vol_total_cache_bytes  = gstripes[i]->len - gstripes[i]->dirlen();
           total_cache_bytes     += vol_total_cache_bytes;
           Dbg(dbg_ctl_cache_init, "CacheProcessor::cacheInitialized - total_cache_bytes = %" PRId64 " = %" PRId64 "Mb",
               total_cache_bytes, total_cache_bytes / (1024 * 1024));
 
-          Metrics::Gauge::increment(vol->cache_vol->vol_rsb.bytes_total, vol_total_cache_bytes);
+          Metrics::Gauge::increment(stripe->cache_vol->vol_rsb.bytes_total, vol_total_cache_bytes);
 
-          vol_total_direntries  = gvol[i]->buckets * gvol[i]->segments * DIR_DEPTH;
+          vol_total_direntries  = gstripes[i]->buckets * gstripes[i]->segments * DIR_DEPTH;
           total_direntries     += vol_total_direntries;
-          Metrics::Gauge::increment(vol->cache_vol->vol_rsb.direntries_total, vol_total_direntries);
+          Metrics::Gauge::increment(stripe->cache_vol->vol_rsb.direntries_total, vol_total_direntries);
 
-          vol_used_direntries = dir_entries_used(gvol[i]);
-          Metrics::Gauge::increment(vol->cache_vol->vol_rsb.direntries_used, vol_used_direntries);
+          vol_used_direntries = dir_entries_used(gstripes[i]);
+          Metrics::Gauge::increment(stripe->cache_vol->vol_rsb.direntries_used, vol_used_direntries);
           used_direntries += vol_used_direntries;
         }
 
@@ -694,35 +711,36 @@ CacheProcessor::cacheInitialized()
         Dbg(dbg_ctl_ram_cache, "config: size = %" PRId64 ", cutoff = %" PRId64 "", cache_config_ram_cache_size,
             cache_config_ram_cache_cutoff);
 
-        for (i = 0; i < gnvol; i++) {
-          vol = gvol[i];
+        for (i = 0; i < gnstripes; i++) {
+          stripe = gstripes[i];
           double factor;
-          if (gvol[i]->cache == theCache && gvol[i]->cache_vol->ramcache_enabled) {
-            ink_assert(gvol[i]->cache != nullptr);
-            factor = static_cast<double>(static_cast<int64_t>(gvol[i]->len >> STORE_BLOCK_SHIFT)) / theCache->cache_size;
+          if (gstripes[i]->cache == theCache && gstripes[i]->cache_vol->ramcache_enabled) {
+            ink_assert(gstripes[i]->cache != nullptr);
+            factor = static_cast<double>(static_cast<int64_t>(gstripes[i]->len >> STORE_BLOCK_SHIFT)) / theCache->cache_size;
             Dbg(dbg_ctl_cache_init, "CacheProcessor::cacheInitialized - factor = %f", factor);
-            gvol[i]->ram_cache->init(static_cast<int64_t>(http_ram_cache_size * factor), vol);
+            gstripes[i]->ram_cache->init(static_cast<int64_t>(http_ram_cache_size * factor), stripe);
             ram_cache_bytes += static_cast<int64_t>(http_ram_cache_size * factor);
-            Metrics::Gauge::increment(vol->cache_vol->vol_rsb.ram_cache_bytes_total,
+            Metrics::Gauge::increment(stripe->cache_vol->vol_rsb.ram_cache_bytes_total,
+
                                       static_cast<int64_t>(http_ram_cache_size * factor));
-          } else if (gvol[i]->cache_vol->ramcache_enabled) {
+          } else if (gstripes[i]->cache_vol->ramcache_enabled) {
             ink_release_assert(!"Unexpected non-HTTP cache volume");
           }
           Dbg(dbg_ctl_cache_init, "CacheProcessor::cacheInitialized[%d] - ram_cache_bytes = %" PRId64 " = %" PRId64 "Mb", i,
               ram_cache_bytes, ram_cache_bytes / (1024 * 1024));
-          vol_total_cache_bytes  = gvol[i]->len - gvol[i]->dirlen();
+          vol_total_cache_bytes  = gstripes[i]->len - gstripes[i]->dirlen();
           total_cache_bytes     += vol_total_cache_bytes;
-          Metrics::Gauge::increment(vol->cache_vol->vol_rsb.bytes_total, vol_total_cache_bytes);
-          Metrics::Gauge::increment(vol->cache_vol->vol_rsb.stripes);
+          Metrics::Gauge::increment(stripe->cache_vol->vol_rsb.bytes_total, vol_total_cache_bytes);
+          Metrics::Gauge::increment(stripe->cache_vol->vol_rsb.stripes);
           Dbg(dbg_ctl_cache_init, "CacheProcessor::cacheInitialized - total_cache_bytes = %" PRId64 " = %" PRId64 "Mb",
               total_cache_bytes, total_cache_bytes / (1024 * 1024));
 
-          vol_total_direntries  = gvol[i]->buckets * gvol[i]->segments * DIR_DEPTH;
+          vol_total_direntries  = gstripes[i]->buckets * gstripes[i]->segments * DIR_DEPTH;
           total_direntries     += vol_total_direntries;
-          Metrics::Gauge::increment(vol->cache_vol->vol_rsb.direntries_total, vol_total_direntries);
+          Metrics::Gauge::increment(stripe->cache_vol->vol_rsb.direntries_total, vol_total_direntries);
 
-          vol_used_direntries = dir_entries_used(gvol[i]);
-          Metrics::Gauge::increment(vol->cache_vol->vol_rsb.direntries_used, vol_used_direntries);
+          vol_used_direntries = dir_entries_used(gstripes[i]);
+          Metrics::Gauge::increment(stripe->cache_vol->vol_rsb.direntries_used, vol_used_direntries);
           used_direntries += vol_used_direntries;
         }
       }
@@ -783,8 +801,8 @@ CacheProcessor::stop()
 int
 CacheProcessor::dir_check(bool afix)
 {
-  for (int i = 0; i < gnvol; i++) {
-    gvol[i]->dir_check(afix);
+  for (int i = 0; i < gnstripes; i++) {
+    gstripes[i]->dir_check(afix);
   }
   return 0;
 }
@@ -879,13 +897,13 @@ build_vol_hash_table(CacheHostRecord *cp)
   uint64_t used  = 0;
   // initialize number of elements per vol
   for (int i = 0; i < num_vols; i++) {
-    if (DISK_BAD(cp->vols[i]->disk)) {
+    if (DISK_BAD(cp->stripes[i]->disk)) {
       bad_vols++;
       continue;
     }
     mapping[map]  = i;
-    p[map++]      = cp->vols[i];
-    total        += (cp->vols[i]->len >> STORE_BLOCK_SHIFT);
+    p[map++]      = cp->stripes[i];
+    total        += (cp->stripes[i]->len >> STORE_BLOCK_SHIFT);
   }
 
   num_vols -= bad_vols;
@@ -983,6 +1001,32 @@ Cache::vol_initialized(bool result)
   }
 }
 
+static void
+persist_bad_disks()
+{
+  std::filesystem::path localstatedir{Layout::get()->localstatedir};
+  std::filesystem::path bad_disks_path{localstatedir / ts::filename::BAD_DISKS};
+  std::error_code ec;
+  std::filesystem::create_directories(bad_disks_path.parent_path(), ec);
+  if (ec) {
+    Error("Error creating directory for bad disks file: %s (%s)", bad_disks_path.c_str(), ec.message().c_str());
+    return;
+  }
+
+  std::fstream bad_disks_file{bad_disks_path.c_str(), bad_disks_file.out};
+  if (bad_disks_file.good()) {
+    for (const std::string &path : known_bad_disks) {
+      bad_disks_file << path << std::endl;
+      if (bad_disks_file.fail()) {
+        Error("Error writing known bad disks file: %s", bad_disks_path.c_str());
+        break;
+      }
+    }
+  } else {
+    Error("Failed to open file to persist bad disks: %s", bad_disks_path.c_str());
+  }
+}
+
 /** Set the state of a disk programmatically.
  */
 bool
@@ -1006,11 +1050,11 @@ CacheProcessor::mark_storage_offline(CacheDisk *d, ///< Target disk
     SET_DISK_BAD(d);
   }
 
-  for (p = 0; p < gnvol; p++) {
-    if (d->fd == gvol[p]->fd) {
-      total_dir_delete   += gvol[p]->buckets * gvol[p]->segments * DIR_DEPTH;
-      used_dir_delete    += dir_entries_used(gvol[p]);
-      total_bytes_delete += gvol[p]->len - gvol[p]->dirlen();
+  for (p = 0; p < gnstripes; p++) {
+    if (d->fd == gstripes[p]->fd) {
+      total_dir_delete   += gstripes[p]->buckets * gstripes[p]->segments * DIR_DEPTH;
+      used_dir_delete    += dir_entries_used(gstripes[p]);
+      total_bytes_delete += gstripes[p]->len - gstripes[p]->dirlen();
     }
   }
 
@@ -1043,6 +1087,11 @@ CacheProcessor::mark_storage_offline(CacheDisk *d, ///< Target disk
         Warning("all volumes for http cache are corrupt, http cache disabled");
       }
     }
+  }
+
+  if (cache_config_persist_bad_disks) {
+    known_bad_disks.insert(d->path);
+    persist_bad_disks();
   }
 
   return zret;
@@ -1146,22 +1195,22 @@ Cache::open(bool clear, bool /* fix ATS_UNUSED */)
   CacheVol *cp = cp_list.head;
   for (; cp; cp = cp->link.next) {
     if (cp->scheme == scheme) {
-      cp->vols   = static_cast<Stripe **>(ats_malloc(cp->num_vols * sizeof(Stripe *)));
-      int vol_no = 0;
+      cp->stripes = static_cast<Stripe **>(ats_malloc(cp->num_vols * sizeof(Stripe *)));
+      int vol_no  = 0;
       for (i = 0; i < gndisks; i++) {
-        if (cp->disk_vols[i] && !DISK_BAD(cp->disk_vols[i]->disk)) {
-          DiskStripeBlockQueue *q = cp->disk_vols[i]->dpb_queue.head;
+        if (cp->disk_stripes[i] && !DISK_BAD(cp->disk_stripes[i]->disk)) {
+          DiskStripeBlockQueue *q = cp->disk_stripes[i]->dpb_queue.head;
           for (; q; q = q->link.next) {
-            cp->vols[vol_no]            = new Stripe();
-            CacheDisk *d                = cp->disk_vols[i]->disk;
-            cp->vols[vol_no]->disk      = d;
-            cp->vols[vol_no]->fd        = d->fd;
-            cp->vols[vol_no]->cache     = this;
-            cp->vols[vol_no]->cache_vol = cp;
-            blocks                      = q->b->len;
+            cp->stripes[vol_no]            = new Stripe();
+            CacheDisk *d                   = cp->disk_stripes[i]->disk;
+            cp->stripes[vol_no]->disk      = d;
+            cp->stripes[vol_no]->fd        = d->fd;
+            cp->stripes[vol_no]->cache     = this;
+            cp->stripes[vol_no]->cache_vol = cp;
+            blocks                         = q->b->len;
 
             bool vol_clear = clear || d->cleared || q->new_block;
-            cp->vols[vol_no]->init(d->path, blocks, q->b->offset, vol_clear);
+            cp->stripes[vol_no]->init(d->path, blocks, q->b->offset, vol_clear);
             vol_no++;
             cache_size += blocks;
           }
@@ -1191,17 +1240,17 @@ Cache::lookup(Continuation *cont, const CacheKey *key, CacheFragType type, const
     return ACTION_RESULT_DONE;
   }
 
-  Stripe *vol = key_to_vol(key, hostname, host_len);
-  CacheVC *c  = new_CacheVC(cont);
+  Stripe *stripe = key_to_vol(key, hostname, host_len);
+  CacheVC *c     = new_CacheVC(cont);
   SET_CONTINUATION_HANDLER(c, &CacheVC::openReadStartHead);
   c->vio.op  = VIO::READ;
   c->op_type = static_cast<int>(CacheOpType::Lookup);
   Metrics::Gauge::increment(cache_rsb.status[c->op_type].active);
-  Metrics::Gauge::increment(vol->cache_vol->vol_rsb.status[c->op_type].active);
+  Metrics::Gauge::increment(stripe->cache_vol->vol_rsb.status[c->op_type].active);
   c->first_key = c->key = *key;
   c->frag_type          = type;
   c->f.lookup           = 1;
-  c->vol                = vol;
+  c->stripe             = stripe;
   c->last_collision     = nullptr;
 
   if (c->handleEvent(EVENT_INTERVAL, nullptr) == EVENT_CONT) {
@@ -1228,7 +1277,7 @@ Cache::remove(Continuation *cont, const CacheKey *key, CacheFragType type, const
 
   CACHE_TRY_LOCK(lock, cont->mutex, this_ethread());
   ink_assert(lock.is_locked());
-  Stripe *vol = key_to_vol(key, hostname, host_len);
+  Stripe *stripe = key_to_vol(key, hostname, host_len);
   // coverity[var_decl]
   Dir result;
   dir_clear(&result); // initialized here, set result empty so we can recognize missed lock
@@ -1239,9 +1288,9 @@ Cache::remove(Continuation *cont, const CacheKey *key, CacheFragType type, const
   c->frag_type = type;
   c->op_type   = static_cast<int>(CacheOpType::Remove);
   Metrics::Gauge::increment(cache_rsb.status[c->op_type].active);
-  Metrics::Gauge::increment(vol->cache_vol->vol_rsb.status[c->op_type].active);
+  Metrics::Gauge::increment(stripe->cache_vol->vol_rsb.status[c->op_type].active);
   c->first_key = c->key = *key;
-  c->vol                = vol;
+  c->stripe             = stripe;
   c->dir                = result;
   c->f.remove           = 1;
 
@@ -1264,16 +1313,16 @@ cplist_init()
   for (int i = 0; i < gndisks; i++) {
     CacheDisk *d = gdisks[i];
     ink_assert(d != nullptr);
-    DiskStripe **dp = d->disk_vols;
+    DiskStripe **dp = d->disk_stripes;
     for (unsigned int j = 0; j < d->header->num_volumes; j++) {
       ink_assert(dp[j]->dpb_queue.head);
       CacheVol *p = cp_list.head;
       while (p) {
         if (p->vol_number == dp[j]->vol_number) {
           ink_assert(p->scheme == (int)dp[j]->dpb_queue.head->b->type);
-          p->size         += dp[j]->size;
-          p->num_vols     += dp[j]->num_volblocks;
-          p->disk_vols[i]  = dp[j];
+          p->size            += dp[j]->size;
+          p->num_vols        += dp[j]->num_volblocks;
+          p->disk_stripes[i]  = dp[j];
           break;
         }
         p = p->link.next;
@@ -1281,14 +1330,14 @@ cplist_init()
       if (!p) {
         // did not find a volume in the cache vol list...create
         // a new one
-        CacheVol *new_p   = new CacheVol();
-        new_p->vol_number = dp[j]->vol_number;
-        new_p->num_vols   = dp[j]->num_volblocks;
-        new_p->size       = dp[j]->size;
-        new_p->scheme     = dp[j]->dpb_queue.head->b->type;
-        new_p->disk_vols  = static_cast<DiskStripe **>(ats_malloc(gndisks * sizeof(DiskStripe *)));
-        memset(new_p->disk_vols, 0, gndisks * sizeof(DiskStripe *));
-        new_p->disk_vols[i] = dp[j];
+        CacheVol *new_p     = new CacheVol();
+        new_p->vol_number   = dp[j]->vol_number;
+        new_p->num_vols     = dp[j]->num_volblocks;
+        new_p->size         = dp[j]->size;
+        new_p->scheme       = dp[j]->dpb_queue.head->b->type;
+        new_p->disk_stripes = static_cast<DiskStripe **>(ats_malloc(gndisks * sizeof(DiskStripe *)));
+        memset(new_p->disk_stripes, 0, gndisks * sizeof(DiskStripe *));
+        new_p->disk_stripes[i] = dp[j];
         cp_list.enqueue(new_p);
         cp_list_len++;
       }
@@ -1317,13 +1366,13 @@ cplist_update()
           int clearCV = 1;
 
           for (d_no = 0; d_no < gndisks; d_no++) {
-            if (cp->disk_vols[d_no]) {
-              if (cp->disk_vols[d_no]->disk->forced_volume_num == cp->vol_number) {
+            if (cp->disk_stripes[d_no]) {
+              if (cp->disk_stripes[d_no]->disk->forced_volume_num == cp->vol_number) {
                 clearCV            = 0;
                 config_vol->cachep = cp;
               } else {
-                cp->disk_vols[d_no]->disk->delete_volume(cp->vol_number);
-                cp->disk_vols[d_no] = nullptr;
+                cp->disk_stripes[d_no]->disk->delete_volume(cp->vol_number);
+                cp->disk_stripes[d_no] = nullptr;
               }
             }
           }
@@ -1340,8 +1389,8 @@ cplist_update()
       // Delete the volume from the cache vol list
       int d_no;
       for (d_no = 0; d_no < gndisks; d_no++) {
-        if (cp->disk_vols[d_no]) {
-          cp->disk_vols[d_no]->disk->delete_volume(cp->vol_number);
+        if (cp->disk_stripes[d_no]) {
+          cp->disk_stripes[d_no]->disk->delete_volume(cp->vol_number);
         }
       }
       CacheVol *temp_cp = cp;
@@ -1373,9 +1422,9 @@ cplist_update()
       if (forced_volume) {
         CacheVol *new_cp = new CacheVol();
         if (nullptr != new_cp) {
-          new_cp->disk_vols = static_cast<decltype(new_cp->disk_vols)>(ats_malloc(gndisks * sizeof(DiskStripe *)));
-          if (nullptr != new_cp->disk_vols) {
-            memset(new_cp->disk_vols, 0, gndisks * sizeof(DiskStripe *));
+          new_cp->disk_stripes = static_cast<decltype(new_cp->disk_stripes)>(ats_malloc(gndisks * sizeof(DiskStripe *)));
+          if (nullptr != new_cp->disk_stripes) {
+            memset(new_cp->disk_stripes, 0, gndisks * sizeof(DiskStripe *));
             new_cp->vol_number = config_vol->number;
             new_cp->scheme     = config_vol->scheme;
             config_vol->cachep = new_cp;
@@ -1411,7 +1460,7 @@ fillExclusiveDisks(CacheVol *cp)
     /* There should be a single "forced" volume and no other volumes should exist on this "exclusive" disk (span) */
     bool found_nonforced_volumes = false;
     for (int j = 0; j < static_cast<int>(gdisks[i]->header->num_volumes); j++) {
-      if (volume_number != gdisks[i]->disk_vols[j]->vol_number) {
+      if (volume_number != gdisks[i]->disk_stripes[j]->vol_number) {
         found_nonforced_volumes = true;
         break;
       }
@@ -1434,8 +1483,8 @@ fillExclusiveDisks(CacheVol *cp)
     do {
       dpb = gdisks[i]->create_volume(volume_number, size_diff, cp->scheme);
       if (dpb) {
-        if (!cp->disk_vols[i]) {
-          cp->disk_vols[i] = gdisks[i]->get_diskvol(volume_number);
+        if (!cp->disk_stripes[i]) {
+          cp->disk_stripes[i] = gdisks[i]->get_diskvol(volume_number);
         }
         size_diff -= dpb->len;
         cp->size  += dpb->len;
@@ -1460,18 +1509,18 @@ cplist_reconfigure()
   ConfigVol *config_vol;
   int assignedVol = 0; // Number of assigned volumes
 
-  gnvol = 0;
+  gnstripes = 0;
   if (config_volumes.num_volumes == 0) {
     /* only the http cache */
-    CacheVol *cp   = new CacheVol();
-    cp->vol_number = 0;
-    cp->scheme     = CACHE_HTTP_TYPE;
-    cp->disk_vols  = static_cast<DiskStripe **>(ats_malloc(gndisks * sizeof(DiskStripe *)));
-    memset(cp->disk_vols, 0, gndisks * sizeof(DiskStripe *));
+    CacheVol *cp     = new CacheVol();
+    cp->vol_number   = 0;
+    cp->scheme       = CACHE_HTTP_TYPE;
+    cp->disk_stripes = static_cast<DiskStripe **>(ats_malloc(gndisks * sizeof(DiskStripe *)));
+    memset(cp->disk_stripes, 0, gndisks * sizeof(DiskStripe *));
     cp_list.enqueue(cp);
     cp_list_len++;
     for (int i = 0; i < gndisks; i++) {
-      if (gdisks[i]->header->num_volumes != 1 || gdisks[i]->disk_vols[0]->vol_number != 0) {
+      if (gdisks[i]->header->num_volumes != 1 || gdisks[i]->disk_stripes[0]->vol_number != 0) {
         /* The user had created several volumes before - clear the disk
            and create one volume for http */
         Note("Clearing Disk: %s", gdisks[i]->path);
@@ -1490,15 +1539,15 @@ cplist_reconfigure()
       }
 
       ink_assert(gdisks[i]->header->num_volumes == 1);
-      DiskStripe **dp   = gdisks[i]->disk_vols;
-      gnvol            += dp[0]->num_volblocks;
-      cp->size         += dp[0]->size;
-      cp->num_vols     += dp[0]->num_volblocks;
-      cp->disk_vols[i]  = dp[0];
+      DiskStripe **dp      = gdisks[i]->disk_stripes;
+      gnstripes           += dp[0]->num_volblocks;
+      cp->size            += dp[0]->size;
+      cp->num_vols        += dp[0]->num_volblocks;
+      cp->disk_stripes[i]  = dp[0];
     }
   } else {
     for (int i = 0; i < gndisks; i++) {
-      if (gdisks[i]->header->num_volumes == 1 && gdisks[i]->disk_vols[0]->vol_number == 0) {
+      if (gdisks[i]->header->num_volumes == 1 && gdisks[i]->disk_stripes[0]->vol_number == 0) {
         /* The user had created several volumes before - clear the disk
            and create one volume for http */
         Note("Clearing Disk: %s", gdisks[i]->path);
@@ -1581,33 +1630,33 @@ cplist_reconfigure()
       size_in_blocks = (static_cast<off_t>(size) * 1024 * 1024) / STORE_BLOCK_SIZE;
 
       if (config_vol->cachep && config_vol->cachep->num_vols > 0) {
-        gnvol += config_vol->cachep->num_vols;
+        gnstripes += config_vol->cachep->num_vols;
         continue;
       }
 
       if (!config_vol->cachep) {
         // we did not find a corresponding entry in cache vol...create one
 
-        CacheVol *new_cp  = new CacheVol();
-        new_cp->disk_vols = static_cast<DiskStripe **>(ats_malloc(gndisks * sizeof(DiskStripe *)));
-        memset(new_cp->disk_vols, 0, gndisks * sizeof(DiskStripe *));
+        CacheVol *new_cp     = new CacheVol();
+        new_cp->disk_stripes = static_cast<DiskStripe **>(ats_malloc(gndisks * sizeof(DiskStripe *)));
+        memset(new_cp->disk_stripes, 0, gndisks * sizeof(DiskStripe *));
         if (create_volume(config_vol->number, size_in_blocks, config_vol->scheme, new_cp)) {
-          ats_free(new_cp->disk_vols);
-          new_cp->disk_vols = nullptr;
+          ats_free(new_cp->disk_stripes);
+          new_cp->disk_stripes = nullptr;
           delete new_cp;
           return -1;
         }
         cp_list.enqueue(new_cp);
         cp_list_len++;
         config_vol->cachep  = new_cp;
-        gnvol              += new_cp->num_vols;
+        gnstripes          += new_cp->num_vols;
         continue;
       }
       //    else
       CacheVol *cp = config_vol->cachep;
       ink_assert(cp->size <= size_in_blocks);
       if (cp->size == size_in_blocks) {
-        gnvol += cp->num_vols;
+        gnstripes += cp->num_vols;
         continue;
       }
       // else the size is greater...
@@ -1621,17 +1670,17 @@ cplist_reconfigure()
         int smallest     = sorted_vols[i];
         int smallest_ndx = i;
         for (int j = i + 1; j < gndisks; j++) {
-          int curr         = sorted_vols[j];
-          DiskStripe *dvol = cp->disk_vols[curr];
+          int curr                = sorted_vols[j];
+          DiskStripe *disk_stripe = cp->disk_stripes[curr];
           if (gdisks[curr]->cleared) {
-            ink_assert(!dvol);
+            ink_assert(!disk_stripe);
             // disks that are cleared should be filled first
             smallest     = curr;
             smallest_ndx = j;
-          } else if (!dvol && cp->disk_vols[smallest]) {
+          } else if (!disk_stripe && cp->disk_stripes[smallest]) {
             smallest     = curr;
             smallest_ndx = j;
-          } else if (dvol && cp->disk_vols[smallest] && (dvol->size < cp->disk_vols[smallest]->size)) {
+          } else if (disk_stripe && cp->disk_stripes[smallest] && (disk_stripe->size < cp->disk_stripes[smallest]->size)) {
             smallest     = curr;
             smallest_ndx = j;
           }
@@ -1643,14 +1692,14 @@ cplist_reconfigure()
       int64_t size_to_alloc = size_in_blocks - cp->size;
       for (int i = 0; (i < gndisks) && size_to_alloc; i++) {
         int disk_no = sorted_vols[i];
-        ink_assert(cp->disk_vols[sorted_vols[gndisks - 1]]);
-        int largest_vol = cp->disk_vols[sorted_vols[gndisks - 1]]->size;
+        ink_assert(cp->disk_stripes[sorted_vols[gndisks - 1]]);
+        int largest_vol = cp->disk_stripes[sorted_vols[gndisks - 1]]->size;
 
         /* allocate storage on new disk. Find the difference
            between the biggest volume on any disk and
            the volume on this disk and try to make
            them equal */
-        int64_t size_diff = (cp->disk_vols[disk_no]) ? largest_vol - cp->disk_vols[disk_no]->size : largest_vol;
+        int64_t size_diff = (cp->disk_stripes[disk_no]) ? largest_vol - cp->disk_stripes[disk_no]->size : largest_vol;
         size_diff         = (size_diff < size_to_alloc) ? size_diff : size_to_alloc;
         /* if size_diff == 0, then the disks have volumes of the
            same sizes, so we don't need to balance the disks */
@@ -1662,8 +1711,8 @@ cplist_reconfigure()
         do {
           dpb = gdisks[disk_no]->create_volume(volume_number, size_diff, cp->scheme);
           if (dpb) {
-            if (!cp->disk_vols[disk_no]) {
-              cp->disk_vols[disk_no] = gdisks[disk_no]->get_diskvol(volume_number);
+            if (!cp->disk_stripes[disk_no]) {
+              cp->disk_stripes[disk_no] = gdisks[disk_no]->get_diskvol(volume_number);
             }
             size_diff -= dpb->len;
             cp->size  += dpb->len;
@@ -1683,11 +1732,11 @@ cplist_reconfigure()
           return -1;
         }
       }
-      gnvol += cp->num_vols;
+      gnstripes += cp->num_vols;
     }
   }
 
-  Metrics::Gauge::store(cache_rsb.stripes, gnvol + assignedVol);
+  Metrics::Gauge::store(cache_rsb.stripes, gnstripes + assignedVol);
 
   return 0;
 }
@@ -1749,8 +1798,8 @@ create_volume(int volume_number, off_t size_in_blocks, int scheme, CacheVol *cp)
         cp->num_vols++;
         cp->size += p->len;
       }
-      if (!cp->disk_vols[i]) {
-        cp->disk_vols[i] = gdisks[i]->get_diskvol(volume_number);
+      if (!cp->disk_stripes[i]) {
+        cp->disk_stripes[i] = gdisks[i]->get_diskvol(volume_number);
       }
     }
   }
@@ -1795,7 +1844,7 @@ Cache::key_to_vol(const CacheKey *key, const char *hostname, int host_len)
           snprintf(format_str, sizeof(format_str), "Volume: %%xd for host: %%.%ds", host_len);
           Dbg(dbg_ctl_cache_hosting, format_str, res.record, hostname);
         }
-        return res.record->vols[host_hash_table[h]];
+        return res.record->stripes[host_hash_table[h]];
       }
     }
   }
@@ -1805,9 +1854,9 @@ Cache::key_to_vol(const CacheKey *key, const char *hostname, int host_len)
       snprintf(format_str, sizeof(format_str), "Generic volume: %%xd for host: %%.%ds", host_len);
       Dbg(dbg_ctl_cache_hosting, format_str, host_rec, hostname);
     }
-    return host_rec->vols[hash_table[h]];
+    return host_rec->stripes[hash_table[h]];
   } else {
-    return host_rec->vols[0];
+    return host_rec->stripes[0];
   }
 }
 
@@ -1905,6 +1954,30 @@ ink_cache_init(ts::ModuleVersion v)
   register_cache_stats(&cache_rsb, "proxy.process.cache");
 
   REC_ReadConfigInteger(cacheProcessor.wait_for_cache, "proxy.config.http.wait_for_cache");
+
+  REC_EstablishStaticConfigInt32(cache_config_persist_bad_disks, "proxy.config.cache.persist_bad_disks");
+  Debug("cache_init", "proxy.config.cache.persist_bad_disks = %d", cache_config_persist_bad_disks);
+  if (cache_config_persist_bad_disks) {
+    std::filesystem::path localstatedir{Layout::get()->localstatedir};
+    std::filesystem::path bad_disks_path{localstatedir / ts::filename::BAD_DISKS};
+    std::fstream bad_disks_file{bad_disks_path.c_str(), bad_disks_file.in};
+    if (bad_disks_file.good()) {
+      for (std::string line; std::getline(bad_disks_file, line);) {
+        if (bad_disks_file.fail()) {
+          Error("Failed while trying to read known bad disks file: %s", bad_disks_path.c_str());
+          break;
+        }
+        if (!line.empty()) {
+          known_bad_disks.insert(std::move(line));
+        }
+      }
+    }
+    // not having a bad disks file is not an error.
+
+    unsigned long known_bad_count = known_bad_disks.size();
+    Warning("%lu previously known bad disks were recorded in %s.  They will not be added to the cache.", known_bad_count,
+            bad_disks_path.c_str());
+  }
 
   Result result = theCacheStore.read_config();
   if (result.failed()) {

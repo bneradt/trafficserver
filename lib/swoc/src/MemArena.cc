@@ -10,7 +10,7 @@
 
 namespace swoc { inline namespace SWOC_VERSION_NS {
 
-void (*MemArena::destroyer)(MemArena*) = std::destroy_at<MemArena>;
+void (*MemArena::destroyer)(MemArena *) = std::destroy_at<MemArena>;
 
 inline bool
 MemArena::Block::satisfies(size_t n, size_t align) const {
@@ -34,7 +34,7 @@ MemArena::MemArena(MemSpan<void> static_block) {
 // Need to break these out because the default implementation doesn't clear the
 // integral values in @a that.
 
-MemArena::MemArena(swoc::MemArena::self_type &&that)
+MemArena::MemArena(swoc::MemArena::self_type &&that) noexcept
   : _active_allocated(that._active_allocated),
     _active_reserved(that._active_reserved),
     _frozen_allocated(that._frozen_allocated),
@@ -57,7 +57,7 @@ MemArena::construct_self_contained(size_t n) {
 }
 
 MemArena &
-MemArena::operator=(swoc::MemArena::self_type &&that) {
+MemArena::operator=(swoc::MemArena::self_type &&that) noexcept {
   this->clear();
   std::swap(_active_allocated, that._active_allocated);
   std::swap(_active_reserved, that._active_reserved);
@@ -94,7 +94,7 @@ MemArena::make_block(size_t n) {
   // Allocate space for the Block instance and the request memory and construct a Block at the front.
   // In theory this could use ::operator new(n) but this causes a size mismatch during ::operator delete.
   // Easier to use malloc and override @c delete.
-  auto free_space = n - sizeof(Block);
+  auto free_space   = n - sizeof(Block);
   _active_reserved += free_space;
   return new (::malloc(n)) Block(free_space);
 }
@@ -103,8 +103,8 @@ MemSpan<void>
 MemArena::alloc(size_t n, size_t align) {
   MemSpan<void> zret;
   this->require(n, align);
-  auto block = _active.head();
-  zret       = block->alloc(n, align);
+  auto block         = _active.head();
+  zret               = block->alloc(n, align);
   _active_allocated += n;
   // If this block is now full, move it to the back.
   if (block->is_full() && block != _active.tail()) {
@@ -155,10 +155,11 @@ MemArena::require(size_t n, size_t align) {
 
   // Search back through the list until a full block is hit, which is a miss.
   while (spot != _active.end() && !spot->satisfies(n, align)) {
-    if (spot->is_full())
+    if (spot->is_full()) {
       spot = _active.end();
-    else
+    } else {
       ++spot;
+    }
   }
   if (spot == _active.end()) {   // no block has enough free space
     block = this->make_block(n); // assuming a new block is sufficiently aligned.
@@ -178,8 +179,9 @@ MemArena::destroy_active() {
   auto sb = _static_block; // C++20 nonsense - capture of @a this is incompatible with C++17.
   _active
     .apply([=](Block *b) {
-      if (b != sb)
+      if (b != sb) {
         delete b;
+      }
     })
     .clear();
 }
@@ -189,8 +191,9 @@ MemArena::destroy_frozen() {
   auto sb = _static_block; // C++20 nonsense - capture of @a this is incompatible with C++17.
   _frozen
     .apply([=](Block *b) {
-      if (b != sb)
+      if (b != sb) {
         delete b;
+      }
     })
     .clear();
 }
@@ -207,8 +210,42 @@ MemArena::clear(size_t hint) {
 }
 
 MemArena &
+MemArena::discard(MemSpan<const void> span) {
+  // This is intended to iterate over empty blocks until @a span is found.
+  for ( auto & block : _active) {
+    if (block.contains(span.data())) { // it's in this block, final iteration.
+      if (block.allocated_data_end() == span.data_end()) {
+        block.allocated -= span.size();
+        _active_allocated -= span.size();
+      }
+      break;
+    } else if (block.allocated > 0) {
+      // If the block wasn't empty the only other place
+      // @a span could be is in the most recent filled block, which is last in the list.
+      // Invariant - the first block does not contain @a span.
+      // Therefore, if the last block contains @a span, it is not the first block.
+      auto lfb = _active.tail(); // list is not empty, must exist.
+      if (lfb->contains(span.data()) && lfb->allocated_data_end() == span.data_end()) {
+        lfb->allocated -= span.size();
+        _active_allocated -= span.size();
+        if (!lfb->is_full()) {
+          _active.erase(lfb);
+          _active.prepend(lfb);
+        }
+      }
+      break; // loop always ends after hitting a non-empty block.
+    }
+  }
+  return *this;
+}
+
+MemArena &
 MemArena::discard(size_t hint) {
-  _reserve_hint = hint ? hint : _frozen_allocated + _active_allocated;
+  // Because existing blocks remain, clear the reserve hint so then when a new block is allocated
+  // it uses the allocation size then, not what it is now. Now is handled by the existing blocks,
+  // unless the caller explicitly provides a hint,
+  _reserve_hint = hint ? hint : 0;
+
   for (auto &block : _active) {
     block.discard();
   }
@@ -228,14 +265,16 @@ MemArena::~MemArena() {
   while (bf) {
     Block *b = bf;
     bf       = bf->_link._next;
-    if (b != sb)
+    if (b != sb) {
       delete b;
+    }
   }
   while (ba) {
     Block *b = ba;
     ba       = ba->_link._next;
-    if (b != sb)
+    if (b != sb) {
       delete b;
+    }
   }
 }
 

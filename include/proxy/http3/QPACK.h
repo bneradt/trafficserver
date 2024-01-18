@@ -29,7 +29,7 @@
 #include "iocore/eventsystem/Event.h"
 #include "iocore/eventsystem/IOBuffer.h"
 #include "tscore/Arena.h"
-#include "tscpp/util/IntrusiveDList.h"
+#include "tsutil/IntrusiveDList.h"
 #include "proxy/hdrs/MIME.h"
 #include "proxy/hdrs/HTTP.h"
 #include "iocore/net/quic/QUICApplication.h"

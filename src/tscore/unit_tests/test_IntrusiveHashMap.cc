@@ -27,7 +27,7 @@
 #include <bitset>
 #include <random>
 #include <tscore/IntrusiveHashMap.h>
-#include <tscpp/util/ts_bw_format.h>
+#include <tsutil/ts_bw_format.h>
 #include "catch.hpp"
 
 // -------------

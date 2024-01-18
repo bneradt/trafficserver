@@ -25,7 +25,6 @@
 #include <openssl/crypto.h>
 #include "tscore/Layout.h"
 #include "tscore/Filenames.h"
-#include "tscpp/util/ts_bw.h"
 #include "records/RecProcess.h"
 #include "records/RecordsConfig.h"
 #include "info.h"
@@ -113,7 +112,6 @@ produce_features(bool json)
   print_feature("TS_HAS_SO_MARK", TS_HAS_SO_MARK, json);
   print_feature("TS_HAS_IP_TOS", TS_HAS_IP_TOS, json);
   print_feature("TS_USE_HWLOC", TS_USE_HWLOC, json);
-  print_feature("TS_USE_SET_RBIO", TS_USE_SET_RBIO, json);
   print_feature("TS_USE_TLS13", TS_USE_TLS13, json);
   print_feature("TS_USE_QUIC", TS_USE_QUIC, json);
   print_feature("TS_HAS_QUICHE", TS_HAS_QUICHE, json);
@@ -161,6 +159,7 @@ produce_layout(bool json)
   print_var("RUNTIMEDIR", RecConfigReadRuntimeDir(), json);
   print_var("PLUGINDIR", RecConfigReadPluginDir(), json);
   print_var("INCLUDEDIR", Layout::get()->includedir, json);
+  print_var("LOCALSTATEDIR", Layout::get()->localstatedir, json);
 
   print_var(ts::filename::RECORDS, RecConfigReadConfigPath(nullptr, ts::filename::RECORDS), json);
   print_var(ts::filename::REMAP, RecConfigReadConfigPath("proxy.config.url_remap.filename"), json);

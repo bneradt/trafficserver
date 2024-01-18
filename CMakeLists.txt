@@ -32,8 +32,8 @@ math(EXPR TS_VERSION_NUMBER "${TS_VERSION_MAJOR} * 1000000 + ${TS_VERSION_MINOR}
 # for testing purposes. For example, it can be used on CI to check compatibility
 # with a newer standard than what our codebase currently has to comply with.
 set(CMAKE_CXX_STANDARD
-    17
-    CACHE STRING "The C++ standard to compile with (default 17)"
+    20
+    CACHE STRING "The C++ standard to compile with (default 20)"
 )
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -192,10 +192,6 @@ set(MAX_THREADS_PER_TYPE
     3072
     CACHE STRING "Max number of threads per event type (default 3072)"
 )
-set(TS_USE_SET_RBIO
-    1
-    CACHE STRING "Use openssl set_rbio (default 1)"
-)
 set(TS_USE_DIAGS
     1
     CACHE STRING "Use diags (default 1)"
@@ -216,21 +212,13 @@ include(CheckTypeSize)
 include(CheckSourceCompiles)
 include(CheckStructHasMember)
 
-check_include_file(dlfcn.h HAVE_DLFCN_H)
-check_include_file(stdlib.h HAVE_STDLIB_H)
 check_include_file(ifaddrs.h HAVE_IFADDRS_H)
-check_include_file(inttypes.h HAVE_INTTYPES_H)
 check_include_file(string.h HAVE_STRING_H)
-check_include_file(linux/major.h HAVE_LINUX_MAJOR_H)
 check_include_file(malloc.h HAVE_MALLOC_H)
 check_include_file(mcheck.h HAVE_MCHECK_H)
-check_include_file(machine/endian.h HAVE_MACHINE_ENDIAN_H)
-check_include_file(sys/byteorder.h HAVE_SYS_BYTEORDER_H)
 check_include_file(sys/disk.h HAVE_SYS_DISK_H)
 check_include_file(sys/disklabel.h HAVE_SYS_DISKLABEL_H)
-check_include_file(sys/endian.h HAVE_SYS_ENDIAN_H)
 check_include_file(sys/ioctl.h HAVE_SYS_IOCTL_H)
-check_include_file(sys/types.h HAVE_SYS_TYPES_H)
 check_include_file(sys/sockio.h HAVE_SYS_SOCKIO_H)
 check_include_file(sys/stat.h HAVE_SYS_STAT_H)
 check_include_file(sys/statfs.h HAVE_SYS_STATFS_H)
@@ -243,10 +231,6 @@ check_include_file(sys/sysctl.h HAVE_SYS_SYSCTL_H)
 check_include_file(sys/mman.h HAVE_SYS_MMAN_H)
 check_include_file(sys/mount.h HAVE_SYS_MOUNT_H)
 check_include_file(sys/param.h HAVE_SYS_PARAM_H)
-check_include_file(sysexits.h HAVE_SYSEXITS_H)
-check_include_file(stropts.h HAVE_STROPTS_H)
-check_include_file(unistd.h HAVE_UNISTD_H)
-check_include_file(values.h HAVE_VALUES_H)
 check_include_file(netinet/in.h HAVE_NETINET_IN_H)
 check_include_file(netinet/in_systm.h HAVE_NETINET_IN_SYSTM_H)
 check_include_file(netinet/tcp.h HAVE_NETINET_TCP_H)
@@ -256,8 +240,6 @@ check_include_file(netdb.h HAVE_NETDB_H)
 check_include_file(arpa/inet.h HAVE_ARPA_INET_H)
 check_include_file(arpa/nameser.h HAVE_ARPA_NAMESER_H)
 check_include_file(arpa/nameser_compat.h HAVE_ARPA_NAMESER_COMPAT_H)
-check_include_file(siginfo.h HAVE_SIGINFO_H)
-check_include_file(endian.h HAVE_ENDIAN_H)
 
 # Find libraries
 if(ENABLE_CRIPTS)
@@ -293,8 +275,24 @@ endif()
 find_package(PCRE REQUIRED)
 
 include(CheckOpenSSLIsBoringSSL)
+include(CheckOpenSSLIsQuictls)
 find_package(OpenSSL REQUIRED)
-check_openssl_is_boringssl(OPENSSL_IS_BORINGSSL "${OPENSSL_INCLUDE_DIR}")
+check_openssl_is_boringssl(OPENSSL_IS_BORINGSSL BORINGSSL_VERSION "${OPENSSL_INCLUDE_DIR}")
+
+if(OPENSSL_IS_BORINGSSL)
+  # The consensus is a commit newer than a1843d660b47116207877614af53defa767be46a
+  # The commit that changes API_VERSION to 27 is actually a little bit older than the commit but still a reasonable commit
+  set(min_bssl "27")
+  if(BORINGSSL_VERSION VERSION_LESS "${min_bssl}")
+    message(FATAL_ERROR "BoringSSL API version >= ${min_bssl} or OpenSSL required")
+  endif()
+else()
+  set(min_ossl "1.1.1")
+  if(OPENSSL_VERSION VERSION_LESS "${min_ossl}")
+    message(FATAL_ERROR "OpenSSL version >= ${min_ossl} or BoringSSL required")
+  endif()
+endif()
+check_openssl_is_quictls(OPENSSL_IS_QUICTLS "${OPENSSL_INCLUDE_DIR}")
 
 if(OPENSSL_VERSION VERSION_GREATER_EQUAL "3.0.0")
   set(OPENSSL_IS_OPENSSL3 TRUE)
@@ -321,9 +319,16 @@ if(ENABLE_QUICHE)
 
   set(TS_HAS_QUICHE ${quiche_FOUND})
   set(TS_USE_QUIC ${TS_HAS_QUICHE})
+  if(NOT OPENSSL_IS_BORINGSSL AND NOT OPENSSL_IS_QUICTLS)
+    message(FATAL_ERROR "Use of BoringSSL or OPENSSL/QUICTLS is required if quiche is used.")
+  endif()
 
-  if(NOT OPENSSL_IS_BORINGSSL)
-    message(FATAL_ERROR "Use of BoringSSL is required if quiche is used.")
+  if(OPENSSL_IS_QUICTLS)
+    # Until we get quictls support integrated with quiche, we just print this message.
+    # Once the above that is done, then we can just validate the version.
+    message(
+      "WARNING - Using quictls requires using a special version of quiche. Make sure quictls is supported in quiche."
+    )
   endif()
 endif()
 
@@ -405,6 +410,8 @@ check_symbol_exists(sendmmsg sys/socket.h HAVE_SENDMMSG)
 check_symbol_exists(strlcat string.h HAVE_STRLCAT)
 check_symbol_exists(strlcpy string.h HAVE_STRLCPY)
 check_symbol_exists(strsignal string.h HAVE_STRSIGNAL)
+check_symbol_exists(pthread_mutexattr_settype pthread.h HAVE_PTHREAD_MUTEXATTR_SETTYPE)
+
 if(TS_USE_HWLOC)
   check_source_compiles(
     C "#include <hwloc.h>
@@ -418,6 +425,7 @@ if(HAVE_IOURING AND USE_IOURING)
   set(TS_USE_LINUX_IO_URING 1)
 endif(HAVE_IOURING AND USE_IOURING)
 
+list(APPEND CMAKE_REQUIRED_LIBRARIES pthread)
 check_symbol_exists(pthread_getname_np pthread.h HAVE_PTHREAD_GETNAME_NP)
 check_symbol_exists(pthread_get_name_np pthread.h HAVE_PTHREAD_GET_NAME_NP)
 
@@ -437,7 +445,7 @@ check_source_compiles(
   C "#include <pthread.h>
   void main() { pthread_set_name_np(0, \"name\"); }" HAVE_PTHREAD_SET_NAME_NP_2
 )
-
+list(REMOVE_ITEM CMAKE_REQUIRED_LIBRARIES pthread)
 # Check ssl functionality
 list(APPEND CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
 list(APPEND CMAKE_REQUIRED_LIBRARIES ${OPENSSL_SSL_LIBRARY} ${OPENSSL_CRYPTO_LIBRARY})
@@ -500,6 +508,10 @@ if(ENABLE_AUTEST)
       ${CMAKE_BINARY_DIR}/_sandbox
       CACHE STRING "Location for autest output (default
   CMAKE_BINARY_DIR/_sandbox)"
+  )
+  set(AUTEST_OPTIONS
+      ""
+      CACHE STRING "Additional options for autest (default \"\")"
   )
   set(PROXY_VERIFIER_VERSION "v2.10.1")
   set(PROXY_VERIFIER_HASH "SHA1=0f189a37596d7488b5b81b5547df6fc1eadf56a1")
@@ -577,8 +589,8 @@ configure_file(configs/records.yaml.default.in configs/records.yaml.default)
 configure_file(include/tscore/ink_config.h.cmake.in include/tscore/ink_config.h)
 configure_file(include/ts/apidefs.h.in include/ts/apidefs.h)
 
-add_subdirectory(src/tscpp/util)
 add_subdirectory(src/tscpp/api)
+add_subdirectory(src/tsutil)
 add_subdirectory(src/tscore)
 add_subdirectory(src/records)
 add_subdirectory(src/iocore)
@@ -671,9 +683,20 @@ add_custom_target(
   VERBATIM
 )
 
+# Leave autopep8 for historical reasons, but have it call yapf. It will not do
+# to have conflicting Python formatting targets. This can be removed when at
+# least CI is updated to use yapf instead of autopep8.
 add_custom_target(
   autopep8
-  ${CMAKE_SOURCE_DIR}/tools/autopep8.sh ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/tools/yapf.sh ${CMAKE_SOURCE_DIR}
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  COMMENT "formatting python files"
+  VERBATIM
+)
+
+add_custom_target(
+  yapf
+  ${CMAKE_SOURCE_DIR}/tools/yapf.sh ${CMAKE_SOURCE_DIR}
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
   COMMENT "formatting python files"
   VERBATIM
@@ -694,9 +717,13 @@ add_custom_target(
   COMMENT "formatting all files"
 )
 
-if(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/.git AND NOT EXISTS ${CMAKE_SOURCE_DIR}/.git/hooks/pre-commit)
-  message(STATUS "Installing github hook")
+if(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/.git)
+  file(TIMESTAMP ${CMAKE_SOURCE_DIR}/.git/hooks/pre-commit PRE_COMMIT_BEFORE)
   configure_file(${CMAKE_SOURCE_DIR}/tools/git/pre-commit ${CMAKE_SOURCE_DIR}/.git/hooks/pre-commit COPYONLY)
+  file(TIMESTAMP ${CMAKE_SOURCE_DIR}/.git/hooks/pre-commit PRE_COMMIT_AFTER)
+  if(NOT PRE_COMMIT_BEFORE STREQUAL PRE_COMMIT_AFTER)
+    message(STATUS "Installing github hook")
+  endif()
 endif()
 
 # Add a target to run the rat tool.  If java isn't installed this will fail, but its not normally run
@@ -714,7 +741,9 @@ install(DIRECTORY DESTINATION ${CMAKE_INSTALL_CACHEDIR})
 
 install(CODE "set(OWNER_USER ${TS_PKGSYSUSER})")
 install(CODE "set(OWNER_GROUP ${TS_PKGSYSGROUP})")
-install(CODE "set(CHOWN_DIRS ${CMAKE_INSTALL_LOGDIR} ${CMAKE_INSTALL_RUNSTATEDIR} ${CMAKE_INSTALL_CACHEDIR})")
+install(
+  CODE "set(CHOWN_DIRS ${CMAKE_INSTALL_FULL_LOGDIR} ${CMAKE_INSTALL_FULL_RUNSTATEDIR} ${CMAKE_INSTALL_FULL_CACHEDIR})"
+)
 install(SCRIPT cmake/post_install.cmake)
 
 # Display build summary

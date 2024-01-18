@@ -29,11 +29,15 @@
 
 #pragma once
 
+#if !defined(__cplusplus) || __cplusplus < 201703L
+#error "Must compile ATS plugin code with C++ version 17 or later."
+#endif
+
 #include <type_traits>
 
-#include <ts/apidefs.h>
-#include <ts/parentselectdefs.h>
-#include <ts/DbgCtl.h>
+#include "tsutil/DbgCtl.h"
+#include "ts/apidefs.h"
+#include "ts/parentselectdefs.h"
 
 class DiagsConfigState;
 

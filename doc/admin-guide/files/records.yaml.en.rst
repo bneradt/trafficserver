@@ -2477,7 +2477,7 @@ Cache Control
    write vector. For further details on cache write vectors, refer to the
    developer documentation for :cpp:class:`CacheVC`.
 
-.. ts::cv:: CONFIG proxy.config.cache.mutex_retry_delay INT 2
+.. ts:cv:: CONFIG proxy.config.cache.mutex_retry_delay INT 2
    :reloadable:
    :units: milliseconds
 
@@ -2487,6 +2487,31 @@ Cache Control
    get the lock for that continuation, it will use this as the delay for the retry. This is also
    used from the asynchronous IO threads when IO finishes and the ``CacheVC`` lock or stripe lock is
    required.
+
+.. ts:cv:: CONFIG proxy.config.cache.max_disk_errors INT 5
+
+   Cache disks sometimes fail due to hardware problems.  |TS| keeps count of
+   the number of times it encounters I/O errors when accessing each cache disk.
+   If the number of errors on a disk reaches this setting, |TS| removes that
+   disk from the cache.
+
+   Note that the count of errors is kept in memory, and is reset to zero when
+   |TS| is restarted.  By default, |TS| will not remember which cache disk has
+   been removed in this way when it restarts.  If you wish to change this behavior
+   and prevent known bad disks from re-joining the cache upon restart, change
+   the setting :ts:cv:`proxy.config.cache.persist_bad_disks`.
+
+.. ts:cv:: CONFIG proxy.config.cache.persist_bad_disks INT 0
+
+   When enabled (``1``), |TS| will remember which cache disks have been
+   marked as failed through :ts:cv:`proxy.config.cache.max_disk_errors`,
+   even after a restart.  A list of known bad cache disks is written to
+   ``localstatedir/known_bad_disks.txt``.  If you replace the known bad disks,
+   delete this file so that |TS| will use them in the cache again.
+
+   When disabled (``0``), |TS| will ignore ``known_bad_disks.txt``.
+
+   This feature is disabled by default.
 
 RAM Cache
 =========
@@ -4785,6 +4810,17 @@ removed in the future without prior notice.
 
    Disables HTTP/0.9 over QUIC by default.
 
+.. ts:cv:: CONFIG proxy.config.quic.cc_algorithm INT 0
+
+   Specified the congestion control algorithm.
+
+   ===== ======================================================================
+   Value Description
+   ===== ======================================================================
+   ``0`` RENO (default).
+   ``1`` CUBIC.
+   ===== ======================================================================
+
 
 UDP Configuration
 =====================
@@ -4925,6 +4961,7 @@ Sockets
    This directive enables operating system specific optimizations for a listening socket. ``defer_accept`` holds a call to ``accept(2)``
    back until data has arrived. In Linux' special case this is up to a maximum of 45 seconds.
    On FreeBSD, ``accf_data`` module needs to be loaded.
+   Note: If MPTCP is enabled, TCP_DEFER_ACCEPT is only supported on Linux kernels 5.19+.
 
 .. ts:cv:: CONFIG proxy.config.net.listen_backlog INT -1
    :reloadable:
@@ -4965,6 +5002,8 @@ Sockets
         PACKET_TOS (32)
         TCP_NOTSENT_LOWAT (64)
 
+   Note: If MPTCP is enabled, TCP_NODELAY is only supported on Linux kernels 5.17+. TCP_FASTOPEN
+   and TCP_NOTSENT_LOWAT socket options are currently not supported.
 .. note::
 
    This is a bitmask and you need to decide what bits to set.  Therefore,
@@ -5019,6 +5058,7 @@ Sockets
 .. ts:cv:: CONFIG proxy.config.net.sock_mss_in INT 0
 
    Same as the command line option ``--accept_mss`` that sets the MSS for all incoming requests.
+   Note: If MPTCP is enabled, TCP_MAXSEG socket option is not supported.
 
 .. ts:cv:: CONFIG proxy.config.net.sock_packet_mark_in INT 0x0
 

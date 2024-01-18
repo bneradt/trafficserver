@@ -30,7 +30,7 @@
 #include "proxy/http/remap/RemapPluginInfo.h"
 
 #include "tscore/Ptr.h"
-#include "tscpp/util/IntrusiveDList.h"
+#include "tsutil/IntrusiveDList.h"
 
 #include "tscore/ink_uuid.h"
 #include "ts/apidefs.h"

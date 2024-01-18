@@ -28,7 +28,7 @@
 
 #include "proxy/IPAllow.h"
 #include "tscore/Filenames.h"
-#include "tscpp/util/ts_errata.h"
+#include "tsutil/ts_errata.h"
 
 #include "swoc/Vectray.h"
 #include "swoc/BufferWriter.h"
@@ -36,12 +36,17 @@
 #include "swoc/bwf_ex.h"
 #include "swoc/bwf_ip.h"
 
-#include "yaml-cpp/yaml.h"
+#include "tsutil/YamlCfg.h"
 
 using swoc::TextView;
 
 using swoc::BufferWriter;
 using swoc::bwf::Spec;
+
+namespace
+{
+DbgCtl dbg_ctl_ip_allow("ip_allow");
+}
 
 namespace swoc
 {
@@ -49,13 +54,6 @@ BufferWriter &
 bwformat(BufferWriter &w, Spec const &spec, IpAllow const *obj)
 {
   return w.print("{}[{}]", obj->MODULE_NAME, obj->get_config_file().c_str());
-}
-
-// This needs to be in namespace "swoc" or "YAML" or ADL doesn't find the overload.
-BufferWriter &
-bwformat(BufferWriter &w, Spec const &spec, YAML::Mark const &mark)
-{
-  return w.print("Line {}", mark.line);
 }
 
 } // namespace swoc
@@ -215,15 +213,15 @@ IpAllow::DebugMap(const IpMap &map) const
   std::string out;
   out.resize(8192);
   swoc::bwprint(out, "{}", map);
-  Debug("ip_allow", "%s", out.c_str());
+  Dbg(dbg_ctl_ip_allow, "%s", out.c_str());
 }
 
 void
 IpAllow::Print() const
 {
-  Debug("ip_allow", "Printing src map");
+  Dbg(dbg_ctl_ip_allow, "Printing src map");
   DebugMap(_src_map);
-  Debug("ip_allow", "Printing dest map");
+  Dbg(dbg_ctl_ip_allow, "Printing dest map");
   DebugMap(_dst_map);
 }
 
@@ -251,7 +249,7 @@ IpAllow::BuildTable()
       return swoc::Errata(ERRATA_ERROR, "{} - No entries found. All IP Addresses will be blocked", this);
     }
 
-    if (is_debug_tag_set("ip_allow")) {
+    if (dbg_ctl_ip_allow.on()) {
       Print();
     }
   } else {
@@ -275,7 +273,7 @@ IpAllow::YAMLLoadMethod(const YAML::Node &node, Record &rec)
         rec._method_mask |= ACL::MethodIdxToMask(method_idx);
       } else {
         names.push_back(value);
-        Debug("ip_allow", "Found nonstandard method '%.*s' at line %d", int(value.size()), value.data(), node.Mark().line);
+        Dbg(dbg_ctl_ip_allow, "Found nonstandard method '%.*s' at line %d", int(value.size()), value.data(), node.Mark().line);
       }
     }
   };

@@ -942,6 +942,7 @@ cmd_verify(char * /* cmd ATS_UNUSED */)
     Layout::get()->update_sysconfdir(conf_dir);
   }
 
+  api_init();
   if (!plugin_init(true)) {
     exitStatus |= (1 << 2);
     fprintf(stderr, "ERROR: Failed to load %s, exitStatus %d\n\n", ts::filename::PLUGIN, exitStatus);
@@ -2172,11 +2173,12 @@ main(int /* argc ATS_UNUSED */, const char **argv)
     }
 
     // initialize logging (after event and net processor)
-    Log::init(Log::NO_REMOTE_MANAGEMENT);
+    Log::init();
 
     (void)parsePluginConfig();
 
     // Init plugins as soon as logging is ready.
+    api_init();
     (void)plugin_init(); // plugin.config
 
     {
