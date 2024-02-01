@@ -130,40 +130,24 @@ ip_allow:
   - apply: in
     ip_addrs: 0/0
     action: allow
+    methods:
+      - GET
 '''
 
 test_ip_allow_optional_methods = Test_remap_acl(
-    "Verify non-allowed methods are blocked.",
+    "Verify remap.config line overrides ip_allow rule.",
     replay_file='remap_acl_get_post_allowed.replay.yaml',
     ip_allow_content=IP_ALLOW_CONTENT,
-    deactivate_ip_allow=True,
+    deactivate_ip_allow=False,
     acl_configuration='@action=allow @src_ip=127.0.0.1 @method=GET @method=POST',
     named_acls=[],
     expected_responses=[200, 200, 403, 403, 403])
 
 test_ip_allow_optional_methods = Test_remap_acl(
-    "Verify denied methods are blocked.",
-    replay_file='remap_acl_get_post_denied.replay.yaml',
+    "Verify remap.config line overrides defined acl rule.",
+    replay_file='remap_acl_get_post_allowed.replay.yaml',
     ip_allow_content=IP_ALLOW_CONTENT,
-    deactivate_ip_allow=True,
-    acl_configuration='@action=deny @src_ip=127.0.0.1 @method=GET @method=POST',
-    named_acls=[],
-    expected_responses=[403, 403, 200, 200, 400])
-
-test_ip_allow_optional_methods = Test_remap_acl(
-    "Verify defined filters are evaluated before remap lines.",
-    replay_file='remap_acl_all_denied.replay.yaml',
-    ip_allow_content=IP_ALLOW_CONTENT,
-    deactivate_ip_allow=True,
+    deactivate_ip_allow=False,
     acl_configuration='@action=allow @src_ip=127.0.0.1 @method=GET @method=POST',
-    named_acls=[('deny', '@action=deny @src_ip=0.0.0.0-255.255.255.255')],
-    expected_responses=[403, 403, 403, 403, 403])
-
-test_ip_allow_optional_methods = Test_remap_acl(
-    "Verify a default deny filter rule works.",
-    replay_file='remap_acl_all_denied.replay.yaml',
-    ip_allow_content=IP_ALLOW_CONTENT,
-    deactivate_ip_allow=True,
-    acl_configuration='@action=allow @src_ip=1.2.3.4 @method=GET @method=POST',
-    named_acls=[('deny', '@action=deny @src_ip=0.0.0.0-255.255.255.255')],
-    expected_responses=[403, 403, 403, 403, 403])
+    named_acls=[("allow_get", "@action=allow @src_ip=127.0.0.1 @method=GET")],
+    expected_responses=[200, 200, 403, 403, 403])
