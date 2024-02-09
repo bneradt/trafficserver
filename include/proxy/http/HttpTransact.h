@@ -37,8 +37,8 @@
 #include "iocore/eventsystem/ConfigProcessor.h"
 #include "proxy/Transform.h"
 #include "proxy/Milestones.h"
+#include "ts/apidefs.h"
 #include "ts/remap.h"
-#include "ts/parentselectdefs.h"
 #include "proxy/http/remap/RemapPluginInfo.h"
 #include "proxy/http/remap/UrlMapping.h"
 #include "records/RecHttp.h"
@@ -662,7 +662,7 @@ public:
 
   using ResponseAction = struct _ResponseAction {
     bool handled = false;
-    TSResponseAction action;
+    tsapi::c::TSResponseAction action;
 
     _ResponseAction() {}
   };

@@ -54,6 +54,13 @@ public:
   AggregateWriteBuffer &operator=(AggregateWriteBuffer &&other) = delete;
 
   /**
+   * Check whether the internal buffer is empty.
+   *
+   * @return Returns true if the buffer is empty, otherwise false.
+   */
+  bool is_empty() const;
+
+  /**
    * Flush the internal buffer to disk.
    *
    * This method should be called during shutdown. It must not be called
@@ -68,6 +75,17 @@ public:
    * @return Returns true if all bytes were flushed, otherwise false.
    */
   bool flush(int fd, off_t write_pos) const;
+
+  /**
+   * Copy part of the buffer.
+   *
+   * The range of bytes to copy must fit within the written buffer.
+   *
+   * @param dest: The destination buffer.
+   * @param offset: Byte offset to begin copying at.
+   * @param nbytes: Number of bytes to copy.
+   */
+  void copy_from(char *dest, int offset, size_t nbytes) const;
 
   Queue<CacheVC, Continuation::Link_link> &get_pending_writers();
   char *get_buffer();
@@ -131,4 +149,10 @@ inline void
 AggregateWriteBuffer::add_bytes_pending_aggregation(int size)
 {
   this->_bytes_pending_aggregation += size;
+}
+
+inline bool
+AggregateWriteBuffer::is_empty() const
+{
+  return this->_buffer_pos == 0;
 }

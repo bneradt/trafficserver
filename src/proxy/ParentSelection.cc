@@ -31,6 +31,8 @@
 #include "iocore/utils/Machine.h"
 #include "tscore/Tokenizer.h"
 
+using namespace tsapi::c;
+
 #define MAX_SIMPLE_RETRIES             5
 #define MAX_UNAVAILABLE_SERVER_RETRIES 5
 
@@ -782,7 +784,7 @@ ParentRecord::Init(matcher_line *line_info)
             modulePrefix, line_num);
     delete unavailable_server_retry_responses;
     unavailable_server_retry_responses = nullptr;
-  } else if (unavailable_server_retry_responses == nullptr && (parent_retry & PARENT_RETRY_UNAVAILABLE_SERVER)) {
+  } else if (unavailable_server_retry_responses == nullptr && parent_retry) {
     // initialize UnavailableServerResponseCodes to the default value if unavailable_server_retry is enabled.
     Warning("%s initializing UnavailableServerResponseCodes on line %d to 503 default.", modulePrefix, line_num);
     unavailable_server_retry_responses = new UnavailableServerResponseCodes(nullptr);
@@ -794,7 +796,7 @@ ParentRecord::Init(matcher_line *line_info)
             line_num);
     delete simple_server_retry_responses;
     simple_server_retry_responses = nullptr;
-  } else if (simple_server_retry_responses == nullptr && (parent_retry & PARENT_RETRY_SIMPLE)) {
+  } else if (simple_server_retry_responses == nullptr && parent_retry) {
     // initialize simple server respones codes to the default value if simple_retry is enabled.
     Warning("%s initializing SimpleRetryResponseCodes on line %d to 404 default.", modulePrefix, line_num);
     simple_server_retry_responses = new SimpleRetryResponseCodes(nullptr);
@@ -867,6 +869,7 @@ ParentRecord::~ParentRecord()
   ats_free(secondary_parents);
   delete selection_strategy;
   delete unavailable_server_retry_responses;
+  delete simple_server_retry_responses;
 }
 
 void

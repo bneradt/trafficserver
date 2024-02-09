@@ -28,6 +28,8 @@
 #include "P_RamCache.h"
 #include "iocore/cache/AggregateWriteBuffer.h"
 
+#include "iocore/eventsystem/EThread.h"
+
 #include "tscore/CryptoHash.h"
 
 #include <atomic>
@@ -249,8 +251,8 @@ public:
   void scan_for_pinned_documents();
   void evacuate_cleanup_blocks(int i);
   void evacuate_cleanup();
-  EvacuationBlock *force_evacuate_head(Dir *dir, int pinned);
-  int within_hit_evacuate_window(Dir *dir) const;
+  EvacuationBlock *force_evacuate_head(Dir const *dir, int pinned);
+  int within_hit_evacuate_window(Dir const *dir) const;
   uint32_t round_to_approx_size(uint32_t l) const;
 
   // inline functions
@@ -258,14 +260,14 @@ public:
   int direntries() const;        // total number of dir entries
   Dir *dir_segment(int s) const; // returns the first dir in the segment s
   size_t dirlen() const;         // calculates the total length of header, directories and footer
-  int vol_out_of_phase_valid(Dir *e) const;
+  int vol_out_of_phase_valid(Dir const *e) const;
 
-  int vol_out_of_phase_agg_valid(Dir *e) const;
-  int vol_out_of_phase_write_valid(Dir *e) const;
-  int vol_in_phase_valid(Dir *e) const;
-  int vol_in_phase_agg_buf_valid(Dir *e) const;
+  int vol_out_of_phase_agg_valid(Dir const *e) const;
+  int vol_out_of_phase_write_valid(Dir const *e) const;
+  int vol_in_phase_valid(Dir const *e) const;
+  int vol_in_phase_agg_buf_valid(Dir const *e) const;
 
-  off_t vol_offset(Dir *e) const;
+  off_t vol_offset(Dir const *e) const;
   off_t offset_to_vol_offset(off_t pos) const;
   off_t vol_offset_to_offset(off_t pos) const;
   off_t vol_relative_length(off_t start_offset) const;
@@ -277,7 +279,6 @@ public:
   }
 
   Queue<CacheVC, Continuation::Link_link> &get_pending_writers();
-  char *get_agg_buffer();
   int get_agg_buf_pos() const;
   int get_agg_todo_size() const;
 
@@ -299,13 +300,40 @@ public:
    * @return: Returns true if the operation was successfull, otherwise false.
    */
   bool add_writer(CacheVC *vc);
-  bool flush_aggregate_write_buffer();
+
+  /**
+   * Sync the stripe meta data to memory for shutdown.
+   *
+   * This method MUST NOT be called during regular operation. The stripe
+   * will be locked for this operation, and will not be unlocked afterwards.
+   *
+   * The aggregate write buffer will be flushed before copying the stripe to
+   * disk. Pending writes will be ignored.
+   *
+   * @param shutdown_thread The EThread to lock the stripe on.
+   */
+  void shutdown(EThread *shutdown_thread);
+
+  /**
+   * Retrieve a document from the aggregate write buffer.
+   *
+   * This is used to speed up reads by copying from the in-memory write buffer
+   * instead of reading from disk. If the document is not in the write buffer,
+   * nothing will be copied.
+   *
+   * @param dir: The directory entry for the desired document.
+   * @param dest: The destination buffer where the document will be copied to.
+   * @param nbytes: The size of the document (number of bytes to copy).
+   * @return Returns true if the document was copied, false otherwise.
+   */
+  bool copy_from_aggregate_write_buffer(char *dest, Dir const &dir, size_t nbytes) const;
 
 private:
   void _clear_init();
   void _init_dir();
   void _init_data_internal();
   void _init_data();
+  bool flush_aggregate_write_buffer();
 
   AggregateWriteBuffer _write_buffer;
 };
@@ -402,31 +430,31 @@ Stripe::direntries() const
 }
 
 inline int
-Stripe::vol_out_of_phase_valid(Dir *e) const
+Stripe::vol_out_of_phase_valid(Dir const *e) const
 {
   return (dir_offset(e) - 1 >= ((this->header->agg_pos - this->start) / CACHE_BLOCK_SIZE));
 }
 
 inline int
-Stripe::vol_out_of_phase_agg_valid(Dir *e) const
+Stripe::vol_out_of_phase_agg_valid(Dir const *e) const
 {
   return (dir_offset(e) - 1 >= ((this->header->agg_pos - this->start + AGG_SIZE) / CACHE_BLOCK_SIZE));
 }
 
 inline int
-Stripe::vol_out_of_phase_write_valid(Dir *e) const
+Stripe::vol_out_of_phase_write_valid(Dir const *e) const
 {
   return (dir_offset(e) - 1 >= ((this->header->write_pos - this->start) / CACHE_BLOCK_SIZE));
 }
 
 inline int
-Stripe::vol_in_phase_valid(Dir *e) const
+Stripe::vol_in_phase_valid(Dir const *e) const
 {
   return (dir_offset(e) - 1 < ((this->header->write_pos + this->_write_buffer.get_buffer_pos() - this->start) / CACHE_BLOCK_SIZE));
 }
 
 inline off_t
-Stripe::vol_offset(Dir *e) const
+Stripe::vol_offset(Dir const *e) const
 {
   return this->start + (off_t)dir_offset(e) * CACHE_BLOCK_SIZE - CACHE_BLOCK_SIZE;
 }
@@ -444,7 +472,7 @@ Stripe::vol_offset_to_offset(off_t pos) const
 }
 
 inline int
-Stripe::vol_in_phase_agg_buf_valid(Dir *e) const
+Stripe::vol_in_phase_agg_buf_valid(Dir const *e) const
 {
   return (this->vol_offset(e) >= this->header->write_pos &&
           this->vol_offset(e) < (this->header->write_pos + this->_write_buffer.get_buffer_pos()));
@@ -490,7 +518,7 @@ Doc::data()
 // inline Functions
 
 inline EvacuationBlock *
-evacuation_block_exists(Dir *dir, Stripe *stripe)
+evacuation_block_exists(Dir const *dir, Stripe *stripe)
 {
   auto bucket = dir_evac_bucket(dir);
   if (stripe->evac_bucket_valid(bucket)) {
@@ -543,7 +571,7 @@ Stripe::open_read(const CryptoHash *key) const
 }
 
 inline int
-Stripe::within_hit_evacuate_window(Dir *xdir) const
+Stripe::within_hit_evacuate_window(Dir const *xdir) const
 {
   off_t oft       = dir_offset(xdir) - 1;
   off_t write_off = (header->write_pos + AGG_SIZE - start) / CACHE_BLOCK_SIZE;
@@ -583,12 +611,6 @@ inline Queue<CacheVC, Continuation::Link_link> &
 Stripe::get_pending_writers()
 {
   return this->_write_buffer.get_pending_writers();
-}
-
-inline char *
-Stripe::get_agg_buffer()
-{
-  return this->_write_buffer.get_buffer();
 }
 
 inline int

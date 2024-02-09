@@ -26,6 +26,8 @@
 #include "proxy/ProxySession.h"
 #include "iocore/net/TLSBasicSupport.h"
 
+using namespace tsapi::c;
+
 std::map<int, std::function<PoolableSession *()>> ProtocolSessionCreateMap;
 
 ProxySession::ProxySession() : VConnection(nullptr) {}
@@ -213,6 +215,18 @@ PoolableSession *
 ProxySession::get_server_session() const
 {
   return nullptr;
+}
+
+bool
+ProxySession::is_protocol_framed() const
+{
+  return false;
+}
+
+uint64_t
+ProxySession::get_received_frame_count(uint64_t type) const
+{
+  return 0;
 }
 
 void

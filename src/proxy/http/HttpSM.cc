@@ -46,7 +46,6 @@
 #include "proxy/Transform.h"
 #include "../../iocore/net/P_SSLConfig.h"
 #include "iocore/net/ConnectionTracker.h"
-#include "iocore/net/SSLSNIConfig.h"
 #include "iocore/net/TLSALPNSupport.h"
 #include "iocore/net/TLSBasicSupport.h"
 #include "iocore/net/TLSSNISupport.h"
@@ -63,6 +62,8 @@
 #include <openssl/ssl.h>
 #include <algorithm>
 #include <atomic>
+
+using namespace tsapi::c;
 
 #define DEFAULT_RESPONSE_BUFFER_SIZE_INDEX 6 // 8K
 #define DEFAULT_REQUEST_BUFFER_SIZE_INDEX  6 // 8K
@@ -2780,6 +2781,23 @@ HttpSM::tunnel_handler_post(int event, void *data)
   return 0;
 }
 
+void
+HttpSM::setup_tunnel_handler_trailer(HttpTunnelProducer *p)
+{
+  p->read_success               = true;
+  t_state.current.server->state = HttpTransact::TRANSACTION_COMPLETE;
+  t_state.current.server->abort = HttpTransact::DIDNOT_ABORT;
+
+  SMDbg(dbg_ctl_http, "Wait for the trailing header");
+
+  // Swap out the default hander to set up the new tunnel for the trailer exchange.
+  HTTP_SM_SET_DEFAULT_HANDLER(&HttpSM::tunnel_handler_trailer);
+  if (_ua.get_txn()) {
+    _ua.get_txn()->set_expect_send_trailer();
+  }
+  tunnel.local_finish_all(p);
+}
+
 int
 HttpSM::tunnel_handler_trailer(int event, void *data)
 {
@@ -2811,6 +2829,7 @@ HttpSM::tunnel_handler_trailer(int event, void *data)
   }
   // Signal the _ua.get_txn() to get ready for a trailer
   _ua.get_txn()->set_expect_send_trailer();
+  tunnel.deallocate_buffers();
   tunnel.reset();
   HttpTunnelProducer *p = tunnel.add_producer(server_entry->vc, nbytes, buf_start, &HttpSM::tunnel_handler_trailer_server,
                                               HT_HTTP_SERVER, "http server trailer");
@@ -3085,6 +3104,10 @@ HttpSM::tunnel_handler_server(int event, HttpTunnelProducer *p)
         tunnel.append_message_to_producer_buffer(p, reason, reason_len);
         }
       */
+      if (server_txn->expect_receive_trailer()) {
+        setup_tunnel_handler_trailer(p);
+        return 0;
+      }
       tunnel.local_finish_all(p);
     }
     break;
@@ -3111,10 +3134,7 @@ HttpSM::tunnel_handler_server(int event, HttpTunnelProducer *p)
       }
     }
     if (server_txn->expect_receive_trailer()) {
-      SMDbg(dbg_ctl_http, "wait for that trailing header");
-      // Swap out the default hander to set up the new tunnel for the trailer exchange.
-      HTTP_SM_SET_DEFAULT_HANDLER(&HttpSM::tunnel_handler_trailer);
-      tunnel.local_finish_all(p);
+      setup_tunnel_handler_trailer(p);
       return 0;
     }
     break;
@@ -4253,51 +4273,53 @@ HttpSM::check_sni_host()
   // Issue warning or mark the transaction to be terminated as necessary
   int host_len;
   const char *host_name = t_state.hdr_info.client_request.host_get(&host_len);
-  if (host_name && host_len) {
-    if (_ua.get_txn()->support_sni()) {
-      int host_sni_policy   = t_state.http_config_param->http_host_sni_policy;
-      NetVConnection *netvc = _ua.get_txn()->get_netvc();
-      if (netvc) {
-        IpEndpoint ip = netvc->get_remote_endpoint();
-        if (SNIConfig::test_client_action(std::string{host_name, static_cast<size_t>(host_len)}.c_str(), netvc->get_local_port(),
-                                          ip, host_sni_policy) &&
-            host_sni_policy > 0) {
-          // In a SNI/Host mismatch where the Host would have triggered SNI policy, mark the transaction
-          // to be considered for rejection after the remap phase passes.  Gives the opportunity to conf_remap
-          // override the policy.:w
-          //
-          //
-          // to be rejected
-          // in the end_remap logic
-          const char *sni_value    = netvc->get_server_name();
-          const char *action_value = host_sni_policy == 2 ? "terminate" : "continue";
-          if (!sni_value || sni_value[0] == '\0') { // No SNI
-            Warning("No SNI for TLS request with hostname %.*s action=%s", host_len, host_name, action_value);
-            SMDbg(dbg_ctl_ssl_sni, "No SNI for TLS request with hostname %.*s action=%s", host_len, host_name, action_value);
-            if (host_sni_policy == 2) {
-              swoc::bwprint(error_bw_buffer, "No SNI for TLS request: connecting to {} for host='{}', returning a 403",
-                            t_state.client_info.dst_addr, std::string_view{host_name, static_cast<size_t>(host_len)});
-              Log::error("%s", error_bw_buffer.c_str());
-              this->t_state.client_connection_enabled = false;
-            }
-          } else if (strncasecmp(host_name, sni_value, host_len) != 0) { // Name mismatch
-            Warning("SNI/hostname mismatch sni=%s host=%.*s action=%s", sni_value, host_len, host_name, action_value);
-            SMDbg(dbg_ctl_ssl_sni, "SNI/hostname mismatch sni=%s host=%.*s action=%s", sni_value, host_len, host_name,
-                  action_value);
-            if (host_sni_policy == 2) {
-              swoc::bwprint(error_bw_buffer, "SNI/hostname mismatch: connecting to {} for host='{}' sni='{}', returning a 403",
-                            t_state.client_info.dst_addr, std::string_view{host_name, static_cast<size_t>(host_len)}, sni_value);
-              Log::error("%s", error_bw_buffer.c_str());
-              this->t_state.client_connection_enabled = false;
-            }
-          } else {
-            SMDbg(dbg_ctl_ssl_sni, "SNI/hostname successfully match sni=%s host=%.*s", sni_value, host_len, host_name);
-          }
-        } else {
-          SMDbg(dbg_ctl_ssl_sni, "No SNI/hostname check configured for host=%.*s", host_len, host_name);
-        }
+
+  if (host_name == nullptr || host_len == 0) {
+    return;
+  }
+
+  auto *netvc = _ua.get_txn()->get_netvc();
+  if (netvc == nullptr) {
+    return;
+  }
+
+  auto *snis = netvc->get_service<TLSSNISupport>();
+  if (snis == nullptr) {
+    return;
+  }
+
+  int host_sni_policy = t_state.http_config_param->http_host_sni_policy;
+  if (snis->would_have_actions_for(std::string{host_name, static_cast<size_t>(host_len)}.c_str(), netvc->get_remote_endpoint(),
+                                   host_sni_policy) &&
+      host_sni_policy > 0) {
+    // In a SNI/Host mismatch where the Host would have triggered SNI policy, mark the transaction
+    // to be considered for rejection after the remap phase passes.  Gives the opportunity to conf_remap
+    // override the policy to be rejected in the end_remap logic
+    const char *sni_value    = netvc->get_server_name();
+    const char *action_value = host_sni_policy == 2 ? "terminate" : "continue";
+    if (!sni_value || sni_value[0] == '\0') { // No SNI
+      Warning("No SNI for TLS request with hostname %.*s action=%s", host_len, host_name, action_value);
+      SMDbg(dbg_ctl_ssl_sni, "No SNI for TLS request with hostname %.*s action=%s", host_len, host_name, action_value);
+      if (host_sni_policy == 2) {
+        swoc::bwprint(error_bw_buffer, "No SNI for TLS request: connecting to {} for host='{}', returning a 403",
+                      t_state.client_info.dst_addr, std::string_view{host_name, static_cast<size_t>(host_len)});
+        Log::error("%s", error_bw_buffer.c_str());
+        this->t_state.client_connection_enabled = false;
       }
+    } else if (strncasecmp(host_name, sni_value, host_len) != 0) { // Name mismatch
+      Warning("SNI/hostname mismatch sni=%s host=%.*s action=%s", sni_value, host_len, host_name, action_value);
+      SMDbg(dbg_ctl_ssl_sni, "SNI/hostname mismatch sni=%s host=%.*s action=%s", sni_value, host_len, host_name, action_value);
+      if (host_sni_policy == 2) {
+        swoc::bwprint(error_bw_buffer, "SNI/hostname mismatch: connecting to {} for host='{}' sni='{}', returning a 403",
+                      t_state.client_info.dst_addr, std::string_view{host_name, static_cast<size_t>(host_len)}, sni_value);
+        Log::error("%s", error_bw_buffer.c_str());
+        this->t_state.client_connection_enabled = false;
+      }
+    } else {
+      SMDbg(dbg_ctl_ssl_sni, "SNI/hostname successfully match sni=%s host=%.*s", sni_value, host_len, host_name);
     }
+  } else {
+    SMDbg(dbg_ctl_ssl_sni, "No SNI/hostname check configured for host=%.*s", host_len, host_name);
   }
 }
 
