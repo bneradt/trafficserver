@@ -39,7 +39,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-list(APPEND CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE)
+list(APPEND CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE -DATS_BUILD)
 
 include(layout)
 
@@ -103,7 +103,19 @@ auto_option(
   "sys/prctl.h"
 )
 auto_option(LUAJIT PACKAGE_DEPENDS luajit)
+auto_option(
+  MAGICK
+  PACKAGE_DEPENDS
+  ImageMagick
+  COMPONENTS
+  Magick++
+  MagickWand
+  MagickCore
+)
 auto_option(UNWIND FEATURE_VAR TS_USE_REMOTE_UNWINDING PACKAGE_DEPENDS unwind)
+
+# This creates the magic import target if necessary (older cmake)
+include(magick_target)
 
 option(ENABLE_ASAN "Use address sanitizer (default OFF)")
 option(ENABLE_FUZZING "Enable fuzzing (default OFF)")
@@ -213,33 +225,6 @@ include(CheckSourceCompiles)
 include(CheckStructHasMember)
 
 check_include_file(ifaddrs.h HAVE_IFADDRS_H)
-check_include_file(string.h HAVE_STRING_H)
-check_include_file(malloc.h HAVE_MALLOC_H)
-check_include_file(mcheck.h HAVE_MCHECK_H)
-check_include_file(sys/disk.h HAVE_SYS_DISK_H)
-check_include_file(sys/disklabel.h HAVE_SYS_DISKLABEL_H)
-check_include_file(sys/ioctl.h HAVE_SYS_IOCTL_H)
-check_include_file(sys/sockio.h HAVE_SYS_SOCKIO_H)
-check_include_file(sys/stat.h HAVE_SYS_STAT_H)
-check_include_file(sys/statfs.h HAVE_SYS_STATFS_H)
-check_include_file(sys/statvfs.h HAVE_SYS_STATVFS_H)
-check_include_file(sys/uio.h HAVE_SYS_UIO_H)
-check_include_file(sys/sysinfo.h HAVE_SYS_SYSINFO_H)
-check_include_file(sys/sysmacros.h HAVE_SYS_SYSMACROS_H)
-check_include_file(sys/systeminfo.h HAVE_SYS_SYSTEMINFO_H)
-check_include_file(sys/sysctl.h HAVE_SYS_SYSCTL_H)
-check_include_file(sys/mman.h HAVE_SYS_MMAN_H)
-check_include_file(sys/mount.h HAVE_SYS_MOUNT_H)
-check_include_file(sys/param.h HAVE_SYS_PARAM_H)
-check_include_file(netinet/in.h HAVE_NETINET_IN_H)
-check_include_file(netinet/in_systm.h HAVE_NETINET_IN_SYSTM_H)
-check_include_file(netinet/tcp.h HAVE_NETINET_TCP_H)
-check_include_file(netinet/ip.h HAVE_NETINET_IP_H)
-check_include_file(netinet/ip_icmp.h HAVE_NETINET_IP_ICMP_H)
-check_include_file(netdb.h HAVE_NETDB_H)
-check_include_file(arpa/inet.h HAVE_ARPA_INET_H)
-check_include_file(arpa/nameser.h HAVE_ARPA_NAMESER_H)
-check_include_file(arpa/nameser_compat.h HAVE_ARPA_NAMESER_COMPAT_H)
 
 # Find libraries
 if(ENABLE_CRIPTS)
@@ -261,18 +246,13 @@ if(brotli_FOUND)
   set(HAVE_BROTLI_ENCODE_H TRUE)
 endif()
 
-if(TS_USE_POSIX_CAP)
-  # These headers must have been found for capabilites to be enabled.
-  set(HAVE_SYS_CAPABILITY_H TRUE)
-  set(HAVE_SYS_PRCTL_H TRUE)
-endif()
-
 find_package(LibLZMA)
 if(LibLZMA_FOUND)
   set(HAVE_LZMA_H TRUE)
 endif()
 
 find_package(PCRE REQUIRED)
+find_package(PCRE2 COMPONENTS 8BIT)
 
 include(CheckOpenSSLIsBoringSSL)
 include(CheckOpenSSLIsQuictls)
@@ -364,10 +344,6 @@ if(EXTERNAL_LIBSWOC)
   find_package(libswoc REQUIRED)
 endif()
 
-# curl is used in traffic_top
-find_package(CURL)
-set(HAVE_CURL ${CURL_FOUND})
-
 include(Check128BitCas)
 include(ConfigureTransparentProxy)
 
@@ -397,7 +373,7 @@ check_symbol_exists(getpeereid unistd.h HAVE_GETPEEREID)
 check_symbol_exists(getpeerucred unistd.h HAVE_GETPEERUCRED)
 check_symbol_exists(getresuid unistd.h HAVE_GETRESUID)
 check_symbol_exists(getresgid unistd.h HAVE_GETRESGID)
-check_symbol_exists(malloc_usable_size malloc.h HAVE_MALLOC_USABLE_SIZE)
+check_symbol_exists(malloc_usable_size "malloc.h;malloc_np.h" HAVE_MALLOC_USABLE_SIZE)
 check_symbol_exists(mcheck_pedantic mcheck.h HAVE_MCHECK_PEDANTIC)
 check_symbol_exists(posix_fadvise fcntl.h HAVE_POSIX_FADVISE)
 check_symbol_exists(posix_fallocate fcntl.h HAVE_POSIX_FALLOCATE)
@@ -410,8 +386,8 @@ check_symbol_exists(sendmmsg sys/socket.h HAVE_SENDMMSG)
 check_symbol_exists(strlcat string.h HAVE_STRLCAT)
 check_symbol_exists(strlcpy string.h HAVE_STRLCPY)
 check_symbol_exists(strsignal string.h HAVE_STRSIGNAL)
-check_symbol_exists(pthread_mutexattr_settype pthread.h HAVE_PTHREAD_MUTEXATTR_SETTYPE)
-
+check_symbol_exists(sysinfo sys/sysinfo.h HAVE_SYSINFO)
+check_symbol_exists(prctl "sys/prctl.h" HAVE_PRCTL)
 if(TS_USE_HWLOC)
   check_source_compiles(
     C "#include <hwloc.h>
@@ -461,7 +437,6 @@ check_symbol_exists(DH_get_2048_256 "openssl/dh.h" TS_USE_GET_DH_2048_256)
 check_symbol_exists(OPENSSL_NO_TLS_3 "openssl/ssl.h" TS_NO_USE_TLS12)
 check_symbol_exists(SSL_CTX_set_client_hello_cb "openssl/ssl.h" TS_USE_HELLO_CB)
 check_symbol_exists(SSL_set1_verify_cert_store "openssl/ssl.h" TS_HAS_VERIFY_CERT_STORE)
-check_symbol_exists(SSL_CTX_set_tlsext_ticket_key_evp_cb "openssl/ssl.h" TS_HAS_TLS_SESSION_TICKET)
 check_symbol_exists(SSL_read_early_data "openssl/ssl.h" TS_HAS_TLS_EARLY_DATA)
 check_symbol_exists(SSL_set_max_early_data "openssl/ssl.h" HAVE_SSL_SET_MAX_EARLY_DATA)
 check_symbol_exists(SSL_CTX_set_ciphersuites "openssl/ssl.h" TS_USE_TLS_SET_CIPHERSUITES)
@@ -471,6 +446,13 @@ check_symbol_exists(SSL_get_all_async_fds openssl/ssl.h TS_USE_TLS_ASYNC)
 check_symbol_exists(TLS1_3_VERSION "openssl/ssl.h" TS_USE_TLS13)
 check_symbol_exists(MD5_Init "openssl/md5.h" HAVE_MD5_INIT)
 check_symbol_exists(sysctlbyname "sys/sysctl.h" HAVE_SYSCTLBYNAME)
+
+if(OPENSSL_IS_OPENSSL3)
+  check_symbol_exists(SSL_CTX_set_tlsext_ticket_key_evp_cb "openssl/ssl.h" TS_HAS_TLS_SESSION_TICKET)
+else()
+  check_symbol_exists(SSL_CTX_set_tlsext_ticket_key_cb "openssl/ssl.h" TS_HAS_TLS_SESSION_TICKET)
+endif()
+
 unset(CMAKE_REQUIRED_FLAGS)
 
 set(HAVE_SSL_READ_EARLY_DATA ${TS_HAS_TLS_EARLY_DATA})
@@ -479,7 +461,12 @@ set(CMAKE_REQUIRED_INCLUDES netinet/in.h netinet/tcp.h)
 check_type_size("struct tcp_info" STRUCT_TCP_INFO)
 unset(CMAKE_REQUIRED_INCLUDES)
 
-check_struct_has_member("struct tcp_info" tcpi_data_segs_out "linux/tcp.h" HAVE_STRUCT_LINUX_TCP_INFO)
+# Since Linux 2.6.12
+check_struct_has_member("struct tcp_info" tcpi_total_retrans "linux/tcp.h" HAVE_STRUCT_TCP_INFO_TCPI_TOTAL_RETRANS)
+# Since Linux 4.6
+check_struct_has_member("struct tcp_info" tcpi_data_segs_out "linux/tcp.h" HAVE_STRUCT_TCP_INFO_TCPI_DATA_SEGS_OUT)
+# Since FreeBSD 6
+check_struct_has_member("struct tcp_info" __tcpi_retrans "netinet/tcp.h" HAVE_STRUCT_TCP_INFO___TCPI_RETRANS)
 check_struct_has_member("struct sockaddr" sa_len "netinet/in.h" HAVE_STRUCT_SOCKADDR_SA_LEN)
 check_struct_has_member("struct sockaddr_in" sin_len "netinet/in.h" HAVE_STRUCT_SOCKADDR_IN_SIN_LEN)
 check_struct_has_member("struct sockaddr_in6" sin6_len "netinet/in.h" HAVE_STRUCT_SOCKADDR_IN6_SIN6_LEN)
@@ -643,11 +630,13 @@ if(ENABLE_BENCHMARKS)
   add_subdirectory(tools/benchmark)
 endif()
 
+set(GIT_COMMON_DIR git rev-parse --git-common-dir)
+
 add_custom_target(
   clang-format-install
   COMMAND ${CMAKE_SOURCE_DIR}/tools/clang-format.sh --install
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  BYPRODUCTS ${CMAKE_SOURCE_DIR}/.git/fmt/.clang-format-installed
+  BYPRODUCTS ${GIT_COMMON_DIR}/fmt/.clang-format-installed
   COMMENT "Installing clang-format"
   VERBATIM
 )

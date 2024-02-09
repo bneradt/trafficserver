@@ -129,7 +129,7 @@ Http2ServerSession::new_connection(NetVConnection *new_vc, MIOBuffer *iobuf, IOB
 
   this->_handle_if_ssl(new_vc);
 
-  do_api_callout(TS_HTTP_SSN_START_HOOK);
+  do_api_callout(tsapi::c::TS_HTTP_SSN_START_HOOK);
 
   this->add_session();
 }
@@ -401,6 +401,22 @@ IOBufferReader *
 Http2ServerSession::get_remote_reader()
 {
   return _read_buffer_reader;
+}
+
+bool
+Http2ServerSession::is_protocol_framed() const
+{
+  return true;
+}
+
+uint64_t
+Http2ServerSession::get_received_frame_count(uint64_t type) const
+{
+  if (type == 999) { // TS_SSN_INFO_RECEIVED_FRAME_COUNT_H2_UNKNOWN in apidefs.h.in
+    return this->_frame_counts_in[HTTP2_FRAME_TYPE_MAX];
+  } else {
+    return this->_frame_counts_in[type];
+  }
 }
 
 std::function<PoolableSession *()> create_h2_server_session = []() -> PoolableSession * {
