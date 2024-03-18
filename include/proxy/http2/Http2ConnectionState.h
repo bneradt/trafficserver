@@ -32,7 +32,7 @@
 #include "proxy/http2/HPACK.h"
 #include "proxy/http2/Http2Stream.h"
 #include "proxy/http2/Http2DependencyTree.h"
-#include "proxy/http2/Http2FrequencyCounter.h"
+#include "tscore/FrequencyCounter.h"
 
 class Http2CommonSession;
 class Http2Frame;
@@ -155,8 +155,9 @@ public:
   Http2ErrorCode get_shutdown_reason() const;
 
   // HTTP/2 frame sender
-  void schedule_stream(Http2Stream *stream);
+  void schedule_stream_to_send_priority_frames(Http2Stream *stream);
   void send_data_frames_depends_on_priority();
+  void schedule_stream_to_send_data_frames(Http2Stream *stream);
   void send_data_frames(Http2Stream *stream);
   Http2SendDataFrameResult send_a_data_frame(Http2Stream *stream, size_t &payload_length);
   void send_headers_frame(Http2Stream *stream);
@@ -325,11 +326,11 @@ private:
   std::array<size_t, 5> _recent_rwnd_increment = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
   int _recent_rwnd_increment_index             = 0;
 
-  Http2FrequencyCounter _received_settings_counter;
-  Http2FrequencyCounter _received_settings_frame_counter;
-  Http2FrequencyCounter _received_ping_frame_counter;
-  Http2FrequencyCounter _received_priority_frame_counter;
-  Http2FrequencyCounter _received_rst_stream_frame_counter;
+  FrequencyCounter _received_settings_counter;
+  FrequencyCounter _received_settings_frame_counter;
+  FrequencyCounter _received_ping_frame_counter;
+  FrequencyCounter _received_priority_frame_counter;
+  FrequencyCounter _received_rst_stream_frame_counter;
 
   /** Records the various settings for each SETTINGS frame that we've sent.
    *
@@ -387,7 +388,8 @@ private:
   //     "If the END_HEADERS bit is not set, this frame MUST be followed by
   //     another CONTINUATION frame."
   Http2StreamId continued_stream_id = 0;
-  bool _scheduled                   = false;
+  bool _priority_scheduled          = false;
+  bool _data_scheduled              = false;
   bool fini_received                = false;
   bool in_destroy                   = false;
   int recursion                     = 0;

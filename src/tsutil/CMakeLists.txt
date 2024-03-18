@@ -37,6 +37,7 @@ set(TSUTIL_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tsutil/ts_meta.h
     ${PROJECT_SOURCE_DIR}/include/tsutil/ts_time_parser.h
     ${PROJECT_SOURCE_DIR}/include/tsutil/ts_unit_parser.h
+    ${PROJECT_SOURCE_DIR}/include/tsutil/ts_errata.h
 )
 add_library(
   tsutil
@@ -49,17 +50,23 @@ add_library(
   YamlCfg.cc
   ts_unit_parser.cc
   Regex.cc
+  ts_errata.cc
 )
+
 add_library(ts::tsutil ALIAS tsutil)
 set_target_properties(tsutil PROPERTIES POSITION_INDEPENDENT_CODE TRUE PUBLIC_HEADER "${TSUTIL_PUBLIC_HEADERS}")
-target_link_libraries(tsutil PUBLIC libswoc::libswoc yaml-cpp::yaml-cpp PCRE::PCRE)
+target_link_libraries(tsutil PUBLIC libswoc::libswoc yaml-cpp::yaml-cpp PkgConfig::PCRE2)
 
-install(
-  TARGETS tsutil
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tsutil
-)
+if(BUILD_SHARED_LIBS)
+  install(
+    TARGETS tsutil
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tsutil
+  )
+else()
+  install(FILES ${TSUTIL_PUBLIC_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tsutil)
+endif()
 
 if(BUILD_TESTING)
   add_executable(

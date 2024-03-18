@@ -4550,7 +4550,7 @@ HTTP/2 Configuration
    This limit only will be enforced if :ts:cv:`proxy.config.http2.stream_priority_enabled`
    is set to 1.
 
-.. ts:cv:: CONFIG proxy.config.http2.max_rst_stream_frames_per_minute INT 14
+.. ts:cv:: CONFIG proxy.config.http2.max_rst_stream_frames_per_minute INT 200
    :reloadable:
 
    Specifies how many RST_STREAM frames |TS| receives for a minute at maximum.
@@ -4590,7 +4590,7 @@ HTTP/2 Configuration
    :reloadable:
    :units: bytes
 
-   Specifies the high water mark for all HTTP/2 frames on an outoging connection.
+   Specifies the high water mark for all HTTP/2 frames on an outgoing connection.
    Default is -1 to preserve existing water marking behavior.
 
    You can override this global setting on a per domain basis in the :file:`sni.yaml` file using the :ref:`http2_buffer_water_mark <override-h2-properties>` attribute.

@@ -26,6 +26,7 @@ file(ARCHIVE_EXTRACT INPUT ${PLANTUML_ARCHIVE} PATTERNS *.jar)
 
 configure_file(ext/local-config.cmake.in.py ext/local-config.py)
 configure_file(ext/traffic-server.cmake.in.py ext/traffic-server.py)
+configure_file(ext/extras/txnbox.cmake.in.py ext/extras/txnbox.py)
 configure_file(conf.cmake.in.py conf.py)
 configure_file(manpages.cmake.in.py manpages.py)
 
@@ -34,6 +35,8 @@ add_custom_target(
   generate_docs_setup
   COMMENT "Copy static files to build directory"
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/static ${CMAKE_CURRENT_BINARY_DIR}/static
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/_templates
+          ${CMAKE_CURRENT_BINARY_DIR}/_templates
 )
 
 # generate svg files from uml files
@@ -51,6 +54,8 @@ set(UML_FILES
     uml/l4-tcp-routing.uml
     uml/traffic_ctl-class-diagram.uml
     uml/url_rewrite.plantuml
+    uml/extras/config-data.plantuml
+    uml/extras/txn_box_config_schema.plantuml
 )
 # unfortunately, sphinx can't look else for files than its source directory
 # so these files must be create in the source tree
