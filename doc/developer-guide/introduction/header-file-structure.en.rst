@@ -76,7 +76,7 @@ were moved to "src/tscpp/api".
 
 The contents of "lib/ts" were broken up and moved to different locations. The headers were moved to
 "include/tscore" for core only headers, while headers to be made available to plugins were moved to
-"include/tsutil". The corresponding source files were moved to "src/tscore" and "src/tsutil"
+"include/tscpp/util". The corresponding source files were moved to "src/tscore" and "src/tscpp/util"
 respectively. "libtsutil" was split in to "libtscore" for the core code and "libtscpputil" for shared
 code.  Now "libtscpputil" has been combined with "tsapicore" headers into the "tsutil" library.
 

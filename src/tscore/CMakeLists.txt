@@ -150,6 +150,7 @@ if(BUILD_TESTING)
     unit_tests/test_HKDF.cc
     unit_tests/test_Histogram.cc
     unit_tests/test_History.cc
+    unit_tests/test_IntrusivePtr.cc
     unit_tests/test_List.cc
     unit_tests/test_MMH.cc
     unit_tests/test_ParseRules.cc

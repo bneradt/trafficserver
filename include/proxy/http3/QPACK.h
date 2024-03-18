@@ -25,11 +25,12 @@
 
 #include <map>
 
+#include "swoc/IntrusiveDList.h"
+
 #include "iocore/eventsystem/EventSystem.h"
 #include "iocore/eventsystem/Event.h"
 #include "iocore/eventsystem/IOBuffer.h"
 #include "tscore/Arena.h"
-#include "tsutil/IntrusiveDList.h"
 #include "proxy/hdrs/MIME.h"
 #include "proxy/hdrs/HTTP.h"
 #include "proxy/hdrs/XPACK.h"
@@ -203,7 +204,7 @@ private:
 
   bool _invalid = false;
 
-  ts::IntrusiveDList<DecodeRequest::Linkage> _blocked_list;
+  swoc::IntrusiveDList<DecodeRequest::Linkage> _blocked_list;
   bool _add_to_blocked_list(DecodeRequest *decode_request);
 
   uint16_t _largest_known_received_index = 0;
