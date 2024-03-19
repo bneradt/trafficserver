@@ -155,7 +155,7 @@ QPACK::~QPACK()
 }
 
 void
-QPACK::on_new_stream(QUICStream &stream)
+QPACK::on_stream_open(QUICStream &stream)
 {
   auto *info = new QUICStreamVCAdapter::IOInfo(stream);
 
@@ -180,23 +180,37 @@ QPACK::on_new_stream(QUICStream &stream)
   stream.set_io_adapter(&info->adapter);
 }
 
+void
+QPACK::on_stream_close(QUICStream &stream)
+{
+}
+
 int
 QPACK::event_handler(int event, Event *data)
 {
-  VIO *vio = reinterpret_cast<VIO *>(data);
+  VIO *vio                     = reinterpret_cast<VIO *>(data->cookie);
+  QUICStreamVCAdapter *adapter = static_cast<QUICStreamVCAdapter *>(vio->vc_server);
   int ret;
 
   switch (event) {
   case VC_EVENT_READ_READY:
+    adapter->clear_read_ready_event(data);
     ret = this->_on_read_ready(vio);
     break;
   case VC_EVENT_READ_COMPLETE:
+    adapter->clear_read_complete_event(data);
     ret = EVENT_DONE;
     break;
   case VC_EVENT_WRITE_READY:
+    adapter->clear_write_ready_event(data);
     ret = this->_on_write_ready(vio);
     break;
   case VC_EVENT_WRITE_COMPLETE:
+    adapter->clear_write_complete_event(data);
+    ret = EVENT_DONE;
+    break;
+  case VC_EVENT_EOS:
+    adapter->clear_eos_event(data);
     ret = EVENT_DONE;
     break;
   default:

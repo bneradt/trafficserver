@@ -356,8 +356,7 @@ Http2CommonSession::do_process_frame_read(int event, VIO *vio, bool inside_frame
     }
 
     Http2ErrorCode err = Http2ErrorCode::HTTP2_ERROR_NO_ERROR;
-    if (this->connection_state.get_stream_error_rate() > std::min(1.0, Http2::stream_error_rate_threshold * 2.0) &&
-        !this->is_outbound()) {
+    if (this->connection_state.get_stream_error_rate() > std::min(1.0, Http2::stream_error_rate_threshold * 2.0)) {
       ip_port_text_buffer ipb;
       const char *peer_ip = ats_ip_ntop(this->get_proxy_session()->get_remote_addr(), ipb, sizeof(ipb));
       SiteThrottledWarning("HTTP/2 session error peer_ip=%s session_id=%" PRId64
@@ -408,8 +407,18 @@ Http2CommonSession::do_process_frame_read(int event, VIO *vio, bool inside_frame
 bool
 Http2CommonSession::_should_do_something_else()
 {
+  if (this->_interrupt_reading_frames) {
+    this->_interrupt_reading_frames = false;
+    return true;
+  }
   // Do something else every 128 incoming frames if connection state isn't closed
   return (this->_n_frame_read & 0x7F) == 0 && !connection_state.is_state_closed();
+}
+
+void
+Http2CommonSession::interrupt_reading_frames()
+{
+  this->_interrupt_reading_frames = true;
 }
 
 int64_t

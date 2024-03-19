@@ -18,13 +18,9 @@
 #pragma once
 
 #include <cstring>
-#include <iostream>
 #include <iterator>
-#include <utility>
 #include <string>
-#include <string_view>
 
-#include "ts/remap.h"
 #include "ts/ts.h"
 
 #include "cripts/Transaction.hpp"
@@ -575,7 +571,7 @@ template <> struct formatter<Header::Method> {
   auto
   format(Header::Method &method, FormatContext &ctx) -> decltype(ctx.out())
   {
-    return format_to(ctx.out(), "{}", method.getSV());
+    return fmt::format_to(ctx.out(), "{}", method.getSV());
   }
 };
 
@@ -590,7 +586,7 @@ template <> struct formatter<Header::String> {
   auto
   format(Header::String &str, FormatContext &ctx) -> decltype(ctx.out())
   {
-    return format_to(ctx.out(), "{}", str.getSV());
+    return fmt::format_to(ctx.out(), "{}", str.getSV());
   }
 };
 
@@ -605,7 +601,7 @@ template <> struct formatter<Header::Name> {
   auto
   format(Header::Name &name, FormatContext &ctx) -> decltype(ctx.out())
   {
-    return format_to(ctx.out(), "{}", name.getSV());
+    return fmt::format_to(ctx.out(), "{}", name.getSV());
   }
 };
 

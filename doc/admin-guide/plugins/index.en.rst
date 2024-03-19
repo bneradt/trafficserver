@@ -157,11 +157,8 @@ Experimental plugins
 Plugins that are considered experimental are located in the
 `plugins/experimental <https://git-wip-us.apache.org/repos/asf?p=trafficserver.git;a=tree;f=plugins/experimental;hb=HEAD>`_
 directory of the |TS| source tree. Experimental plugins can be compiled by passing the
-`--enable-experimental-plugins` option to `configure`::
+``-DBUILD_EXPERIMENTAL_PLUGINS=ON``` variable to ``cmake`` command when building.
 
-    $ autoconf -i
-    $ ./configure --enable-experimental-plugins
-    $ make
 
 .. toctree::
    :hidden:
@@ -193,6 +190,7 @@ directory of the |TS| source tree. Experimental plugins can be compiled by passi
    System Statistics <system_stats.en>
    Wasm <wasm.en>
    Prefetch <prefetch.en>
+   Transaction Box(TxnBox) <txn_box/index.en>
 
 :doc:`Access Control <access_control.en>`
    Access control plugin that handles various access control use-cases.
@@ -280,3 +278,6 @@ directory of the |TS| source tree. Experimental plugins can be compiled by passi
 
 :doc:`Wasm <wasm.en>`
    Allows WebAssembly/Wasm (proxy-wasm) module to be used as ATS Plugin.
+
+:doc:`Transaction Box(TxnBox) <txn_box/index.en>`
+   Transaction Box, or TxnBox, is an Apache Traffic Server plugin to manipulate transactions.
