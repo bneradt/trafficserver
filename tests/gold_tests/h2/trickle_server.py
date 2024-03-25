@@ -91,6 +91,53 @@ class Http2ConnectionManager:
         # The last time in ms since epoch that a packet was received.
         self.last_packet_time: int = 0
 
+    def _send_responses(self, responses: Dict[int, ResponseInfo]) -> None:
+        """Send any responses that have been generated.
+
+        :param responses: A dictionary of responses we wish to send.
+        """
+        responded_streams = []
+        for stream_id, response in responses.items():
+            try:
+                self.listening_conn.send_headers(stream_id, response.headers)
+
+                send_window = self.listening_conn.local_flow_control_window(stream_id)
+                body_size = len(response.body_bytes)
+                bytes_to_send = min(send_window, body_size)
+                if bytes_to_send < body_size:
+                    raise ValueError(
+                        f'We do not have a big enough window: body size of {body_size} bytes vs {send_window} byte window')
+                # Send one byte at a time, every millisecond.
+                bytes_sent = 0
+                while bytes_to_send > 0:
+                    chunk_size = 1
+                    byte_to_send = response.body_bytes[bytes_sent:bytes_sent + chunk_size]
+                    logging.debug(f'Sending {byte_to_send}')
+                    self.listening_conn.send_data(stream_id, byte_to_send)
+                    self.sock.sendall(self.listening_conn.data_to_send())
+                    bytes_sent += chunk_size
+                    bytes_to_send -= chunk_size
+                    time.sleep(0.001)
+
+                self.listening_conn.send_data(stream_id, response.body_bytes, end_stream=False if response.trailers else True)
+                if response.trailers is not None:
+                    self.listening_conn.send_headers(stream_id, response.trailers, end_stream=True)
+                responded_streams.append(stream_id)
+
+            except StreamClosedError as e:
+                logging.debug(e)
+            except StreamIDTooLowError as e:
+                logging.debug(e)
+        try:
+            # Send the responses we added to the listening_conn.
+            self.sock.sendall(self.listening_conn.data_to_send())
+        except (SSLError, SSLSysCallError) as e:
+            logging.debug(f'Ignoring sock.sendall exception for now: {e}')
+
+        # Clean up any responses we sent.
+        for stream_id in responded_streams:
+            del responses[stream_id]
+
     def _receive_data(self, responses: Dict[int, ResponseInfo]) -> Optional[bytes]:
         """Receive data from the socket.
 
@@ -108,49 +155,7 @@ class Http2ConnectionManager:
                 return None
             except TimeoutError:
                 # Take time to send any responses we've generated.
-                data = None
-                responded_streams = []
-                for stream_id, response in responses.items():
-                    try:
-                        self.listening_conn.send_headers(stream_id, response.headers)
-
-                        send_window = self.listening_conn.local_flow_control_window(stream_id)
-                        body_size = len(response.body_bytes)
-                        bytes_to_send = min(send_window, body_size)
-                        if bytes_to_send < body_size:
-                            raise ValueError(
-                                f'We do not have a big enough window: body size of {body_size} bytes vs {send_window} byte window')
-                        # Send one byte at a time, every millisecond.
-                        bytes_sent = 0
-                        while bytes_to_send > 0:
-                            chunk_size = 1
-                            byte_to_send = response.body_bytes[bytes_sent:bytes_sent + chunk_size]
-                            logging.debug(f'Sending {byte_to_send}')
-                            self.listening_conn.send_data(stream_id, byte_to_send)
-                            self.sock.sendall(self.listening_conn.data_to_send())
-                            bytes_sent += chunk_size
-                            bytes_to_send -= chunk_size
-                            time.sleep(0.001)
-
-                        self.listening_conn.send_data(
-                            stream_id, response.body_bytes, end_stream=False if response.trailers else True)
-                        if response.trailers is not None:
-                            self.listening_conn.send_headers(stream_id, response.trailers, end_stream=True)
-                        responded_streams.append(stream_id)
-
-                    except StreamClosedError as e:
-                        logging.debug(e)
-                    except StreamIDTooLowError as e:
-                        logging.debug(e)
-                try:
-                    # Send the responses we added to the listening_conn.
-                    self.sock.sendall(self.listening_conn.data_to_send())
-                except (SSLError, SSLSysCallError) as e:
-                    logging.debug(f'Ignoring sock.sendall exception for now: {e}')
-
-                # Clean up any responses we sent.
-                for stream_id in responded_streams:
-                    del responses[stream_id]
+                self._send_responses(responses)
 
                 # Loop back around to receive more data.
                 logging.debug('Timeout, waiting again for more data.')
@@ -247,6 +252,7 @@ class Http2ConnectionManager:
             events = self.listening_conn.receive_data(data)
             self._process_events(events, responses)
             self._cleanup_closed_stream_ids()
+            self._send_responses(responses)
 
             logging.debug('Sending data on the socket')
             try:
