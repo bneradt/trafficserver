@@ -74,6 +74,7 @@ execute_process(
 
 # Options
 include(AutoOptionHelpers)
+find_package(PkgConfig)
 auto_option(HWLOC FEATURE_VAR TS_USE_HWLOC PACKAGE_DEPENDS hwloc)
 auto_option(
   JEMALLOC
@@ -112,6 +113,7 @@ auto_option(
   MagickWand
   MagickCore
 )
+
 auto_option(UNWIND FEATURE_VAR TS_USE_REMOTE_UNWINDING PACKAGE_DEPENDS unwind)
 
 # This creates the magic import target if necessary (older cmake)
@@ -316,7 +318,10 @@ endif()
 find_package(maxminddb) # Header_rewrite experimental/maxmind_acl
 
 if(ENABLE_ASAN)
-  add_compile_options(-fsanitize=address)
+  if(ENABLE_JEMALLOC OR ENABLE_MIMALLOC)
+    message(FATAL_ERROR "ENABLE_JEMALLOC and ENABLE_MIMALLOC are not compatible with asan builds")
+  endif()
+  add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
   add_link_options(-fsanitize=address)
 endif()
 
@@ -563,7 +568,7 @@ add_subdirectory(lib)
 # there are warnings, we can't do anything about it.
 # Note: -DCMAKE_COMPILE_WARNING_AS_ERROR=ON will turn warnings into errors.
 add_compile_options(-pipe -Wall -Wextra -Wno-unused-parameter)
-add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-Wno-noexcept-type;-Wsuggest-override>")
+add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-Wno-noexcept-type;-Wsuggest-override;-Wno-vla-extension>")
 add_compile_options("$<$<CXX_COMPILER_ID:GNU>:-Wno-format-truncation;-Wno-stringop-overflow>")
 
 if(NOT EXTERNAL_YAML_CPP)
