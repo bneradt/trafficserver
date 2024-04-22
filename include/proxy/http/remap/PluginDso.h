@@ -66,7 +66,7 @@ public:
   virtual ~PluginDso();
 
   /* DSO Load, unload, get symbols from DSO */
-  virtual bool load(std::string &error);
+  virtual bool load(std::string &error, const fs::path &compilerPath);
   virtual bool unload(std::string &error);
   bool isLoaded();
   bool getSymbol(const char *symbol, void *&address, std::string &error) const;
@@ -166,7 +166,8 @@ protected:
 
   void *_dlh = nullptr; /** @brief dlopen handler used internally in this class, used as flag for loaded vs unloaded (nullptr) */
 
-  static constexpr const char *const _tag = "plugin_dso";       /** @brief log tag used by this class */
+  static constexpr const char *const _tag = "plugin_dso"; /** @brief log tag used by this class */
+  static const DbgCtl &_dbg_ctl();
   swoc::file::file_time_type _mtime{fs::file_time_type::min()}; /* @brief modification time of the DSO's file, used for checking */
   bool _preventiveCleaning = true;
 
@@ -174,3 +175,11 @@ protected:
     _plugins; /** @brief a global list of plugins, usually maintained by a plugin factory or plugin instance itself */
   RefCountObj _instanceCount; /** @brief used for properly calling "done" and "indicate config reload" methods by the factory */
 };
+
+inline const DbgCtl &
+PluginDso::_dbg_ctl()
+{
+  static DbgCtl dc{_tag};
+
+  return dc;
+}

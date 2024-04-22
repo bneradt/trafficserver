@@ -70,7 +70,18 @@ auto_option(
   PACKAGE_DEPENDS
   opentelemetry
   Protobuf
-  curl
+  CURL
+  DEFAULT
+  ${_DEFAULT}
+)
+auto_option(
+  WASM
+  FEATURE_VAR
+  BUILD_WASM
+  WITH_SUBDIRECTORY
+  plugins/experimental/wasm
+  PACKAGE_DEPENDS
+  wamr
   DEFAULT
   ${_DEFAULT}
 )
