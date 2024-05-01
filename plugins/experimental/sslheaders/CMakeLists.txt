@@ -22,9 +22,10 @@ set_target_properties(sslhdr PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
 
 if(BUILD_TESTING)
   add_executable(test_sslhdr unit_tests/unit_test_main.cc unit_tests/test_sslheaders.cc)
-  target_link_libraries(test_sslhdr PRIVATE sslhdr catch2::catch2 OpenSSL::SSL ts::tsutil)
+  target_link_libraries(test_sslhdr PRIVATE sslhdr catch2::catch2 OpenSSL::SSL libswoc::libswoc)
 endif()
 
 add_atsplugin(sslheaders sslheaders.cc)
 target_link_libraries(sslheaders PRIVATE sslhdr OpenSSL::SSL)
 verify_global_plugin(sslheaders)
+verify_remap_plugin(sslheaders)
