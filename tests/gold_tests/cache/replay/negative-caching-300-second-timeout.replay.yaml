@@ -52,10 +52,11 @@ sessions:
       reason: "Not Found"
       headers:
         fields:
+        #- [ Transfer-Encoding, chunked ]
         - [ Transfer-Encoding, chunked ]
         - [ Cache-Control, max-age=300 ]
       content:
-        size: 32
+        size: 0
 
     proxy-response:
       status: 404
