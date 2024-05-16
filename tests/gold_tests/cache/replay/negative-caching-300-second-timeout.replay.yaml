@@ -48,18 +48,17 @@ sessions:
 
     # Populate the cache with a 404 response.
     server-response:
-      status: 404
-      reason: "Not Found"
+      status: 200
+      reason: OK
       headers:
         fields:
-        #- [ Transfer-Encoding, chunked ]
         - [ Transfer-Encoding, chunked ]
         - [ Cache-Control, max-age=300 ]
       content:
         size: 0
 
     proxy-response:
-      status: 404
+      status: 200
 
   - all: { headers: { fields: [[ uuid, 22 ]]}}
     <<: *request_404_item
@@ -68,12 +67,12 @@ sessions:
     # should not get to the server.  But if it does, return a 200 so the test
     # knows that something went wrong.
     server-response:
-      status: 200
-      reason: OK
+      status: 404
+      reason: "Not Found"
       headers:
         fields:
         - [ Content-Length, 0 ]
 
     # Expect the cached 404 response.
     proxy-response:
-      status: 404
+      status: 200
