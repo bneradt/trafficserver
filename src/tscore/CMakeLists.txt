@@ -18,6 +18,8 @@
 # This executable generates the parse rules that are included in ParseRules.cc
 # Add custom commands and dependencies to make sure this gets build and run before compiling libtscore
 add_executable(CompileParseRules CompileParseRules.cc)
+target_compile_options(CompileParseRules PRIVATE "-fno-sanitize=address")
+target_link_options(CompileParseRules PRIVATE "-fno-sanitize=address")
 
 add_custom_command(
   OUTPUT ParseRulesCType ParseRulesCTypeToUpper ParseRulesCTypeToLower
