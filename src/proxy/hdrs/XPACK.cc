@@ -29,10 +29,15 @@
 #include "tscore/Diags.h"
 #include "tscore/ink_memory.h"
 #include "tsutil/LocalBuffer.h"
+#include <cstdint>
 
-#define XPACKDebug(fmt, ...) Debug("xpack", fmt, ##__VA_ARGS__)
+namespace
+{
+DbgCtl dbg_ctl_xpack{"xpack"};
 
-static inline bool
+#define XPACKDbg(fmt, ...) Dbg(dbg_ctl_xpack, fmt, ##__VA_ARGS__)
+
+inline bool
 match(const char *s1, int s1_len, const char *s2, int s2_len)
 {
   if (s1_len != s2_len) {
@@ -49,6 +54,8 @@ match(const char *s1, int s1_len, const char *s2, int s2_len)
 
   return true;
 }
+
+} // end anonymous namespace
 
 //
 // [RFC 7541] 5.1. Integer representation
@@ -216,7 +223,7 @@ xpack_encode_string(uint8_t *buf_start, const uint8_t *buf_end, const char *valu
 //
 XpackDynamicTable::XpackDynamicTable(uint32_t size) : _maximum_size(size), _available(size), _max_entries(size), _storage(size)
 {
-  XPACKDebug("Dynamic table size: %u", size);
+  XPACKDbg("Dynamic table size: %u", size);
   this->_entries      = static_cast<struct XpackDynamicTableEntry *>(ats_malloc(sizeof(struct XpackDynamicTableEntry) * size));
   this->_entries_head = size - 1;
   this->_entries_tail = size - 1;
@@ -233,7 +240,7 @@ XpackDynamicTable::~XpackDynamicTable()
 const XpackLookupResult
 XpackDynamicTable::lookup(uint32_t index, const char **name, size_t *name_len, const char **value, size_t *value_len) const
 {
-  XPACKDebug("Lookup entry: abs_index=%u", index);
+  XPACKDbg("Lookup entry: abs_index=%u", index);
 
   if (this->is_empty()) {
     // There's no entry
@@ -263,7 +270,7 @@ XpackDynamicTable::lookup(uint32_t index, const char **name, size_t *name_len, c
 const XpackLookupResult
 XpackDynamicTable::lookup(const char *name, size_t name_len, const char *value, size_t value_len) const
 {
-  XPACKDebug("Lookup entry: name=%.*s, value=%.*s", static_cast<int>(name_len), name, static_cast<int>(value_len), value);
+  XPACKDbg("Lookup entry: name=%.*s, value=%.*s", static_cast<int>(name_len), name, static_cast<int>(value_len), value);
   XpackLookupResult::MatchType match_type      = XpackLookupResult::MatchType::NONE;
   uint32_t                     i               = this->_calc_index(this->_entries_tail, 1);
   uint32_t                     end             = this->_calc_index(this->_entries_head, 1);
@@ -293,7 +300,7 @@ XpackDynamicTable::lookup(const char *name, size_t name_len, const char *value, 
     }
   }
 
-  XPACKDebug("Lookup entry: candidate_index=%u, match_type=%u", candidate_index, match_type);
+  XPACKDbg("Lookup entry: candidate_index=%u, match_type=%u", candidate_index, match_type);
   return {candidate_index, match_type};
 }
 
@@ -307,7 +314,7 @@ const XpackLookupResult
 XpackDynamicTable::lookup_relative(uint32_t relative_index, const char **name, size_t *name_len, const char **value,
                                    size_t *value_len) const
 {
-  XPACKDebug("Lookup entry: rel_index=%u", relative_index);
+  XPACKDbg("Lookup entry: rel_index=%u", relative_index);
   return this->lookup(this->_entries[this->_entries_head].index - relative_index, name, name_len, value, value_len);
 }
 
@@ -355,8 +362,8 @@ XpackDynamicTable::insert_entry(const char *name, size_t name_len, const char *v
     wks};
   this->_available -= required_size;
 
-  XPACKDebug("Insert Entry: entry=%u, index=%u, size=%zu", this->_entries_head, this->_entries_inserted - 1, name_len + value_len);
-  XPACKDebug("Available size: %u", this->_available);
+  XPACKDbg("Insert Entry: entry=%u, index=%u, size=%zu", this->_entries_head, this->_entries_inserted - 1, name_len + value_len);
+  XPACKDbg("Available size: %u", this->_available);
   return {this->_entries_inserted, value_len ? XpackLookupResult::MatchType::EXACT : XpackLookupResult::MatchType::NAME};
 }
 
@@ -406,11 +413,15 @@ XpackDynamicTable::update_maximum_size(uint32_t new_max_size)
   if (used < new_max_size) {
     this->_maximum_size = new_max_size;
     this->_available    = new_max_size - used;
+    this->_expand_storage_size(new_max_size);
     return true;
   }
 
+  // used is larger than or equal to new_max_size. This means that _maximum_size
+  // is shrinking and we need to evict entries to get the used space below
+  // new_max_size.
   bool ret = this->_make_space(used - new_max_size);
-  // Size update must suceeds
+  // Size update must succeed.
   if (ret) {
     this->_available    = new_max_size - (this->_maximum_size - this->_available);
     this->_maximum_size = new_max_size;
@@ -470,6 +481,18 @@ XpackDynamicTable::count() const
   }
 }
 
+void
+XpackDynamicTable::_expand_storage_size(uint32_t new_storage_size)
+{
+  ExpandCapacityContext context{this->_storage, new_storage_size};
+  uint32_t              i   = this->_calc_index(this->_entries_tail, 1);
+  uint32_t              end = this->_calc_index(this->_entries_head, 1);
+  for (; i != end; i = this->_calc_index(i, 1)) {
+    auto &entry  = this->_entries[i];
+    entry.offset = context.copy_field(entry.offset, entry.name_len + entry.value_len);
+  }
+}
+
 bool
 XpackDynamicTable::_make_space(uint64_t required_size)
 {
@@ -493,11 +516,11 @@ XpackDynamicTable::_make_space(uint64_t required_size)
 
   // Evict
   if (freed > 0) {
-    XPACKDebug("Evict entries: from %u to %u", this->_entries[this->_calc_index(this->_entries_tail, 1)].index,
-               this->_entries[tail - 1].index);
+    XPACKDbg("Evict entries: from %u to %u", this->_entries[this->_calc_index(this->_entries_tail, 1)].index,
+             this->_entries[tail - 1].index);
     this->_available    += freed;
     this->_entries_tail  = tail - 1;
-    XPACKDebug("Available size: %u", this->_available);
+    XPACKDbg("Available size: %u", this->_available);
   }
 
   return required_size <= this->_available;
@@ -517,11 +540,10 @@ XpackDynamicTable::_calc_index(uint32_t base, int64_t offset) const
 // DynamicTableStorage
 //
 
-XpackDynamicTableStorage::XpackDynamicTableStorage(uint32_t size) : _head(size * 2 - 1), _tail(size * 2 - 1)
+XpackDynamicTableStorage::XpackDynamicTableStorage(uint32_t size)
+  : _overwrite_threshold(size), _capacity{size * 2}, _head{_capacity - 1}
 {
-  this->_data_size           = size * 2;
-  this->_data                = reinterpret_cast<uint8_t *>(ats_malloc(this->_data_size));
-  this->_overwrite_threshold = size;
+  this->_data = reinterpret_cast<uint8_t *>(ats_malloc(this->_capacity));
 }
 
 XpackDynamicTableStorage::~XpackDynamicTableStorage()
@@ -540,20 +562,63 @@ XpackDynamicTableStorage::read(uint32_t offset, const char **name, uint32_t name
 uint32_t
 XpackDynamicTableStorage::write(const char *name, uint32_t name_len, const char *value, uint32_t value_len)
 {
-  uint32_t offset = (this->_head + 1) % this->_data_size;
-  memcpy(this->_data + offset, name, name_len);
-  memcpy(this->_data + offset + name_len, value, value_len);
+  // insert_entry should guard against buffer overrun, but rather than overrun
+  // our buffer we assert here in case something horrible went wrong.
+  ink_release_assert(name_len + value_len <= this->_capacity);
+  ink_release_assert(this->_head == this->_capacity - 1 || this->_head + name_len + value_len <= this->_capacity);
 
-  this->_head = (this->_head + (name_len + value_len)) % this->_data_size;
+  uint32_t offset = (this->_head + 1) % this->_capacity;
+  if (name_len > 0) {
+    memcpy(this->_data + offset, name, name_len);
+  }
+  if (value_len > 0) {
+    memcpy(this->_data + offset + name_len, value, value_len);
+  }
+
+  this->_head = (this->_head + (name_len + value_len)) % this->_capacity;
   if (this->_head > this->_overwrite_threshold) {
-    this->_head = 0;
+    // This is how we wrap back around to the beginning of the buffer.
+    this->_head = this->_capacity - 1;
   }
 
   return offset;
 }
 
-void
-XpackDynamicTableStorage::erase(uint32_t name_len, uint32_t value_len)
+bool
+XpackDynamicTableStorage::_start_expanding_capacity(uint32_t new_maximum_size)
 {
-  this->_tail = (this->_tail + (name_len + value_len)) % this->_data_size;
+  if ((new_maximum_size * 2) <= this->_capacity) {
+    // We never shrink our memory for the data storage because we don't support
+    // arbitrary eviction from it via XpackDynamicTableStorage. The
+    // XpackDynamicTable class keeps track of field sizes and therefore can
+    // evict properly. Also, we don't want to invalidate XpackDynamicTable's
+    // offsets into the storage.
+    return false;
+  }
+  this->_capacity = new_maximum_size * 2;
+
+  this->_old_data = this->_data;
+  this->_data     = reinterpret_cast<uint8_t *>(ats_malloc(this->_capacity));
+  if (this->_data == nullptr) {
+    // Realloc failed. We're out of memory and ATS is in trouble.
+    return false;
+  }
+
+  this->_overwrite_threshold = new_maximum_size;
+  this->_head                = this->_capacity - 1;
+  return true;
+}
+
+void
+XpackDynamicTableStorage::_finish_expanding_capacity()
+{
+  ats_free(this->_old_data);
+  this->_old_data = nullptr;
+}
+
+uint32_t
+ExpandCapacityContext::copy_field(uint32_t offset, uint32_t len)
+{
+  char const *field = reinterpret_cast<char const *>(this->_storage._old_data + offset);
+  return this->_storage.write(field, len, nullptr, 0);
 }

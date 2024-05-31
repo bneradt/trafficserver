@@ -15,6 +15,10 @@
 #
 #######################
 
+# Adjust default RelWithDebInfo flags to be in line with "Release with Debug".
+# The default RelWithDebInfo uses -O2, but Release uses -O3. This difference can be astonishing to users
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g -DNDEBUG")
+
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
   message(FATAL_ERROR "In source builds are disabled.  Use a preset, -B or run from a different directory")
 endif()
@@ -141,6 +145,7 @@ option(ENABLE_BENCHMARKS "Build benchmarks (default OFF)")
 option(EXTERNAL_YAML_CPP "Use external yaml-cpp (default OFF)")
 option(EXTERNAL_LIBSWOC "Use external libswoc (default OFF)")
 option(LINK_PLUGINS "Link core libraries to plugins (default OFF)")
+option(ENABLE_PROBES "Enable ATS SystemTap probes (default OFF)")
 
 # Setup user
 # NOTE: this is the user trafficserver runs as
@@ -325,6 +330,10 @@ if(ENABLE_ASAN)
   add_link_options(-fsanitize=address)
 endif()
 
+if(ENABLE_PROBES)
+  add_compile_options("-DENABLE_SYSTEMTAP_PROBES")
+endif()
+
 set(TS_USE_MALLOC_ALLOCATOR ${ENABLE_MALLOC_ALLOCATOR})
 find_package(ZLIB REQUIRED)
 
@@ -401,6 +410,15 @@ if(TS_USE_HWLOC)
   )
 endif()
 
+check_symbol_exists(SO_TXTIME "sys/socket.h" SO_TXTIME_FOUND)
+set(CMAKE_EXTRA_INCLUDE_FILES "linux/net_tstamp.h")
+check_type_size("struct sock_txtime" STRUCT_SOCK_TXTIME_FOUND)
+unset(CMAKE_EXTRA_INCLUDE_FILES)
+
+if(SO_TXTIME_FOUND AND STRUCT_SOCK_TXTIME_FOUND)
+  set(HAVE_SO_TXTIME TRUE)
+endif()
+
 option(USE_IOURING "Use experimental io_uring (linux only)" 0)
 if(HAVE_IOURING AND USE_IOURING)
   message(STATUS "Using io_uring")
@@ -443,8 +461,10 @@ check_symbol_exists(DH_get_2048_256 "openssl/dh.h" TS_USE_GET_DH_2048_256)
 check_symbol_exists(OPENSSL_NO_TLS_3 "openssl/ssl.h" TS_NO_USE_TLS12)
 check_symbol_exists(SSL_CTX_set_client_hello_cb "openssl/ssl.h" TS_USE_HELLO_CB)
 check_symbol_exists(SSL_set1_verify_cert_store "openssl/ssl.h" TS_HAS_VERIFY_CERT_STORE)
-check_symbol_exists(SSL_read_early_data "openssl/ssl.h" TS_HAS_TLS_EARLY_DATA)
 check_symbol_exists(SSL_set_max_early_data "openssl/ssl.h" HAVE_SSL_SET_MAX_EARLY_DATA)
+check_symbol_exists(SSL_read_early_data "openssl/ssl.h" HAVE_SSL_READ_EARLY_DATA)
+check_symbol_exists(SSL_write_early_data "openssl/ssl.h" HAVE_SSL_WRITE_EARLY_DATA)
+check_symbol_exists(SSL_in_early_data "openssl/ssl.h" HAVE_SSL_IN_EARLY_DATA)
 check_symbol_exists(SSL_CTX_set_ciphersuites "openssl/ssl.h" TS_USE_TLS_SET_CIPHERSUITES)
 check_symbol_exists(SSL_CTX_set_keylog_callback "openssl/ssl.h" TS_HAS_TLS_KEYLOGGING)
 check_symbol_exists(SSL_CTX_set_tlsext_ticket_key_cb "openssl/ssl.h" HAVE_SSL_CTX_SET_TLSEXT_TICKET_KEY_CB)
@@ -461,7 +481,15 @@ endif()
 
 unset(CMAKE_REQUIRED_FLAGS)
 
-set(HAVE_SSL_READ_EARLY_DATA ${TS_HAS_TLS_EARLY_DATA})
+set(TS_HAS_TLS_EARLY_DATA
+    ${HAVE_SSL_SET_MAX_EARLY_DATA}
+    |
+    ${HAVE_SSL_READ_EARLY_DATA}
+    |
+    ${HAVE_SSL_WRITE_EARLY_DATA}
+    |
+    ${HAVE_SSL_IN_EARLY_DATA}
+)
 
 set(CMAKE_REQUIRED_INCLUDES netinet/in.h netinet/tcp.h)
 check_type_size("struct tcp_info" STRUCT_TCP_INFO)
@@ -571,7 +599,7 @@ add_compile_options(-pipe -Wall -Wextra -Wno-unused-parameter)
 add_compile_options(
   "$<$<COMPILE_LANGUAGE:CXX>:-Wno-noexcept-type;-Wsuggest-override;-Wno-vla-extension;-fno-strict-aliasing>"
 )
-add_compile_options("$<$<CXX_COMPILER_ID:GNU>:-Wno-format-truncation;-Wno-stringop-overflow>")
+add_compile_options("$<$<CXX_COMPILER_ID:GNU>:-Wno-format-truncation>")
 
 if(NOT EXTERNAL_YAML_CPP)
   include(subproject_version)

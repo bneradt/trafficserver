@@ -36,6 +36,7 @@
 #include "iocore/net/TLSSNISupport.h"
 
 #include "tscore/ink_assert.h"
+#include "tscore/ink_hrtime.h"
 #include "tscore/ink_memory.h"
 #include "tsutil/PostScript.h"
 #include "tsutil/LocalBuffer.h"
@@ -44,6 +45,11 @@
 #include <sstream>
 #include <numeric>
 
+namespace
+{
+DbgCtl dbg_ctl_http2_con{"http2_con"};
+DbgCtl dbg_ctl_http2_priority{"http2_priority"};
+
 #define REMEMBER(e, r)                                     \
   {                                                        \
     if (this->session) {                                   \
@@ -51,12 +57,12 @@
     }                                                      \
   }
 
-#define Http2ConDebug(session, fmt, ...) Debug("http2_con", "[%" PRId64 "] " fmt, session->get_connection_id(), ##__VA_ARGS__);
+#define Http2ConDebug(session, fmt, ...) Dbg(dbg_ctl_http2_con, "[%" PRId64 "] " fmt, session->get_connection_id(), ##__VA_ARGS__);
 
 #define Http2StreamDebug(session, stream_id, fmt, ...) \
-  Debug("http2_con", "[%" PRId64 "] [%u] " fmt, session->get_connection_id(), stream_id, ##__VA_ARGS__);
+  Dbg(dbg_ctl_http2_con, "[%" PRId64 "] [%u] " fmt, session->get_connection_id(), stream_id, ##__VA_ARGS__);
 
-static const int buffer_size_index[HTTP2_FRAME_TYPE_MAX] = {
+const int buffer_size_index[HTTP2_FRAME_TYPE_MAX] = {
   BUFFER_SIZE_INDEX_16K, // HTTP2_FRAME_TYPE_DATA
   BUFFER_SIZE_INDEX_16K, // HTTP2_FRAME_TYPE_HEADERS
   -1,                    // HTTP2_FRAME_TYPE_PRIORITY
@@ -69,7 +75,7 @@ static const int buffer_size_index[HTTP2_FRAME_TYPE_MAX] = {
   BUFFER_SIZE_INDEX_16K, // HTTP2_FRAME_TYPE_CONTINUATION
 };
 
-inline static unsigned
+inline unsigned
 read_rcv_buffer(char *buf, size_t bufsize, unsigned &nbytes, const Http2Frame &frame)
 {
   char *end;
@@ -83,6 +89,8 @@ read_rcv_buffer(char *buf, size_t bufsize, unsigned &nbytes, const Http2Frame &f
 
   return end - buf;
 }
+
+} // end anonymous namespace
 
 Http2Error
 Http2ConnectionState::rcv_data_frame(const Http2Frame &frame)
@@ -195,7 +203,7 @@ Http2ConnectionState::rcv_data_frame(const Http2Frame &frame)
   // Update stream window size
   stream->decrement_local_rwnd(payload_length);
 
-  if (is_debug_tag_set("http2_con")) {
+  if (dbg_ctl_http2_con.on()) {
     uint32_t const stream_window  = this->acknowledged_local_settings.get(HTTP2_SETTINGS_INITIAL_WINDOW_SIZE);
     uint32_t const session_window = this->_get_configured_receive_session_window_size();
     Http2StreamDebug(this->session, id,
@@ -486,6 +494,7 @@ Http2ConnectionState::rcv_headers_frame(const Http2Frame &frame)
     if (!stream->is_outbound_connection() && !stream->trailing_header_is_possible()) {
       SCOPED_MUTEX_LOCK(stream_lock, stream->mutex, this_ethread());
       stream->mark_milestone(Http2StreamMilestone::START_TXN);
+      stream->cancel_active_timeout();
       stream->new_transaction(frame.is_from_early_data());
       // Send request header to SM
       stream->send_headers(*this);
@@ -582,10 +591,10 @@ Http2ConnectionState::rcv_priority_frame(const Http2Frame &frame)
     // [RFC 7540] 5.3.3 Reprioritization
     Http2StreamDebug(this->session, stream_id, "Reprioritize");
     this->dependency_tree->reprioritize(node, priority.stream_dependency, priority.exclusive_flag);
-    if (is_debug_tag_set("http2_priority")) {
+    if (dbg_ctl_http2_priority.on()) {
       std::stringstream output;
       this->dependency_tree->dump_tree(output);
-      Debug("http2_priority", "[%" PRId64 "] reprioritize %s", this->session->get_connection_id(), output.str().c_str());
+      Dbg(dbg_ctl_http2_priority, "[%" PRId64 "] reprioritize %s", this->session->get_connection_id(), output.str().c_str());
     }
   } else {
     // PRIORITY frame is received before HEADERS frame.
@@ -1511,6 +1520,23 @@ Http2ConnectionState::main_event_handler(int event, void *edata)
     this->session->flush();
   } break;
 
+  case HTTP2_SESSION_EVENT_ERROR: {
+    REMEMBER(event, this->recursion);
+
+    Http2ErrorCode error_code = Http2ErrorCode::HTTP2_ERROR_INTERNAL_ERROR;
+    if (edata != nullptr) {
+      Http2Error *error = static_cast<Http2Error *>(edata);
+      error_code        = error->code;
+    }
+
+    SCOPED_MUTEX_LOCK(lock, this->mutex, this_ethread());
+    this->send_goaway_frame(this->latest_streamid_in, error_code);
+    this->session->set_half_close_local_flag(true);
+    if (fini_event == nullptr) {
+      this->fini_event = this_ethread()->schedule_imm_local(static_cast<Continuation *>(this), HTTP2_SESSION_EVENT_FINI);
+    }
+  } break;
+
   // Initiate a graceful shutdown
   case HTTP2_SESSION_EVENT_SHUTDOWN_INIT: {
     REMEMBER(event, this->recursion);
@@ -1813,6 +1839,11 @@ Http2ConnectionState::create_stream(Http2StreamId new_id, Http2Error &error)
   }
   increment_stream_requests();
 
+  // Set incomplete header timeout
+  //   Client should send END_HEADERS flag within the http2.incomplete_header_timeout_in.
+  //   The active timeout of this stream will be reset by HttpSM with http.transction_active_timeout_in when a HTTP TXN is started
+  new_stream->set_active_timeout(HRTIME_SECONDS(Http2::incomplete_header_timeout_in));
+
   // Clear the session timeout.  Let the transaction timeouts reign
   session->get_proxy_session()->cancel_inactivity_timeout();
   session->get_proxy_session()->set_session_active();
@@ -1966,10 +1997,10 @@ Http2ConnectionState::delete_stream(Http2Stream *stream)
       if (node->active) {
         dependency_tree->deactivate(node, 0);
       }
-      if (is_debug_tag_set("http2_priority")) {
+      if (dbg_ctl_http2_priority.on()) {
         std::stringstream output;
         dependency_tree->dump_tree(output);
-        Debug("http2_priority", "[%" PRId64 "] %s", session->get_connection_id(), output.str().c_str());
+        Dbg(dbg_ctl_http2_priority, "[%" PRId64 "] %s", session->get_connection_id(), output.str().c_str());
       }
       dependency_tree->remove(node);
       // ink_release_assert(dependency_tree->find(stream->get_id()) == nullptr);

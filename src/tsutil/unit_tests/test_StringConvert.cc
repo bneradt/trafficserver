@@ -1,6 +1,6 @@
 /** @file
 
-    A brief file description
+    Unit tests for StringConvert
 
     @section license License
 
@@ -19,22 +19,15 @@
     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
     See the License for the specific language governing permissions and
     limitations under the License.
-*/
+ */
 
-#pragma once
+#include <catch.hpp>
 
-#ifdef HAVE_SYSTEMTAP
+#include <tsutil/StringConvert.h>
 
-#include <sys/sdt.h>
-
-#define ATS_PROBE(probe)                  DTRACE_PROBE(trafficserver, probe)
-#define ATS_PROBE1(probe, param1)         DTRACE_PROBE1(trafficserver, probe, param1)
-#define ATS_PROBE2(probe, param1, param2) DTRACE_PROBE2(trafficserver, probe, param1, param2)
-
-#else
-
-#define ATS_PROBE(...)
-#define ATS_PROBE1(...)
-#define ATS_PROBE2(...)
-
-#endif
+TEST_CASE("StringConvert", "[STE]")
+{
+  REQUIRE(ts::hex("01") == "3031");
+  REQUIRE(ts::unhex("3031") == "01");
+  REQUIRE(ts::hex("5pn2QM") == "35706e32514d");
+}
