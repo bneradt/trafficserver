@@ -56,7 +56,7 @@
 #include "iocore/net/ProxyProtocol.h"
 
 #include "tscore/Layout.h"
-#include "ts/sdt.h"
+#include "ts/ats_probe.h"
 
 #include <openssl/ossl_typ.h>
 #include <openssl/ssl.h>
@@ -1088,6 +1088,7 @@ HttpSM::state_raw_http_server_open(int event, void *data)
     break;
   }
   case VC_EVENT_ERROR:
+  case VC_EVENT_EOS:
   case NET_EVENT_OPEN_FAILED:
     t_state.current.state = HttpTransact::OPEN_RAW_ERROR;
     // use this value just to get around other values
@@ -1224,6 +1225,7 @@ HttpSM::state_common_wait_for_transform_read(HttpTransformInfo *t_info, HttpSMHa
     }
   // FALLTHROUGH
   case VC_EVENT_ERROR:
+  case VC_EVENT_EOS:
   case VC_EVENT_INACTIVITY_TIMEOUT:
     // Transform VC sends NULL on error conditions
     if (!c) {
@@ -1800,6 +1802,7 @@ HttpSM::state_http_server_open(int event, void *data)
     t_state.set_connect_fail(ETIMEDOUT);
   /* fallthrough */
   case VC_EVENT_ERROR:
+  case VC_EVENT_EOS:
   case NET_EVENT_OPEN_FAILED: {
     t_state.current.state = HttpTransact::CONNECTION_ERROR;
     t_state.outbound_conn_track_state.clear();
@@ -4847,10 +4850,13 @@ HttpSM::do_range_setup_if_necessary()
         }
       } else {
         // if revalidating and cache is stale we want to transform
-        if (t_state.cache_info.action == HttpTransact::CACHE_DO_REPLACE &&
-            t_state.hdr_info.server_response.status_get() == HTTP_STATUS_OK) {
-          Dbg(dbg_ctl_http_range, "Serving transform after stale cache re-serve");
-          do_transform = true;
+        if (t_state.cache_info.action == HttpTransact::CACHE_DO_REPLACE) {
+          if (t_state.hdr_info.server_response.status_get() == HTTP_STATUS_OK) {
+            Dbg(dbg_ctl_http_range, "Serving transform after stale cache re-serve");
+            do_transform = true;
+          } else {
+            Dbg(dbg_ctl_http_range, "Not transforming after revalidate");
+          }
         } else if (cache_sm.cache_read_vc && cache_sm.cache_read_vc->is_pread_capable()) {
           // If only one range entry and pread is capable, no need transform range
           t_state.range_setup = HttpTransact::RANGE_NOT_TRANSFORM_REQUESTED;
