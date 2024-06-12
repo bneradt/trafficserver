@@ -27,10 +27,16 @@
   Commonality across all platforms -- move out as required.
 
 **************************************************************************/
-#include "tscore/ink_platform.h"
-#include "tscore/ink_defs.h"
 
 #include "P_Net.h"
+
+#include "tscore/ink_defs.h"
+#include "tscore/ink_platform.h"
+#include "tscore/ink_sock.h"
+
+#if TS_USE_HWLOC
+#include <hwloc.h>
+#endif
 
 #ifdef SO_ACCEPTFILTER
 #include <sys/param.h>
@@ -42,6 +48,16 @@
 // #define SEND_BUF_SIZE            (1024*64)
 #define FIRST_RANDOM_PORT 16000
 #define LAST_RANDOM_PORT  32000
+
+namespace
+{
+DbgCtl dbg_ctl_http_tproxy{"http_tproxy"};
+DbgCtl dbg_ctl_proxyprotocol{"proxyprotocol"};
+DbgCtl dbg_ctl_iocore_net_server{"iocore_net_server"};
+DbgCtl dbg_ctl_connection{"connection"};
+DbgCtl dbg_ctl_iocore_thread{"iocore_thread"};
+
+} // end anonymous namespace
 
 int
 get_listen_backlog()
@@ -82,10 +98,10 @@ Server::accept(Connection *c)
     return res;
   }
   c->fd = res;
-  if (is_debug_tag_set("iocore_net_server")) {
+  if (dbg_ctl_iocore_net_server.on()) {
     ip_port_text_buffer ipb1, ipb2;
-    Debug("iocore_net_server", "Connection accepted [Server]. %s -> %s", ats_ip_nptop(&c->addr, ipb2, sizeof(ipb2)),
-          ats_ip_nptop(&addr, ipb1, sizeof(ipb1)));
+    DbgPrint(dbg_ctl_iocore_net_server, "Connection accepted [Server]. %s -> %s", ats_ip_nptop(&c->addr, ipb2, sizeof(ipb2)),
+             ats_ip_nptop(&addr, ipb1, sizeof(ipb1)));
   }
 
 #ifdef SEND_BUF_SIZE
@@ -229,6 +245,23 @@ Server::setup_fd_for_listen(bool non_blocking, const NetProcessor::AcceptOptions
 #endif
   }
 
+#ifdef SO_INCOMING_CPU
+  if (opt.sockopt_flags & NetVCOptions::SOCK_OPT_INCOMING_CPU) {
+    int      cpu     = 0;
+    EThread *ethread = this_ethread();
+
+#if TS_USE_HWLOC
+    cpu = ethread->hwloc_obj->os_index;
+#else
+    cpu = ethread->id;
+#endif
+    if (safe_setsockopt(fd, SOL_SOCKET, SO_INCOMING_CPU, &cpu, sizeof(cpu)) < 0) {
+      goto Lerror;
+    }
+    Dbg(dbg_ctl_iocore_thread, "SO_INCOMING_CPU - fd=%d cpu=%d", fd, cpu);
+  }
+#endif
+
   if ((opt.sockopt_flags & NetVCOptions::SOCK_OPT_NO_DELAY) && setsockopt_on(fd, IPPROTO_TCP, TCP_NODELAY) < 0) {
     goto Lerror;
   }
@@ -250,7 +283,7 @@ Server::setup_fd_for_listen(bool non_blocking, const NetProcessor::AcceptOptions
 
   if (opt.f_inbound_transparent) {
 #if TS_USE_TPROXY
-    Debug("http_tproxy", "Listen port inbound transparency enabled.");
+    Dbg(dbg_ctl_http_tproxy, "Listen port inbound transparency enabled.");
     if (setsockopt_on(fd, SOL_IP, TS_IP_TRANSPARENT) < 0) {
       Fatal("[Server::listen] Unable to set transparent socket option [%d] %s\n", errno, strerror(errno));
     }
@@ -260,7 +293,7 @@ Server::setup_fd_for_listen(bool non_blocking, const NetProcessor::AcceptOptions
   }
 
   if (opt.f_proxy_protocol) {
-    Debug("proxyprotocol", "Proxy Protocol enabled.");
+    Dbg(dbg_ctl_proxyprotocol, "Proxy Protocol enabled.");
   }
 
 #if defined(TCP_MAXSEG)
@@ -347,7 +380,7 @@ Server::listen(bool non_blocking, const NetProcessor::AcceptOptions &opt)
   }
 
   if (opt.f_mptcp) {
-    Debug("connection", "Define socket with MPTCP");
+    Dbg(dbg_ctl_connection, "Define socket with MPTCP");
     prot = IPPROTO_MPTCP;
   }
 

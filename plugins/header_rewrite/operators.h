@@ -129,7 +129,10 @@ protected:
   void exec(const Resources &res) const override;
 
 private:
-  UrlQualifiers _url_qual = URL_QUAL_NONE;
+  UrlQualifiers                 _url_qual = URL_QUAL_NONE;
+  bool                          _keep     = false;
+  std::string                   _stop     = "";
+  std::vector<std::string_view> _stop_list;
 };
 
 class OperatorSetRedirect : public Operator
@@ -442,4 +445,36 @@ protected:
 private:
   bool           _flag = false;
   TSHttpCntlType _cntl_qual;
+};
+
+class RemapPluginInst; // Opaque to the HRW operator, but needed in the implementation.
+
+class OperatorRunPlugin : public Operator
+{
+public:
+  OperatorRunPlugin() { Dbg(dbg_ctl, "Calling CTOR for OperatorRunPlugin"); }
+
+  // This one is special, since we have to remove the old plugin from the factory.
+  ~OperatorRunPlugin() override
+  {
+    Dbg(dbg_ctl, "Calling DTOR for OperatorRunPlugin");
+
+    if (_plugin) {
+      _plugin->done();
+      _plugin = nullptr;
+    }
+  }
+
+  // noncopyable
+  OperatorRunPlugin(const OperatorRunPlugin &) = delete;
+  void operator=(const OperatorRunPlugin &)    = delete;
+
+  void initialize(Parser &p) override;
+
+protected:
+  void initialize_hooks() override;
+  void exec(const Resources &res) const override;
+
+private:
+  RemapPluginInst *_plugin = nullptr;
 };
