@@ -35,6 +35,7 @@ enum OperModifiers {
   OPER_LAST = 1,
   OPER_NEXT = 2,
   OPER_QSA  = 4,
+  OPER_INV  = 8,
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -44,6 +45,8 @@ class Operator : public Statement
 {
 public:
   Operator() { Dbg(dbg_ctl, "Calling CTOR for Operator"); }
+
+  virtual ~Operator() = default; // Very uncommon for an Operator to have a custom DTOR, but happens.
 
   // noncopyable
   Operator(const Operator &)       = delete;

@@ -22,8 +22,10 @@
 #include <arpa/inet.h>
 #include <cstring>
 #include <algorithm>
+#include <iomanip>
 
 #include "ts/ts.h"
+#include "swoc/swoc_file.h"
 
 #include "operators.h"
 #include "ts/apidefs.h"
@@ -171,17 +173,6 @@ OperatorSetDestination::initialize(Parser &p)
   require_resources(RSRC_SERVER_REQUEST_HEADERS);
 }
 
-// OperatorRMDestination
-void
-OperatorRMDestination::initialize(Parser &p)
-{
-  Operator::initialize(p);
-
-  _url_qual = parse_url_qualifier(p.get_arg());
-  require_resources(RSRC_CLIENT_REQUEST_HEADERS);
-  require_resources(RSRC_SERVER_REQUEST_HEADERS);
-}
-
 void
 OperatorSetDestination::exec(const Resources &res) const
 {
@@ -291,12 +282,45 @@ OperatorSetDestination::exec(const Resources &res) const
   }
 }
 
+#include <iostream>
+
+// OperatorRMDestination
+static std::vector<std::string_view>
+_tokenize(swoc::TextView text, char delimiter)
+{
+  std::vector<std::string_view> tokens;
+
+  while (text) {
+    tokens.push_back(text.take_prefix_at(delimiter));
+  }
+
+  return tokens;
+}
+
+void
+OperatorRMDestination::initialize(Parser &p)
+{
+  Operator::initialize(p);
+
+  _url_qual = parse_url_qualifier(p.get_arg());
+  _stop     = p.get_value();
+
+  if (!_stop.empty()) {
+    if (get_oper_modifiers() & OPER_INV) {
+      _keep = true;
+    }
+    _stop_list = _tokenize(_stop, ',');
+  }
+
+  require_resources(RSRC_CLIENT_REQUEST_HEADERS);
+  require_resources(RSRC_SERVER_REQUEST_HEADERS);
+}
+
 void
 OperatorRMDestination::exec(const Resources &res) const
 {
   if (res._rri || (res.bufp && res.hdr_loc)) {
-    // Default empty string to delete components
-    static std::string value = "";
+    std::string value = "";
 
     // Determine which TSMBuffer and TSMLoc to use
     TSMBuffer bufp;
@@ -320,9 +344,30 @@ OperatorRMDestination::exec(const Resources &res) const
       Dbg(pi_dbg_ctl, "OperatorRMDestination::exec() deleting PATH");
       break;
     case URL_QUAL_QUERY:
+      if (_stop_list.size() > 0) {
+        int         q_len = 0;
+        const char *query = TSUrlHttpQueryGet(bufp, url_m_loc, &q_len);
+
+        if (q_len > 0) {
+          for (auto &q : _tokenize({query, static_cast<size_t>(q_len)}, '&')) {
+            auto eq_pos = q.find('=');
+            auto it = std::find(_stop_list.begin(), _stop_list.end(), (eq_pos != std::string_view::npos) ? q.substr(0, eq_pos) : q);
+
+            if (_keep == (it != _stop_list.end())) {
+              if (!value.empty()) {
+                value.append("&").append(q);
+              } else {
+                value = q;
+              }
+            }
+          }
+        }
+        Dbg(pi_dbg_ctl, "OperatorRMDestination::exec() rewrote QUERY to \"%s\"", value.c_str());
+      } else {
+        Dbg(pi_dbg_ctl, "OperatorRMDestination::exec() deleting QUERY");
+      }
       const_cast<Resources &>(res).changed_url = true;
       TSUrlHttpQuerySet(bufp, url_m_loc, value.c_str(), value.size());
-      Dbg(pi_dbg_ctl, "OperatorRMDestination::exec() deleting QUERY");
       break;
     case URL_QUAL_PORT:
       const_cast<Resources &>(res).changed_url = true;
@@ -1092,6 +1137,7 @@ OperatorSetHttpCntl::initialize_hooks()
 static const char *const HttpCntls[] = {
   "LOGGING", "INTERCEPT_RETRY", "RESP_CACHEABLE", "REQ_CACHEABLE", "SERVER_NO_STORE", "TXN_DEBUG", "SKIP_REMAP",
 };
+
 void
 OperatorSetHttpCntl::exec(const Resources &res) const
 {
@@ -1101,5 +1147,75 @@ OperatorSetHttpCntl::exec(const Resources &res) const
   } else {
     TSHttpTxnCntlSet(res.txnp, _cntl_qual, false);
     Dbg(pi_dbg_ctl, "   Turning OFF %s for transaction", HttpCntls[static_cast<size_t>(_cntl_qual)]);
+  }
+}
+
+void
+OperatorRunPlugin::initialize(Parser &p)
+{
+  Operator::initialize(p);
+
+  auto plugin_name = p.get_arg();
+  auto plugin_args = p.get_value();
+
+  if (plugin_name.empty()) {
+    TSError("[%s] missing plugin name", PLUGIN_NAME);
+    return;
+  }
+
+  std::vector<std::string> tokens;
+  std::istringstream       iss(plugin_args);
+  std::string              token;
+
+  while (iss >> std::quoted(token)) {
+    tokens.push_back(token);
+  }
+
+  // Create argc and argv
+  int    argc = tokens.size() + 2;
+  char **argv = new char *[argc];
+
+  argv[0] = p.from_url();
+  argv[1] = p.to_url();
+
+  for (int i = 0; i < argc; ++i) {
+    argv[i + 2] = const_cast<char *>(tokens[i].c_str());
+  }
+
+  std::string error;
+
+  // We have to escalate access while loading these plugins, just as done when loading remap.config
+  {
+    uint32_t elevate_access = 0;
+
+    REC_ReadConfigInteger(elevate_access, "proxy.config.plugin.load_elevated");
+    ElevateAccess access(elevate_access ? ElevateAccess::FILE_PRIVILEGE : 0);
+
+    _plugin = plugin_factory.getRemapPlugin(swoc::file::path(plugin_name), argc, const_cast<char **>(argv), error,
+                                            isPluginDynamicReloadEnabled());
+  } // done elevating access
+
+  delete[] argv;
+
+  if (!_plugin) {
+    TSError("[%s] Unable to load plugin '%s': %s", PLUGIN_NAME, plugin_name.c_str(), error.c_str());
+  }
+}
+
+void
+OperatorRunPlugin::initialize_hooks()
+{
+  add_allowed_hook(TS_REMAP_PSEUDO_HOOK);
+
+  require_resources(RSRC_CLIENT_REQUEST_HEADERS); // Need this for the txnp
+}
+
+void
+OperatorRunPlugin::exec(const Resources &res) const
+{
+  TSReleaseAssert(_plugin != nullptr);
+
+  if (res._rri && res.txnp) {
+    _plugin->doRemap(res.txnp, res._rri);
   }
 }
