@@ -19,8 +19,10 @@
 
 #include <ctime>
 
-#include "ts/remap.h"
 #include "ts/ts.h"
+#include "ts/remap.h"
+
+#include "cripts/Lulu.hpp"
 
 // This is lame, but until C++20, we're missing important features from
 // std::chrono :-/ Todo: Rewrite this with std::chrono when it has things like
@@ -33,62 +35,62 @@ class BaseTime
   using self_type = detail::BaseTime;
 
 public:
-  BaseTime()                       = default;
-  BaseTime(const BaseTime &)       = delete;
-  void operator=(const BaseTime &) = delete;
+  BaseTime()                        = default;
+  BaseTime(const self_type &)       = delete;
+  void operator=(const self_type &) = delete;
 
-  operator integer() const { return epoch(); }
+  operator integer() const { return Epoch(); }
 
   [[nodiscard]] integer
-  epoch() const
+  Epoch() const
   {
     return static_cast<integer>(_now);
   }
 
   [[nodiscard]] integer
-  year() const
+  Year() const
   {
     return static_cast<integer>(_result.tm_year) + 1900;
   }
 
   [[nodiscard]] integer
-  month() const
+  Month() const
   {
     return static_cast<integer>(1 + _result.tm_mon);
   }
 
   [[nodiscard]] integer
-  day() const
+  Day() const
   {
     return static_cast<integer>(_result.tm_mday);
   }
 
   [[nodiscard]] integer
-  hour() const
+  Hour() const
   {
     return static_cast<integer>(_result.tm_hour);
   }
 
   [[nodiscard]] integer
-  minute() const
+  Minute() const
   {
     return static_cast<integer>(_result.tm_min);
   }
 
   [[nodiscard]] integer
-  second() const
+  Second() const
   {
     return static_cast<integer>(_result.tm_sec);
   }
 
   [[nodiscard]] integer
-  weekday() const
+  WeekDay() const
   {
     return static_cast<integer>(_result.tm_wday) + 1;
   }
 
   [[nodiscard]] integer
-  yearday() const
+  YearDay() const
   {
     return static_cast<integer>(_result.tm_yday) + 1;
   }
@@ -109,13 +111,14 @@ class Local : public detail::BaseTime
   using self_type  = Local;
 
 public:
+  Local(const self_type &)          = delete;
+  void operator=(const self_type &) = delete;
+
   Local() { localtime_r(&_now, static_cast<struct tm *>(&_result)); }
-  Local(const Local &)          = delete;
-  void operator=(const Local &) = delete;
 
   // Factory, for consistency with ::get()
   static Local
-  now()
+  Now()
   {
     return {};
   }
@@ -138,7 +141,7 @@ template <> struct formatter<Time::Local> {
   auto
   format(Time::Local &time, FormatContext &ctx) -> decltype(ctx.out())
   {
-    return fmt::format_to(ctx.out(), "{}", time.epoch());
+    return fmt::format_to(ctx.out(), "{}", time.Epoch());
   }
 };
 } // namespace fmt

@@ -1,6 +1,9 @@
-/** @ja3_fingerprint.cc
+/** @file ja3_fingerprint.cc
+ *
   Plugin JA3 Fingerprint calculates JA3 signatures for incoming SSL traffic.
+
   @section license License
+
   Licensed to the Apache Software Foundation (ASF) under one
   or more contributor license agreements.  See the NOTICE file
   distributed with this work for additional information
@@ -8,34 +11,26 @@
   to you under the Apache License, Version 2.0 (the
   "License"); you may not use this file except in compliance
   with the License.  You may obtain a copy of the License at
+
       http://www.apache.org/licenses/LICENSE-2.0
+
   Unless required by applicable law or agreed to in writing, software
   distributed under the License is distributed on an "AS IS" BASIS,
   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
   See the License for the specific language governing permissions and
   limitations under the License.
+
  */
 
-#include <cstdlib>
-#include <cstdio>
-#include <cstring>
-#include <cstdlib>
+#include "ja3_utils.h"
+
 #include <getopt.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#include <string>
-#include <unordered_set>
-#include <memory>
-#include <atomic>
-#include <mutex>
-#include <shared_mutex>
-
 #include "ts/apidefs.h"
 #include "ts/ts.h"
 #include "ts/remap.h"
-
-#include <tsutil/TsSharedMutex.h>
 
 #ifdef OPENSSL_NO_SSL_INTERN
 #undef OPENSSL_NO_SSL_INTERN
@@ -45,8 +40,22 @@
 #include <openssl/md5.h>
 #include <openssl/opensslv.h>
 
-// Get 16bit big endian order and update pointer
-#define n2s(c, s) ((s = (((unsigned int)(c[0])) << 8) | (((unsigned int)(c[1])))), c += 2)
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <utility>
+
+namespace
+{
+//
+constexpr int ja3_hash_included_byte_count{16};
+static_assert(ja3_hash_included_byte_count <= MD5_DIGEST_LENGTH);
+
+constexpr int ja3_hash_hex_string_with_null_terminator_length{2 * ja3_hash_included_byte_count + 1};
+
+} // end anonymous namespace
 
 const char            *PLUGIN_NAME = "ja3_fingerprint";
 static DbgCtl          dbg_ctl{PLUGIN_NAME};
@@ -56,120 +65,25 @@ static int             global_raw_enabled             = 0;
 static int             global_log_enabled             = 0;
 static int             global_modify_incoming_enabled = 0;
 
-// GREASE table as in ja3
-static const std::unordered_set<uint16_t> GREASE_table = {0x0a0a, 0x1a1a, 0x2a2a, 0x3a3a, 0x4a4a, 0x5a5a, 0x6a6a, 0x7a7a,
-                                                          0x8a8a, 0x9a9a, 0xaaaa, 0xbaba, 0xcaca, 0xdada, 0xeaea, 0xfafa};
-
-// Instances must be created with new operator.
-//
 struct ja3_data {
-  ja3_data() = default;
-
-  // No copying.
-  ja3_data(ja3_data const &)            = delete;
-  ja3_data &operator=(ja3_data const &) = delete;
-
-  class accessor
-  {
-    friend struct ja3_data;
-
-  private:
-    accessor() = default;
-    ja3_data *_inst{nullptr};
-
-  public:
-    ja3_data const *
-    get()
-    {
-      return _inst;
-    }
-    ~accessor();
-
-    accessor(accessor const &)            = delete;
-    accessor &operator=(accessor const &) = delete;
-
-    accessor(accessor &&lhs)
-    {
-      if (this != &lhs) {
-        this->_inst = lhs._inst;
-        lhs._inst   = nullptr;
-      }
-    }
-  };
-
-  // req_hdr_ja3_handler() must only access a ja3_data instance using an accessor returned by this function.
-  //
-  static accessor
-  access(TSVConn vconn)
-  {
-    accessor result;
-
-    if (vconn) {
-      std::shared_lock<ts::shared_mutex> sl{_vconn_arg_mtx};
-      void                              *p = TSUserArgGet(vconn, ja3_idx);
-      if (p) {
-        result._inst = static_cast<ja3_data *>(p);
-
-        // Hold on to the lock until the reference count is incremented, so that VCONN_CLOSE doesn't destroy
-        // the instance prematurely.
-        //
-        ++(result._inst->_reference_count);
-      }
-    }
-    return result;
-  }
-
-  // The VCONN close event must destroy this sa3_data instance by calling this function.
-  //
-  void
-  destroy(TSVConn vconn)
-  {
-    TSAssert(vconn != nullptr);
-
-    {
-      std::lock_guard<ts::shared_mutex> lg{_vconn_arg_mtx};
-
-      TSUserArgSet(vconn, ja3_idx, nullptr);
-    }
-
-    _dereference();
-  }
-
   std::string ja3_string;
-  char        md5_string[33];
+  char        md5_string[ja3_hash_hex_string_with_null_terminator_length];
   char        ip_addr[INET6_ADDRSTRLEN];
 
-private:
-  void
-  _dereference()
+  char const *
+  update_fingerprint()
   {
-    unsigned cnt = --_reference_count;
+    // Validate that the buffer is the same size as we will be writing into.
+    static_assert(ja3_hash_hex_string_with_null_terminator_length == sizeof(this->md5_string));
 
-    if (0 == cnt) {
-      delete this;
+    unsigned char digest[MD5_DIGEST_LENGTH];
+    MD5(reinterpret_cast<unsigned char const *>(this->ja3_string.c_str()), this->ja3_string.length(), digest);
+    for (int i{0}; i < ja3_hash_included_byte_count; ++i) {
+      std::snprintf(&(this->md5_string[i * 2]), sizeof(this->md5_string) - (i * 2), "%02x", static_cast<unsigned int>(digest[i]));
     }
+    return this->md5_string;
   }
-
-  // The reference count is the number of accessors of this instance created by transactions, plus 1 for the VCONN that
-  // created this intance exists, as long as it is open.
-  //
-  std::atomic<unsigned> _reference_count{1};
-
-  // Mutex for VCONN user arg that points to this instance.  (The mutual exclusion logic is needed because it seems to
-  // be possible for continuations on the VCONN_CLOSE hook to run overlapped with continuations on hooks for the
-  // transactions that run on the VCONN.)
-  //
-  static ts::shared_mutex _vconn_arg_mtx;
 };
-
-ts::shared_mutex ja3_data::_vconn_arg_mtx;
-
-ja3_data::accessor::~accessor()
-{
-  if (_inst) {
-    _inst->_dereference();
-  }
-}
 
 struct ja3_remap_info {
   int    raw_enabled = false;
@@ -184,31 +98,6 @@ struct ja3_remap_info {
     }
   }
 };
-
-static int
-custom_get_ja3_prefixed(int unit, const unsigned char *&data, int len, std::string &result)
-{
-  int  cnt, tmp;
-  bool first = true;
-  // Extract each entry and append to result string
-  for (cnt = 0; cnt < len; cnt += unit) {
-    if (unit == 1) {
-      tmp = *(data++);
-    } else {
-      n2s(data, tmp);
-    }
-
-    // Check for GREASE for 16-bit values, append only if non-GREASE
-    if (unit != 2 || GREASE_table.find(tmp) == GREASE_table.end()) {
-      if (!first) {
-        result += '-';
-      }
-      first   = false;
-      result += std::to_string(tmp);
-    }
-  }
-  return 0;
-}
 
 char *
 getIP(sockaddr const *s_sockaddr, char res[INET6_ADDRSTRLEN])
@@ -236,52 +125,43 @@ getIP(sockaddr const *s_sockaddr, char res[INET6_ADDRSTRLEN])
 }
 
 static std::string
-custom_get_ja3(SSL *s)
+custom_get_ja3(SSL *ssl)
 {
-  std::string          ja3;
-  size_t               len;
-  const unsigned char *p;
+  std::string          result;
+  std::size_t          len{};
+  const unsigned char *buf{};
 
   // Get version
-  unsigned int version  = SSL_client_hello_get0_legacy_version(s);
-  ja3                  += std::to_string(version) + ',';
+  unsigned int version = SSL_client_hello_get0_legacy_version(ssl);
+  result.append(std::to_string(version));
+  result.push_back(',');
 
   // Get cipher suites
-  len = SSL_client_hello_get0_ciphers(s, &p);
-  custom_get_ja3_prefixed(2, p, len, ja3);
-  ja3 += ',';
+  len = SSL_client_hello_get0_ciphers(ssl, &buf);
+  result.append(ja3::encode_word_buffer(buf, len));
+  result.push_back(',');
 
   // Get extensions
-  int        *o;
-  std::string eclist, ecpflist;
-  if (SSL_client_hello_get0_ext(s, 0x0a, &p, &len) == 1) {
+  int *extension_ids{};
+  if (SSL_client_hello_get1_extensions_present(ssl, &extension_ids, &len) == 1) {
+    result.append(ja3::encode_integer_buffer(extension_ids, len));
+    OPENSSL_free(extension_ids);
+  }
+  result.push_back(',');
+
+  // Get elliptic curves
+  if (SSL_client_hello_get0_ext(ssl, 0x0a, &buf, &len) == 1) {
     // Skip first 2 bytes since we already have length
-    p   += 2;
-    len -= 2;
-    custom_get_ja3_prefixed(2, p, len, eclist);
+    result.append(ja3::encode_word_buffer(buf + 2, len - 2));
   }
-  if (SSL_client_hello_get0_ext(s, 0x0b, &p, &len) == 1) {
+  result.push_back(',');
+
+  // Get elliptic curve point formats
+  if (SSL_client_hello_get0_ext(ssl, 0x0b, &buf, &len) == 1) {
     // Skip first byte since we already have length
-    ++p;
-    --len;
-    custom_get_ja3_prefixed(1, p, len, ecpflist);
+    result.append(ja3::encode_byte_buffer(buf + 1, len - 1));
   }
-  if (SSL_client_hello_get1_extensions_present(s, &o, &len) == 1) {
-    bool first = true;
-    for (size_t i = 0; i < len; i++) {
-      int type = o[i];
-      if (GREASE_table.find(type) == GREASE_table.end()) {
-        if (!first) {
-          ja3 += '-';
-        }
-        first  = false;
-        ja3   += std::to_string(type);
-      }
-    }
-    OPENSSL_free(o);
-  }
-  ja3 += "," + eclist + "," + ecpflist;
-  return ja3;
+  return result;
 }
 
 // This function will append value to the last occurrence of field. If none exists, it will
@@ -308,62 +188,84 @@ append_to_field(TSMBuffer bufp, TSMLoc hdr_loc, const char *field, int field_len
   TSHandleMLocRelease(bufp, hdr_loc, target);
 }
 
-static int
-client_hello_ja3_handler(TSCont contp, TSEvent event, void *edata)
+static ja3_data *
+create_ja3_data(TSVConn const ssl_vc)
 {
-  TSVConn ssl_vc = reinterpret_cast<TSVConn>(edata);
-  switch (event) {
-  case TS_EVENT_SSL_CLIENT_HELLO: {
-    TSSslConnection sslobj = TSVConnSslConnectionGet(ssl_vc);
+  ja3_data         *result = new ja3_data;
+  std::string const raw_ja3_string{custom_get_ja3(reinterpret_cast<SSL *>(TSVConnSslConnectionGet(ssl_vc)))};
+  result->ja3_string = std::move(raw_ja3_string);
+  getIP(TSNetVConnRemoteAddrGet(ssl_vc), result->ip_addr);
+  return result;
+}
 
-    // OpenSSL handle
-    SSL *ssl = reinterpret_cast<SSL *>(sslobj);
-
-    ja3_data *data = new ja3_data;
-    data->ja3_string.append(custom_get_ja3(ssl));
-    getIP(TSNetVConnRemoteAddrGet(ssl_vc), data->ip_addr);
-
-    Dbg(dbg_ctl, "client_hello_ja3_handler(): JA3: %s", data->ja3_string.c_str());
-
-    // MD5 hash
-    unsigned char digest[MD5_DIGEST_LENGTH];
-    MD5((unsigned char *)data->ja3_string.c_str(), data->ja3_string.length(), digest);
-
-    // Validate that the buffer is the same size as we will be writing into (compile time)
-    static_assert((16 * 2 + 1) == sizeof(data->md5_string));
-    for (int i = 0; i < 16; i++) {
-      snprintf(&(data->md5_string[i * 2]), sizeof(data->md5_string) - (i * 2), "%02x", static_cast<unsigned int>(digest[i]));
-    }
-    Dbg(dbg_ctl, "Fingerprint: %s", data->md5_string);
-
-    // Since transactions for the VCONN will access this arg, and they don't exist yet, there is no need to take
-    // the arg mutex at this point.
-    //
-    TSUserArgSet(ssl_vc, ja3_idx, static_cast<void *>(data));
-    break;
+static int
+tls_client_hello_handler(TSCont /* contp ATS_UNUSED */, TSEvent event, void *edata)
+{
+  if (TS_EVENT_SSL_CLIENT_HELLO != event) {
+    Dbg(dbg_ctl, "Unexpected event %d.", event);
+    // We ignore the event, but we don't want to reject the connection.
+    return TS_SUCCESS;
   }
-  case TS_EVENT_VCONN_CLOSE: {
-    // Clean up.  Since this hook is the only writer of the VCONN arg at this point, it doesn't have to read-lock
-    // the arg mutex.
-    //
-    ja3_data *data = static_cast<ja3_data *>(TSUserArgGet(ssl_vc, ja3_idx));
 
-    if (data == nullptr) {
-      Dbg(dbg_ctl, "client_hello_ja3_handler(): Failed to retrieve ja3 data at VCONN_CLOSE.");
-      return TS_ERROR;
-    }
-
-    data->destroy(ssl_vc);
-
-    break;
-  }
-  default: {
-    Dbg(dbg_ctl, "client_hello_ja3_handler(): Unexpected event.");
-    break;
-  }
-  }
+  TSVConn const ssl_vc{static_cast<TSVConn>(edata)};
+  ja3_data     *ja3_vconn_data{create_ja3_data(ssl_vc)};
+  TSUserArgSet(ssl_vc, ja3_idx, static_cast<void *>(ja3_vconn_data));
+  Dbg(dbg_ctl, "JA3 raw: %s", ja3_vconn_data->ja3_string.c_str());
+  char const *fingerprint{ja3_vconn_data->update_fingerprint()};
+  Dbg(dbg_ctl, "JA3 fingerprint: %s", fingerprint);
   TSVConnReenable(ssl_vc);
   return TS_SUCCESS;
+}
+
+static int
+vconn_close_handler(TSCont /* contp ATS_UNUSED */, TSEvent event, void *edata)
+{
+  if (TS_EVENT_VCONN_CLOSE != event) {
+    Dbg(dbg_ctl, "Unexpected event %d.", event);
+    // We ignore the event, but we don't want to reject the connection.
+    return TS_SUCCESS;
+  }
+
+  TSVConn const ssl_vc{static_cast<TSVConn>(edata)};
+  delete static_cast<ja3_data *>(TSUserArgGet(ssl_vc, ja3_idx));
+  TSUserArgSet(ssl_vc, ja3_idx, nullptr);
+  TSVConnReenable(ssl_vc);
+  return TS_SUCCESS;
+}
+
+static void
+modify_ja3_headers(TSCont contp, TSHttpTxn txnp, ja3_data const *ja3_vconn_data)
+{
+  // Decide global or remap
+  ja3_remap_info *remap_info = static_cast<ja3_remap_info *>(TSContDataGet(contp));
+  bool            raw_flag   = remap_info ? remap_info->raw_enabled : global_raw_enabled;
+  bool            log_flag   = remap_info ? remap_info->log_enabled : global_log_enabled;
+  Dbg(dbg_ctl, "Found ja3 string.");
+
+  // Get handle to headers
+  TSMBuffer bufp;
+  TSMLoc    hdr_loc;
+  if (global_modify_incoming_enabled) {
+    TSAssert(TS_SUCCESS == TSHttpTxnClientReqGet(txnp, &bufp, &hdr_loc));
+  } else {
+    TSAssert(TS_SUCCESS == TSHttpTxnServerReqGet(txnp, &bufp, &hdr_loc));
+  }
+
+  // Add JA3 md5 fingerprints
+  append_to_field(bufp, hdr_loc, "X-JA3-Sig", 9, ja3_vconn_data->md5_string, 32);
+
+  // If raw string is configured, added JA3 raw string to header as well
+  if (raw_flag) {
+    append_to_field(bufp, hdr_loc, "x-JA3-RAW", 9, ja3_vconn_data->ja3_string.data(), ja3_vconn_data->ja3_string.size());
+  }
+  TSHandleMLocRelease(bufp, TS_NULL_MLOC, hdr_loc);
+
+  // Write to logfile
+  if (log_flag) {
+    TSTextLogObjectWrite(pluginlog, "Client IP: %s\tJA3: %.*s\tMD5: %.*s", ja3_vconn_data->ip_addr,
+                         static_cast<int>(ja3_vconn_data->ja3_string.size()), ja3_vconn_data->ja3_string.data(), 32,
+                         ja3_vconn_data->md5_string);
+  }
 }
 
 static int
@@ -371,57 +273,27 @@ req_hdr_ja3_handler(TSCont contp, TSEvent event, void *edata)
 {
   TSEvent expected_event = global_modify_incoming_enabled ? TS_EVENT_HTTP_READ_REQUEST_HDR : TS_EVENT_HTTP_SEND_REQUEST_HDR;
   if (event != expected_event) {
-    TSError("[%s] req_hdr_ja3_handler(): Unexpected event, got %d, expected %d", PLUGIN_NAME, event, expected_event);
+    TSError("[%s] Unexpected event, got %d, expected %d", PLUGIN_NAME, event, expected_event);
     TSAssert(event == expected_event);
   }
 
-  TSHttpTxn txnp  = nullptr;
-  TSHttpSsn ssnp  = nullptr;
-  TSVConn   vconn = nullptr;
+  TSHttpTxn txnp{};
+  TSHttpSsn ssnp{};
+  TSVConn   vconn{};
   if ((txnp = static_cast<TSHttpTxn>(edata)) == nullptr || (ssnp = TSHttpTxnSsnGet(txnp)) == nullptr ||
       (vconn = TSHttpSsnClientVConnGet(ssnp)) == nullptr) {
-    Dbg(dbg_ctl, "req_hdr_ja3_handler(): Failure to retrieve txn/ssn/vconn object.");
+    Dbg(dbg_ctl, "Failure to retrieve txn/ssn/vconn object.");
     TSHttpTxnReenable(txnp, TS_EVENT_HTTP_CONTINUE);
     return TS_SUCCESS;
   }
-  {
-    // Retrieve ja3_data from vconn args
-    auto a = ja3_data::access(vconn);
-    if (a.get()) {
-      // Decide global or remap
-      ja3_remap_info *remap_info = static_cast<ja3_remap_info *>(TSContDataGet(contp));
-      bool            raw_flag   = remap_info ? remap_info->raw_enabled : global_raw_enabled;
-      bool            log_flag   = remap_info ? remap_info->log_enabled : global_log_enabled;
-      Dbg(dbg_ctl, "req_hdr_ja3_handler(): Found ja3 string.");
 
-      // Get handle to headers
-      TSMBuffer bufp;
-      TSMLoc    hdr_loc;
-      if (global_modify_incoming_enabled) {
-        TSAssert(TS_SUCCESS == TSHttpTxnClientReqGet(txnp, &bufp, &hdr_loc));
-      } else {
-        TSAssert(TS_SUCCESS == TSHttpTxnServerReqGet(txnp, &bufp, &hdr_loc));
-      }
-
-      // Add JA3 md5 fingerprints
-      append_to_field(bufp, hdr_loc, "X-JA3-Sig", 9, a.get()->md5_string, 32);
-
-      // If raw string is configured, added JA3 raw string to header as well
-      if (raw_flag) {
-        append_to_field(bufp, hdr_loc, "x-JA3-RAW", 9, a.get()->ja3_string.data(), a.get()->ja3_string.size());
-      }
-      TSHandleMLocRelease(bufp, TS_NULL_MLOC, hdr_loc);
-
-      // Write to logfile
-      if (log_flag) {
-        TSTextLogObjectWrite(pluginlog, "Client IP: %s\tJA3: %.*s\tMD5: %.*s", a.get()->ip_addr,
-                             static_cast<int>(a.get()->ja3_string.size()), a.get()->ja3_string.data(), 32, a.get()->md5_string);
-      }
-    } else {
-      Dbg(dbg_ctl, "req_hdr_ja3_handler(): ja3 data not set. Not SSL vconn. Abort.");
-    }
-  } // This block is needed to make sure 'a' is destroyed before reeenable is called.
-
+  // Retrieve ja3_data from vconn args
+  ja3_data const *ja3_vconn_data = static_cast<ja3_data *>(TSUserArgGet(vconn, ja3_idx));
+  if (ja3_vconn_data) {
+    modify_ja3_headers(contp, txnp, ja3_vconn_data);
+  } else {
+    Dbg(dbg_ctl, "ja3 data not set. Not SSL vconn. Abort.");
+  }
   TSHttpTxnReenable(txnp, TS_EVENT_HTTP_CONTINUE);
   return TS_SUCCESS;
 }
@@ -440,19 +312,19 @@ read_config_option(int argc, const char *argv[], int &raw, int &log, int &modify
   while ((opt = getopt_long(argc, const_cast<char *const *>(argv), "", longopts, nullptr)) >= 0) {
     switch (opt) {
     case '?':
-      Dbg(dbg_ctl, "read_config_option(): Unrecognized command arguments.");
+      Dbg(dbg_ctl, "Unrecognized command arguments.");
     case 0:
     case -1:
       break;
     default:
-      Dbg(dbg_ctl, "read_config_option(): Unexpected options error.");
+      Dbg(dbg_ctl, "Unexpected options error.");
       return false;
     }
   }
 
-  Dbg(dbg_ctl, "read_config_option(): ja3 raw is %s", (raw == 1) ? "enabled" : "disabled");
-  Dbg(dbg_ctl, "read_config_option(): ja3 logging is %s", (log == 1) ? "enabled" : "disabled");
-  Dbg(dbg_ctl, "read_config_option(): ja3 modify-incoming is %s", (modify_incoming == 1) ? "enabled" : "disabled");
+  Dbg(dbg_ctl, "ja3 raw is %s", (raw == 1) ? "enabled" : "disabled");
+  Dbg(dbg_ctl, "ja3 logging is %s", (log == 1) ? "enabled" : "disabled");
+  Dbg(dbg_ctl, "ja3 modify-incoming is %s", (modify_incoming == 1) ? "enabled" : "disabled");
   return true;
 }
 
@@ -464,8 +336,8 @@ TSPluginInit(int argc, const char *argv[])
   TSPluginRegistrationInfo info;
 
   info.plugin_name   = PLUGIN_NAME;
-  info.vendor_name   = "Oath";
-  info.support_email = "zeyuany@oath.com";
+  info.vendor_name   = "Apache Software Foundation";
+  info.support_email = "dev@trafficserver.apache.org";
 
   // Options
   if (!read_config_option(argc, argv, global_raw_enabled, global_log_enabled, global_modify_incoming_enabled)) {
@@ -480,10 +352,9 @@ TSPluginInit(int argc, const char *argv[])
       Dbg(dbg_ctl, "log object created successfully");
     }
     // SNI handler
-    TSCont ja3_cont = TSContCreate(client_hello_ja3_handler, nullptr);
     TSUserArgIndexReserve(TS_USER_ARGS_VCONN, PLUGIN_NAME, "used to pass ja3", &ja3_idx);
-    TSHttpHookAdd(TS_SSL_CLIENT_HELLO_HOOK, ja3_cont);
-    TSHttpHookAdd(TS_VCONN_CLOSE_HOOK, ja3_cont);
+    TSHttpHookAdd(TS_SSL_CLIENT_HELLO_HOOK, TSContCreate(tls_client_hello_handler, nullptr));
+    TSHttpHookAdd(TS_VCONN_CLOSE_HOOK, TSContCreate(vconn_close_handler, nullptr));
 
     TSHttpHookID const hook = global_modify_incoming_enabled ? TS_HTTP_READ_REQUEST_HDR_HOOK : TS_HTTP_SEND_REQUEST_HDR_HOOK;
     TSHttpHookAdd(hook, TSContCreate(req_hdr_ja3_handler, nullptr));
@@ -494,21 +365,20 @@ TSPluginInit(int argc, const char *argv[])
 
 // Remap Part
 TSReturnCode
-TSRemapInit(TSRemapInterface *api_info, char *errbuf, int errbuf_size)
+TSRemapInit(TSRemapInterface * /* api_info ATS_UNUSED */, char * /* errbuf ATS_UNUSED */, int /* errbuf_size ATS_UNUSED */)
 {
   Dbg(dbg_ctl, "JA3 Remap Plugin initializing..");
 
   // Check if there is config conflict as both global and remap plugin
   if (ja3_idx >= 0) {
-    TSError(PLUGIN_NAME, "TSRemapInit(): JA3 configured as both global and remap. Check plugin.config.");
+    TSError("[%s] JA3 configured as both global and remap. Check plugin.config.", PLUGIN_NAME);
     return TS_ERROR;
   }
 
   // Set up SNI handler for all TLS connections
-  TSCont ja3_cont = TSContCreate(client_hello_ja3_handler, nullptr);
   TSUserArgIndexReserve(TS_USER_ARGS_VCONN, PLUGIN_NAME, "Used to pass ja3", &ja3_idx);
-  TSHttpHookAdd(TS_SSL_CLIENT_HELLO_HOOK, ja3_cont);
-  TSHttpHookAdd(TS_VCONN_CLOSE_HOOK, ja3_cont);
+  TSHttpHookAdd(TS_SSL_CLIENT_HELLO_HOOK, TSContCreate(tls_client_hello_handler, nullptr));
+  TSHttpHookAdd(TS_VCONN_CLOSE_HOOK, TSContCreate(vconn_close_handler, nullptr));
 
   return TS_SUCCESS;
 }
@@ -523,7 +393,7 @@ TSRemapNewInstance(int argc, char *argv[], void **ih, char * /* errbuf ATS_UNUSE
   int discard_modify_incoming = -1; // Not used for remap.
   if (!read_config_option(argc - 1, const_cast<const char **>(argv + 1), remap_info->raw_enabled, remap_info->log_enabled,
                           discard_modify_incoming)) {
-    Dbg(dbg_ctl, "TSRemapNewInstance(): Bad arguments");
+    Dbg(dbg_ctl, "Bad arguments");
     return TS_ERROR;
   }
 
@@ -548,7 +418,7 @@ TSRemapDoRemap(void *ih, TSHttpTxn rh, TSRemapRequestInfo *rri)
 
   // On remap, set up handler at send req hook to send JA3 data as header
   if (!remap_info || !rri || !(remap_info->handler)) {
-    TSError("[%s] TSRemapDoRemap(): Invalid private data or RRI or handler.", PLUGIN_NAME);
+    TSError("[%s] Invalid private data or RRI or handler.", PLUGIN_NAME);
   } else {
     TSHttpTxnHookAdd(rh, TS_HTTP_SEND_REQUEST_HDR_HOOK, remap_info->handler);
   }

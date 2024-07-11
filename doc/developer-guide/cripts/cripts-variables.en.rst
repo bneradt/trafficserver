@@ -59,7 +59,7 @@ get the length of a string, you can use the ``size()`` method:
 
 .. code-block:: cpp
 
-     borrow req  = Client::Request::get();
+     borrow req  = Client::Request::Get();
 
      if (req["Host"].size() > 3) {
          // Do something
@@ -75,9 +75,9 @@ Method                Description
 ``size()``            Return the length of the string. Also available as ``length()``.
 ``starts_with()``     Check if the string starts with a given string.
 ``ends_with()``       Check if the string ends with a given string.
-``find()``            Find a string within the string. **TBD**
-``rfind()``           Find a string within the string, starting from the end. **TBD**
-``contains()``        Check if the string contains a given string. **TBD**
+``find()``            Find a string within the string.
+``rfind()``           Find a string within the string, starting from the end.
+``contains()``        Check if the string contains a given string.
 ``substr()``          Get a substring of the string, arguments are ``start`` and ``end`` position.
 ``split()``           Split the string into a list of strings, using a delimiter. Returns a list.
 ``trim()``            Trim whitespace from the string.
@@ -96,9 +96,8 @@ with strings. These are covered in more detail in the :ref:`cripts-matchers` sec
 regular comparisons such as ``==`` and ``!=`` are also available.
 
 .. note::
-
-   We'll continue to update features of Cripts as we start using it more in production. If you
-   have any suggestions or requests for strings (or any other data type), please let us know!
+   The ``find()`` and ``rfind()`` methods return the position of the string within the string, or
+   ``Cript::string_view::npos`` if the string is not found.
 
 .. _cripts-variables-configuration:
 
@@ -114,14 +113,27 @@ Best way to understand this is to look at an example:
 
 .. code-block:: cpp
 
-   auto cache_on = proxy.config.http.cache.http.get();
+   auto cache_on = proxy.config.http.cache.http.Get();
 
    if (cache_on > 0) {
-     proxy.config.http.ignore_server_no_cache.set(1);
+     proxy.config.http.ignore_server_no_cache.Set(1);
    }
 
 This is a pretty artificial example, but shows the name space of these configurations, and how they
 match the documented ATS configuration names.
+
+The configurations can also be access via a more advanced API, typically used for embedding existing
+control planes with Cripts. This is done using the ``Records`` object, for example:
+
+.. code-block:: cpp
+
+   do_remap() {
+     auto http_cache = Cript::Records("proxy.config.http.cache.http");
+
+     if (AsInteger(http_cache.Get()) > 0) {
+       CDebug("HTTP Cache is on");
+     }
+   }
 
 .. _cripts-variables-control:
 
@@ -145,14 +157,14 @@ Variable                       Description
 ============================   ====================================================================
 
 All of these are controlled via a boolean value, and can be set to either ``true`` or ``false``,
-using the same ``.get()`` and ``.set()`` as for configuration variables. As an example, lets randomly
+using the same ``Get()`` and ``Set()`` as for configuration variables. As an example, lets randomly
 turn off logging for some percentage of requests:
 
 .. code-block:: cpp
 
    do_remap() {
      if (Cript::random(1000) > 99) {
-       control.logging.set(false); // 10% log sampling
+       control.logging.Set(false); // 10% log sampling
      }
    }
 

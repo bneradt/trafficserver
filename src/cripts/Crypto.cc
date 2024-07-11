@@ -20,14 +20,13 @@
 
 #include "cripts/Lulu.hpp"
 #include "cripts/Preamble.hpp"
-#include "tsutil/StringConvert.h"
 
 // From ATS, seems high ...
 #define ENCODED_LEN(len) (((int)ceil(1.34 * (len) + 5)) + 1)
 #define DECODED_LEN(len) (((int)ceil((len) / 1.33 + 5)) + 1)
 
 Cript::string
-Crypto::Base64::encode(Cript::string_view str)
+Crypto::Base64::Encode(Cript::string_view str)
 {
   Cript::string ret;
   size_t        encoded_len = 0;
@@ -43,7 +42,7 @@ Crypto::Base64::encode(Cript::string_view str)
 }
 
 Cript::string
-Crypto::Base64::decode(Cript::string_view str)
+Crypto::Base64::Decode(Cript::string_view str)
 {
   Cript::string ret;
   size_t        decoded_len = 0;
@@ -60,7 +59,7 @@ Crypto::Base64::decode(Cript::string_view str)
 }
 
 Cript::string
-Crypto::Escape::encode(Cript::string_view str)
+Crypto::Escape::Encode(Cript::string_view str)
 {
   static const unsigned char map[32] = {
     0xFF, 0xFF, 0xFF,
@@ -95,7 +94,7 @@ Crypto::Escape::encode(Cript::string_view str)
 }
 
 Cript::string
-Crypto::Escape::decode(Cript::string_view str)
+Crypto::Escape::Decode(Cript::string_view str)
 {
   Cript::string ret;
   size_t        decoded_len = 0;
@@ -107,21 +106,8 @@ Crypto::Escape::decode(Cript::string_view str)
   return ret; // RVO
 }
 
-// These may be small, but pulls in a fair amount of Boost code, so better keep them in the .cc
-Cript::string
-Crypto::detail::Digest::hex() const
-{
-  return ts::hex({reinterpret_cast<const char *>(_hash), _length});
-}
-
-Cript::string
-Crypto::detail::Cipher::hex() const
-{
-  return ts::hex(_message);
-}
-
 Crypto::SHA256
-Crypto::SHA256::encode(Cript::string_view str)
+Crypto::SHA256::Encode(Cript::string_view str)
 {
   SHA256_CTX     ctx;
   Crypto::SHA256 digest;
@@ -134,7 +120,7 @@ Crypto::SHA256::encode(Cript::string_view str)
 }
 
 Crypto::SHA512
-Crypto::SHA512::encode(Cript::string_view str)
+Crypto::SHA512::Encode(Cript::string_view str)
 {
   SHA512_CTX     ctx;
   Crypto::SHA512 digest;
@@ -147,7 +133,7 @@ Crypto::SHA512::encode(Cript::string_view str)
 }
 
 Crypto::MD5
-Crypto::MD5::encode(Cript::string_view str)
+Crypto::MD5::Encode(Cript::string_view str)
 {
   MD5_CTX     ctx;
   Crypto::MD5 digest;
@@ -166,8 +152,8 @@ Crypto::detail::Cipher::_initialize()
   unsigned char iv[EVP_MAX_IV_LENGTH];
 
   TSAssert(_ctx == nullptr);
-  TSReleaseAssert(_cipher != nullptr);
-  TSReleaseAssert(_key_len == static_cast<int>(EVP_CIPHER_key_length(_cipher))); // Make sure the crypto key was correct size
+  CAssert(_cipher != nullptr);
+  CAssert(_key_len == static_cast<int>(EVP_CIPHER_key_length(_cipher))); // Make sure the crypto key was correct size
 
   memset(iv, 0, sizeof(iv)); // The IV is always '0x0'
   _ctx = EVP_CIPHER_CTX_new();
@@ -175,7 +161,7 @@ Crypto::detail::Cipher::_initialize()
 }
 
 void
-Crypto::detail::Cipher::encrypt(Cript::string_view str)
+Crypto::detail::Cipher::Encrypt(Cript::string_view str)
 {
   int len = 0;
 
@@ -190,7 +176,7 @@ Crypto::detail::Cipher::encrypt(Cript::string_view str)
 }
 
 Cript::string_view
-Crypto::detail::Cipher::finalize()
+Crypto::detail::Cipher::Finalize()
 {
   int len = 0;
 
@@ -206,18 +192,18 @@ Crypto::detail::Cipher::finalize()
 }
 
 Crypto::AES256
-Crypto::AES256::encrypt(Cript::string_view str, const unsigned char *key)
+Crypto::AES256::Encrypt(Cript::string_view str, const unsigned char *key)
 {
   Crypto::AES256 crypt(key);
 
-  crypt.encrypt(str);
-  crypt.finalize();
+  crypt.Encrypt(str);
+  crypt.Finalize();
 
   return crypt;
 }
 
 Crypto::HMAC::SHA256
-Crypto::HMAC::SHA256::encrypt(Cript::string_view str, const Cript::string &key)
+Crypto::HMAC::SHA256::Encrypt(Cript::string_view str, const Cript::string &key)
 {
   Crypto::HMAC::SHA256 retval;
 

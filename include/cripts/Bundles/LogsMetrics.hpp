@@ -15,15 +15,15 @@
   See the License for the specific language governing permissions and
   limitations under the License.
 */
+#pragma once
 
 // This is a bundle for some per-remap metrics and logging.
-//
 //  Bundle::LogsMetrics::activate().propstats("property-name")
 //                                 .logsample(2000)
 //                                 .tcpinfo();
-//
-#pragma once
 
+#include "cripts/Lulu.hpp"
+#include "cripts/Instance.hpp"
 #include "cripts/Bundle.hpp"
 
 namespace Bundle
@@ -41,13 +41,13 @@ public:
   {
     auto *entry = new self_type(&inst);
 
-    inst.addBundle(entry);
+    inst.AddBundle(entry);
 
     return *entry;
   }
 
-  const Cript::string &
-  name() const override
+  [[nodiscard]] const Cript::string &
+  Name() const override
   {
     return _name;
   }
@@ -57,7 +57,7 @@ public:
   self_type &
   logsample(int val)
   {
-    needCallback(Cript::Callbacks::DO_REMAP);
+    NeedCallback(Cript::Callbacks::DO_REMAP);
     _log_sample = val;
 
     return *this;
@@ -67,7 +67,7 @@ public:
   tcpinfo(bool enable = true)
   {
     if (enable) {
-      needCallback({Cript::Callbacks::DO_REMAP, Cript::Callbacks::DO_SEND_RESPONSE, Cript::Callbacks::DO_TXN_CLOSE});
+      NeedCallback({Cript::Callbacks::DO_REMAP, Cript::Callbacks::DO_SEND_RESPONSE, Cript::Callbacks::DO_TXN_CLOSE});
     }
     _tcpinfo = enable;
 

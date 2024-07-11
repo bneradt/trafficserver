@@ -29,7 +29,7 @@
 namespace Cript
 {
 // This is a bitfield, used to disable a particular callback from a previous hook
-enum Callbacks {
+enum Callbacks : std::uint8_t {
   NONE             = 0,
   DO_REMAP         = 1,
   DO_POST_REMAP    = 2,
@@ -44,7 +44,7 @@ class Transaction
 {
 public:
   void
-  disableCallback(Callbacks cb)
+  DisableCallback(Callbacks cb)
   {
     enabled_hooks &= ~cb;
   }
@@ -61,15 +61,19 @@ public:
   unsigned     enabled_hooks = 0; // Which hooks are enabled, other than the mandatory ones
 
   [[nodiscard]] bool
-  aborted() const
+  Aborted() const
   {
     bool client_abort = false;
 
-    return (TSHttpTxnAborted(txnp, &client_abort) == TS_SUCCESS);
+    if (TSHttpTxnAborted(txnp, &client_abort) == TS_SUCCESS) {
+      return client_abort;
+    }
+
+    return false;
   }
 
   [[nodiscard]] int
-  lookupStatus() const
+  LookupStatus() const
   {
     int status = 0;
 

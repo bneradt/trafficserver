@@ -49,9 +49,9 @@ Here's an example using the regular expression matcher:
    {
      static Matcher::PCRE pcre({"^/([^/]+)/(.*)$", "^(.*)$"}); // Nonsensical ...
 
-     borrow url = Client::URL::get();
+     borrow url = Client::URL::Get();
 
-     if (pcre.match(url.path)) {
+     if (pcre.Match(url.path)) {
        // Do something with the match
      }
    }
@@ -60,7 +60,7 @@ Here's an example using the regular expression matcher:
 
    For the IP-range and regular expression matcher, you can specify a single range or regular expression,
    it does not have to be declared as a list with the ``{}`` syntax. For both, the single or list arguments
-   are strings withing ``""``.
+   are strings within ``""``.
 
 .. _cripts-matchers-functions:
 
@@ -72,9 +72,9 @@ All matchers have the following functions:
 ============================   ====================================================================
 Function                       Description
 ============================   ====================================================================
-``match()``                    Match the given string against the matcher.
-``contains()``                 Another name for ``match()``
-``add()``                      Add another element to the matcher (can not be used with ``static``)
+``Match()``                    Match the given string against the matcher.
+``Contains()``                 Another name for ``Match()``
+``Add()``                      Add another element to the matcher (can not be used with ``static``)
 ============================   ====================================================================
 
 .. _cripts-matchers-pcre:
@@ -89,10 +89,10 @@ to deal with the matched results and the capture groups:
 ============================   ====================================================================
 Function                       Description
 ============================   ====================================================================
-``matched()``                  A boolean indicating if a regex was matched.
-``count()``                    Returns the number of regex capture groups that are matched.
-``matchIX()``                  Returns the index of the matched regex capture group.
-[] Index                       Retrives the matched string for the given capture group index.
+``Matched()``                  A boolean indicating if a regex was matched.
+``Count()``                    Returns the number of regex capture groups that are matched.
+``MatchIX()``                  Returns the index of the matched regex capture group.
+[] Index                       Retrieves the matched string for the given capture group index.
 ============================   ====================================================================
 
 Lets show an example:
@@ -103,11 +103,11 @@ Lets show an example:
    {
      static Matcher::PCRE allow({"^([a-c][^/]*)/?(.*)", "^([g-h][^/]*)/?(.*)"});
 
-     borrow url = Client::URL::get();
+     borrow url = Client::URL::Get();
 
-     auto res = allow.match(url.path);
+     auto res = allow.Match(url.path);
 
-     if (res.matched()) {
+     if (res.Matched()) {
        CDebug("Matched: {}", res[1]);
        CDebug("Matched: {}", res[2]);
        // Now do something with these URLs matching these paths

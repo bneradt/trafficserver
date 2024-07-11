@@ -42,6 +42,16 @@ namespace CFS = std::filesystem;           // Simplify the usage of std::filesys
 
 integer integer_helper(std::string_view sv);
 
+// Some convenience macros
+#define borrow         auto &
+#define CAssert(...)   TSReleaseAssert(__VA_ARGS__)
+#define CFatal(...)    TSFatal(__VA_ARGS__)
+#define AsBoolean(arg) std::get<boolean>(arg)
+#define AsString(arg)  std::get<Cript::string>(arg)
+#define AsInteger(arg) std::get<integer>(arg)
+#define AsFloat(arg)   std::get<double>(arg)
+#define AsPointer(arg) std::get<void *>(arg)
+
 namespace Cript
 {
 // Use Cript::string_view consistently, so that it's a one-stop shop for all string_view needs.
@@ -49,7 +59,7 @@ using string_view = swoc::TextView;
 
 namespace details
 {
-  template <typename T> std::vector<T> splitter(T input, char delim);
+  template <typename T> std::vector<T> Splitter(T input, char delim);
 
 } // namespace details
 
@@ -77,43 +87,37 @@ public:
   operator integer() const { return integer_helper(_value); }
 
   [[nodiscard]] integer
-  toInteger() const
-  {
-    return integer(*this);
-  }
-
-  [[nodiscard]] integer
-  asInteger() const
+  ToInteger() const
   {
     return integer(*this);
   }
 
   [[nodiscard]] double
-  toFloat() const
+  ToFloat() const
   {
     return float(*this);
   }
 
   [[nodiscard]] bool
-  toBool() const
+  ToBool() const
   {
     return bool(*this);
   }
 
   std::vector<mixin_type>
-  splitter(mixin_type input, char delim)
+  Splitter(mixin_type input, char delim)
   {
-    return details::splitter<mixin_type>(input, delim);
+    return details::Splitter<mixin_type>(input, delim);
   }
 
   [[nodiscard]] std::vector<mixin_type>
   split(char delim)
   {
-    return splitter(_value, delim);
+    return Splitter(_value, delim);
   }
 
   [[nodiscard]] mixin_type
-  getSV() const
+  GetSV() const
   {
     return _value;
   }
@@ -187,8 +191,6 @@ public:
     _value.remove_suffix(n);
   }
 
-  // ToDo: There are other members of std::string_view /swoc::TextView that we may want to incorporate here,
-  // to make the mixin class more complete.
   ChildT &
   ltrim(char c)
   {
@@ -237,16 +239,34 @@ public:
     return _value.data_end();
   }
 
-  [[nodiscard]] bool
+  [[nodiscard]] constexpr bool
   ends_with(Cript::string_view const suffix) const
   {
     return _value.ends_with(suffix);
   }
 
-  [[nodiscard]] bool
+  [[nodiscard]] constexpr bool
   starts_with(Cript::string_view const prefix) const
   {
     return _value.starts_with(prefix);
+  }
+
+  [[nodiscard]] constexpr mixin_type::size_type
+  find(Cript::string_view const substr, mixin_type::size_type pos = 0) const
+  {
+    return _value.find(substr, pos);
+  }
+
+  [[nodiscard]] constexpr mixin_type::size_type
+  rfind(Cript::string_view const substr, mixin_type::size_type pos = 0) const
+  {
+    return _value.rfind(substr, pos);
+  }
+
+  [[nodiscard]] constexpr bool
+  contains(Cript::string_view const substr) const
+  {
+    return (_value.find(substr) != _value.npos);
   }
 
 protected:
@@ -298,7 +318,7 @@ public:
 
   // This allows for a std::string to be moved to a Cript::string
   string(super_type &&that) : super_type(std::move(that)) {}
-  string(self_type &&that) : super_type(std::move(that)) {}
+  string(self_type &&that) noexcept : super_type(that) {}
 
   operator Cript::string_view() const { return {this->c_str(), this->size()}; }
 
@@ -355,48 +375,32 @@ public:
   operator float() const { return std::stod(*this); }
 
   [[nodiscard]] integer
-  toInteger() const
-  {
-    return integer(*this);
-  }
-
-  [[nodiscard]] integer
-  asInteger() const
+  ToInteger() const
   {
     return integer(*this);
   }
 
   [[nodiscard]] double
-  toFloat() const
+  ToFloat() const
   {
     return float(*this);
   }
 
   [[nodiscard]] bool
-  toBool() const
+  ToBool() const
   {
     return bool(*this);
   }
 
 }; // End class Cript::string
 
-// Helpers for deducting if a type is a static string
-template <typename T> struct isStatic : std::false_type {
-};
-
-template <std::size_t N> struct isStatic<const char[N]> : std::true_type {
-};
-
-template <std::size_t N> struct isStatic<char[N]> : std::true_type {
-};
-
 // Some helper functions, in the Cript:: generic namespace
-int                             random(int max);
-std::vector<Cript::string_view> splitter(Cript::string_view input, char delim);
-Cript::string                   hex(const Cript::string &str);
-Cript::string                   hex(Cript::string_view sv);
-Cript::string                   unhex(const Cript::string &str);
-Cript::string                   unhex(Cript::string_view sv);
+int                             Random(int max);
+std::vector<Cript::string_view> Splitter(Cript::string_view input, char delim);
+Cript::string                   Hex(const Cript::string &str);
+Cript::string                   Hex(Cript::string_view sv);
+Cript::string                   UnHex(const Cript::string &str);
+Cript::string                   UnHex(Cript::string_view sv);
 
 } // namespace Cript
 
@@ -407,9 +411,9 @@ class Control
     using self_type = Base;
 
   public:
-    Base()                       = delete;
-    Base(const Base &)           = delete;
-    void operator=(const Base &) = delete;
+    Base()                            = delete;
+    Base(const self_type &)           = delete;
+    void operator=(const self_type &) = delete;
 
     explicit Base(TSHttpCntlType ctrl) : _ctrl(ctrl) {}
     bool _get(Cript::Context *context) const;
@@ -424,9 +428,9 @@ class Control
     using self_type = Cache;
 
   public:
-    Cache()                       = default;
-    Cache(const Cache &)          = delete;
-    void operator=(const Cache &) = delete;
+    Cache()                           = default;
+    Cache(const self_type &)          = delete;
+    void operator=(const self_type &) = delete;
 
     Base response{TS_HTTP_CNTL_RESPONSE_CACHEABLE};
     Base request{TS_HTTP_CNTL_REQUEST_CACHEABLE};
@@ -447,40 +451,30 @@ class Versions
   using self_type = Versions;
 
 public:
-  Versions()                       = default;
-  Versions(const Versions &)       = delete;
-  void operator=(const Versions &) = delete;
+  Versions()                        = default;
+  Versions(const self_type &)       = delete;
+  void operator=(const self_type &) = delete;
 
-  Cript::string_view
-  getSV()
-  {
-    if (_version.length() == 0) {
-      const char *ver = TSTrafficServerVersionGet();
+  Cript::string_view GetSV();
 
-      _version = Cript::string_view(ver, strlen(ver)); // ToDo: Annoyingly, we have ambiquity on the operator=
-    }
-
-    return _version;
-  }
-
-  operator Cript::string_view() { return getSV(); }
+  operator Cript::string_view() { return GetSV(); }
 
   Cript::string_view::const_pointer
-  data()
+  Data()
   {
-    return getSV().data();
+    return GetSV().data();
   }
 
   Cript::string_view::size_type
-  size()
+  Size()
   {
-    return getSV().size();
+    return GetSV().size();
   }
 
   Cript::string_view::size_type
-  length()
+  Length()
   {
-    return getSV().length();
+    return GetSV().length();
   }
 
 private:
@@ -489,9 +483,9 @@ private:
     using self_type = Major;
 
   public:
-    Major()                       = default;
-    Major(const Major &)          = delete;
-    void operator=(const Major &) = delete;
+    Major()                           = default;
+    Major(const self_type &)          = delete;
+    void operator=(const self_type &) = delete;
 
     operator integer() const // This should not be explicit
     {
@@ -505,9 +499,9 @@ private:
     using self_type = Minor;
 
   public:
-    Minor()                       = default;
-    Minor(const Minor &)          = delete;
-    void operator=(const Minor &) = delete;
+    Minor()                           = default;
+    Minor(const self_type &)          = delete;
+    void operator=(const self_type &) = delete;
 
     operator integer() const // This should not be explicit
     {
@@ -521,9 +515,9 @@ private:
     using self_type = Minor;
 
   public:
-    Patch()                       = default;
-    Patch(const Patch &)          = delete;
-    void operator=(const Patch &) = delete;
+    Patch()                           = default;
+    Patch(const self_type &)          = delete;
+    void operator=(const self_type &) = delete;
 
     operator integer() const // This should not be explicit
     {
@@ -558,7 +552,7 @@ template <> struct formatter<Versions> {
   auto
   format(Versions &version, FormatContext &ctx) -> decltype(ctx.out())
   {
-    return fmt::format_to(ctx.out(), "{}", version.getSV());
+    return fmt::format_to(ctx.out(), "{}", version.GetSV());
   }
 };
 

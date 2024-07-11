@@ -21,8 +21,8 @@
 #include <variant>
 #include <unordered_map>
 
-#include "ts/remap.h"
 #include "ts/ts.h"
+#include "ts/remap.h"
 
 #include "cripts/Plugins.hpp"
 #include "cripts/Metrics.hpp"
@@ -39,12 +39,12 @@ class Instance
 public:
   using DataType = std::variant<integer, double, boolean, void *, Cript::string>;
 
-  Instance()                       = delete;
-  Instance(const Instance &)       = delete;
-  void operator=(const Instance &) = delete;
+  Instance()                        = delete;
+  Instance(const self_type &)       = delete;
+  void operator=(const self_type &) = delete;
 
   // This has to be in the .hpp file, otherwise we will not get the correct debug tag!
-  Instance(int argc, char *argv[]) { initialize(argc, argv, __BASE_FILE__); }
+  Instance(int argc, char *argv[]) { _initialize(argc, argv, __BASE_FILE__); }
   ~Instance()
   {
     plugins.clear();
@@ -54,61 +54,49 @@ public:
     }
   }
 
-  bool addPlugin(const Cript::string &tag, const Cript::string &plugin, const Plugin::Options &options);
-  bool deletePlugin(const Cript::string &tag);
-  void initialize(int argc, char *argv[], const char *filename);
-
-  void
-  addBundle(Cript::Bundle::Base *bundle)
-  {
-    for (auto &it : bundles) {
-      if (it->name() == bundle->name()) {
-        TSReleaseAssert(!"Duplicate bundle");
-      }
-    }
-
-    bundles.push_back(bundle);
-  }
+  bool AddPlugin(const Cript::string &tag, const Cript::string &plugin, const Plugin::Options &options);
+  bool DeletePlugin(const Cript::string &tag);
+  void AddBundle(Cript::Bundle::Base *bundle);
 
   // This allows Bundles to require hooks as well.
   void
-  needCallback(Cript::Callbacks cb)
+  NeedCallback(Cript::Callbacks cb)
   {
     _callbacks |= cb;
   }
 
   void
-  needCallback(unsigned cbs)
+  NeedCallback(unsigned cbs)
   {
     _callbacks |= cbs;
   }
 
   [[nodiscard]] unsigned
-  callbacks() const
+  Callbacks() const
   {
     return _callbacks;
   }
 
   [[nodiscard]] bool
-  debugOn() const
+  DebugOn() const
   {
     return dbg_ctl_cript.on();
   }
 
   void
-  fail()
+  Fail()
   {
     _failed = true;
   }
 
   [[nodiscard]] bool
-  failed() const
+  Failed() const
   {
     return _failed;
   }
 
   [[nodiscard]] size_t
-  size() const
+  Size() const
   {
     return _size;
   }
@@ -117,7 +105,7 @@ public:
   void
   debug(fmt::format_string<T...> fmt, T &&...args) const
   {
-    if (debugOn()) {
+    if (DebugOn()) {
       auto str = fmt::vformat(fmt, fmt::make_format_args(args...));
 
       Dbg(dbg_ctl_cript, "%s", str.c_str());
@@ -133,6 +121,8 @@ public:
   std::vector<Cript::Bundle::Base *>             bundles;
 
 private:
+  void _initialize(int argc, char *argv[], const char *filename);
+
   size_t   _size      = 0;
   bool     _failed    = false;
   unsigned _callbacks = 0;
@@ -142,9 +132,11 @@ private:
 // A little wrapper / hack to make the do_create_instance take what looks like a context.
 // This is only used during instantiation, not at runtime when the instance is used.
 struct InstanceContext {
-  InstanceContext()                        = delete;
-  void operator=(const InstanceContext &)  = delete;
-  InstanceContext(const InstanceContext &) = delete;
+  using self_type = InstanceContext;
+
+  InstanceContext()                  = delete;
+  InstanceContext(const self_type &) = delete;
+  void operator=(const self_type &)  = delete;
 
   InstanceContext(Cript::Instance &inst) : p_instance(inst) {}
 

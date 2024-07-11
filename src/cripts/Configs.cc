@@ -19,46 +19,158 @@
 #include "cripts/Lulu.hpp"
 #include "cripts/Preamble.hpp"
 
-integer
-IntConfig::_get(Cript::Context *context) const
+namespace Cript
 {
-  integer value = -1;
 
-  TSAssert(context->state.txnp);
-  if (TSHttpTxnConfigIntGet(context->state.txnp, _key, &value) != TS_SUCCESS) {
-    context->state.error.fail();
+std::unordered_map<Cript::string_view, const Records *> Records::_gRecords;
+
+Records::Records(const Cript::string_view name)
+{
+  TSOverridableConfigKey key;
+  TSRecordDataType       type;
+
+  if (TSHttpTxnConfigFind(name.data(), name.size(), &key, &type) == TS_SUCCESS) {
+    _name = name;
+    _key  = key;
+    _type = type;
+  } else {
+    CFatal("[Records]: Invalid configuration variable '%.*s'", static_cast<int>(name.size()), name.data());
   }
-
-  return value;
 }
 
+Records::ValueType
+Records::_get(const Cript::Context *context) const
+{
+  TSAssert(context->state.txnp);
+
+  switch (_type) {
+  case TS_RECORDDATATYPE_INT: {
+    TSMgmtInt i;
+
+    if (TSHttpTxnConfigIntGet(context->state.txnp, _key, &i) == TS_SUCCESS) {
+      return i;
+    }
+  } break;
+  case TS_RECORDDATATYPE_FLOAT: {
+    TSMgmtFloat f;
+
+    if (TSHttpTxnConfigFloatGet(context->state.txnp, _key, &f) == TS_SUCCESS) {
+      return f;
+    }
+  } break;
+  case TS_RECORDDATATYPE_STRING: {
+    return std::string{GetSV(context)};
+  } break;
+  default:
+    CFatal("[Records]: Invalid configuration type");
+    return 0;
+  }
+
+  return 0;
+}
+
+const Cript::string_view
+Records::GetSV(const Cript::Context *context) const
+{
+  TSAssert(context->state.txnp);
+
+  switch (_type) {
+  case TS_RECORDDATATYPE_STRING: {
+    const char *s   = nullptr;
+    int         len = 0;
+
+    if (TSHttpTxnConfigStringGet(context->state.txnp, _key, &s, &len) == TS_SUCCESS) {
+      return {s, len};
+    }
+  } break;
+  default:
+    CFatal("[Records]: Invalid configuration type for GetSV()");
+    break;
+  }
+
+  return {};
+}
+
+bool
+Records::_set(const Cript::Context *context, const ValueType &value) const
+{
+  TSAssert(context->state.txnp);
+
+  switch (_type) {
+  case TS_RECORDDATATYPE_INT: {
+    TSMgmtInt i = std::get<TSMgmtInt>(value);
+
+    if (TSHttpTxnConfigIntSet(context->state.txnp, _key, i) != TS_SUCCESS) {
+      TSError("Failed to set integer configuration '%s'", _name.c_str());
+      return false;
+    }
+    CDebug("Set integer configuration '{}' to {}", _name.c_str(), i);
+  } break;
+  case TS_RECORDDATATYPE_FLOAT: {
+    TSMgmtFloat f = std::get<TSMgmtFloat>(value);
+
+    if (TSHttpTxnConfigFloatSet(context->state.txnp, _key, f) != TS_SUCCESS) {
+      TSError("Failed to set float configuration '%s'", _name.c_str());
+      return false;
+    }
+    CDebug("Set float configuration '{}' to {}", _name.c_str(), f);
+  } break;
+  case TS_RECORDDATATYPE_STRING: {
+    auto &str = std::get<std::string>(value);
+
+    SetSV(context, {str.data(), str.size()});
+  } break;
+  default:
+    CFatal("[Records]: Invalid configuration type");
+    return false;
+  }
+
+  return true; // Success
+}
+
+bool
+Records::SetSV(const Cript::Context *context, const Cript::string_view value) const
+{
+  TSAssert(context->state.txnp);
+
+  switch (_type) {
+  case TS_RECORDDATATYPE_STRING: {
+    if (TSHttpTxnConfigStringSet(context->state.txnp, _key, value.data(), value.size()) != TS_SUCCESS) {
+      TSError("Failed to set string configuration '%s'", _name.c_str());
+      return false;
+    }
+    CDebug("Set string configuration '{}' to '{}'", _name.c_str(), value);
+  } break;
+  default:
+    CFatal("[Records]: Invalid configuration type for setSV()");
+    return false;
+  }
+
+  return true; // Success
+}
+
+// Static members for the records "cache"
 void
-IntConfig::_set(Cript::Context *context, integer value)
+Records::Add(const Records *rec)
 {
-  TSAssert(context->state.txnp);
-  if (TSHttpTxnConfigIntSet(context->state.txnp, _key, static_cast<TSMgmtInt>(value)) != TS_SUCCESS) {
-    context->state.error.fail();
-  }
+  CAssert(rec->Loaded());
+  auto it = _gRecords.find(rec->Name());
+
+  CAssert(it == _gRecords.end());
+  _gRecords[rec->Name()] = rec;
 }
 
-float
-FloatConfig::_get(Cript::Context *context) const
+const Records *
+Records::Lookup(const Cript::string_view name)
 {
-  float value = -1;
+  auto it = _gRecords.find(name);
 
-  TSAssert(context->state.txnp);
-  if (TSHttpTxnConfigFloatGet(context->state.txnp, _key, &value) != TS_SUCCESS) {
-    context->state.error.fail();
+  if (it != _gRecords.end()) {
+    CAssert(it->second->Loaded());
+    return it->second;
   }
 
-  return value;
+  return nullptr;
 }
 
-void
-FloatConfig::_set(Cript::Context *context, float value)
-{
-  TSAssert(context->state.txnp);
-  if (TSHttpTxnConfigFloatSet(context->state.txnp, _key, static_cast<TSMgmtFloat>(value)) != TS_SUCCESS) {
-    context->state.error.fail();
-  }
-}
+} // namespace Cript

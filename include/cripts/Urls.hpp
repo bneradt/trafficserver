@@ -17,16 +17,15 @@
 */
 #pragma once
 
-#include <cstring>
-#include <iostream>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
 
-#include "ts/remap.h"
 #include "ts/ts.h"
+#include "ts/remap.h"
+
+#include "cripts/Headers.hpp"
 
 namespace Cript
 {
@@ -40,27 +39,28 @@ class Url
 
   public:
     Component() = default;
+    Component(Url *owner) : _owner(owner) {}
 
-    virtual Cript::string_view getSV() = 0;
+    virtual Cript::string_view GetSV() = 0;
 
-    std::vector<Cript::string_view> split(char delim);
+    std::vector<Cript::string_view> Split(char delim);
 
-    operator Cript::string_view() { return getSV(); } // Should not be explicit
+    operator Cript::string_view() { return GetSV(); } // Should not be explicit
 
     bool
     operator==(Cript::string_view const &rhs)
     {
-      return getSV() == rhs;
+      return GetSV() == rhs;
     }
 
     bool
     operator!=(Cript::string_view const &rhs)
     {
-      return getSV() != rhs;
+      return GetSV() != rhs;
     }
 
     virtual void
-    reset()
+    Reset()
     {
       _data.clear();
     }
@@ -68,19 +68,37 @@ class Url
     Cript::string_view::const_pointer
     data()
     {
-      return getSV().data();
+      return GetSV().data();
     }
 
     Cript::string_view::size_type
     size()
     {
-      return getSV().size();
+      return GetSV().size();
     }
 
     Cript::string_view::size_type
     length()
     {
-      return getSV().size();
+      return GetSV().size();
+    }
+
+    Cript::string_view::const_pointer
+    Data()
+    {
+      return GetSV().data();
+    }
+
+    Cript::string_view::size_type
+    Size()
+    {
+      return GetSV().size();
+    }
+
+    Cript::string_view::size_type
+    Length()
+    {
+      return GetSV().size();
     }
 
     // This is not ideal, but best way I can think of for now to mixin the Cript::string_view mixin class
@@ -190,11 +208,10 @@ public:
     using super_type = Component;
     using self_type  = Scheme;
 
-    friend class Url;
-
   public:
-    Scheme() = default;
-    Cript::string_view getSV() override;
+    using Component::Component;
+
+    Cript::string_view GetSV() override;
     self_type          operator=(Cript::string_view scheme);
 
   }; // End class Url::Scheme
@@ -204,11 +221,10 @@ public:
     using super_type = Component;
     using self_type  = Host;
 
-    friend class Url;
-
   public:
-    Host() = default;
-    Cript::string_view getSV() override;
+    using Component::Component;
+
+    Cript::string_view GetSV() override;
     self_type          operator=(Cript::string_view host);
 
   }; // End class Url::Host
@@ -217,13 +233,11 @@ public:
   {
     using self_type = Port;
 
-    friend class Url;
-
   public:
-    Port() = default;
+    Port(Url *owner) : _owner(owner){};
 
     void
-    reset()
+    Reset()
     {
       _port = -1;
     }
@@ -257,8 +271,6 @@ public:
   private:
     using super_type = Component;
     using self_type  = Path;
-
-    friend class Url;
 
     class String : public Cript::StringViewMixin<String>
     {
@@ -316,17 +328,17 @@ public:
   public:
     friend struct fmt::formatter<Path::String>;
 
-    Path() = default;
+    using Component::Component;
 
-    void reset() override;
+    void Reset() override;
 
-    Cript::string_view getSV() override;
+    Cript::string_view GetSV() override;
     Cript::string      operator+=(Cript::string_view add);
     self_type          operator=(Cript::string_view path);
     String             operator[](Segments::size_type ix);
 
     void
-    erase(Segments::size_type ix)
+    Erase(Segments::size_type ix)
     {
       auto p = operator[](ix);
 
@@ -335,25 +347,25 @@ public:
     }
 
     void
-    erase()
+    Erase()
     {
       operator=("");
     }
 
     void
-    clear()
+    Clear()
     {
-      erase();
+      Erase();
     }
 
-    void push(Cript::string_view val);
-    void insert(Segments::size_type ix, Cript::string_view val);
+    void Push(Cript::string_view val);
+    void Insert(Segments::size_type ix, Cript::string_view val);
 
     void
-    flush()
+    Flush()
     {
       if (_modified) {
-        operator=(getSV());
+        operator=(GetSV());
       }
     }
 
@@ -372,8 +384,6 @@ public:
     using super_type = Component;
     using self_type  = Query;
 
-    friend class Url;
-
     using OrderedParams = std::vector<Cript::string_view>;                            // Ordered parameter nmes
     using HashParams    = std::unordered_map<Cript::string_view, Cript::string_view>; // Hash lookups
 
@@ -386,15 +396,15 @@ public:
       Parameter() = default;
 
       [[nodiscard]] Cript::string_view
-      name() const
+      Name() const
       {
         return _name;
       }
 
       void
-      erase()
+      Erase()
       {
-        _owner->erase(_name);
+        _owner->Erase(_name);
       }
 
       // Implemented in the Urls.cc file, bigger function
@@ -445,7 +455,7 @@ public:
   public:
     friend struct fmt::formatter<Query::Parameter>;
 
-    Query() = default;
+    using Component::Component;
 
     Query(Cript::string_view load)
     {
@@ -454,36 +464,36 @@ public:
       _loaded = true;
     }
 
-    void reset() override;
+    void Reset() override;
 
-    Cript::string_view getSV() override;
+    Cript::string_view GetSV() override;
     self_type          operator=(Cript::string_view query);
     Cript::string      operator+=(Cript::string_view add);
     Parameter          operator[](Cript::string_view param);
-    void               erase(Cript::string_view param);
-    void               erase(std::initializer_list<Cript::string_view> list, bool keep = false);
+    void               Erase(Cript::string_view param);
+    void               Erase(std::initializer_list<Cript::string_view> list, bool keep = false);
 
     void
-    erase()
+    Erase()
     {
       operator=("");
       _size = 0;
     }
 
     void
-    keep(std::initializer_list<Cript::string_view> list)
+    Keep(std::initializer_list<Cript::string_view> list)
     {
-      erase(list, true);
+      Erase(list, true);
     }
 
     void
-    clear()
+    Clear()
     {
-      return erase();
+      return Erase();
     }
 
     void
-    sort()
+    Sort()
     {
       // Make sure the hash and vector are populated
       _parser();
@@ -493,10 +503,10 @@ public:
     }
 
     void
-    flush()
+    Flush()
     {
       if (_modified) {
-        operator=(getSV());
+        operator=(GetSV());
       }
     }
 
@@ -512,68 +522,83 @@ public:
 
   }; // End class Url::Query
 
-public:
-  Url() = default;
+  class Matrix : public Component
+  {
+    using super_type = Component;
+    using self_type  = Matrix;
 
-  ~Url() { reset(); }
+  public:
+    using Component::Component;
+
+    Cript::string_view GetSV() override;
+    self_type          operator=(Cript::string_view matrix);
+
+  }; // End class Url::Matrix
+
+public:
+  Url() : scheme(this), host(this), port(this), path(this), query(this), matrix(this) {}
 
   // Clear anything "cached" in the Url, this is rather draconian, but it's safe...
   virtual void
-  reset()
+  Reset()
   {
     if (_bufp && _urlp) {
       TSHandleMLocRelease(_bufp, TS_NULL_MLOC, _urlp);
       _urlp = nullptr;
       _bufp = nullptr;
 
-      query.reset();
-      path.reset();
+      query.Reset();
+      path.Reset();
     }
     _state = nullptr;
   }
 
-  bool
-  initialized() const
+  [[nodiscard]] bool
+  Initialized() const
   {
     return (_state != nullptr);
   }
 
-  bool
-  modified() const
+  [[nodiscard]] bool
+  Modified() const
   {
     return _modified;
   }
 
-  TSMLoc
-  urlp() const
+  [[nodiscard]] TSMLoc
+  UrlP() const
   {
     return _urlp;
   }
 
-  // Getters / setters for the full URL
-  Cript::string url() const;
+  [[nodiscard]] virtual bool
+  ReadOnly() const
+  {
+    return false;
+  }
 
-  Host   host;
+  // This is the full string for a URL, which needs allocations.
+  [[nodiscard]] Cript::string String() const;
+
   Scheme scheme;
+  Host   host;
+  Port   port;
   Path   path;
   Query  query;
-  Port   port;
+  Matrix matrix;
 
 protected:
   void
   _initialize(Cript::Transaction *state)
   {
-    _state      = state;
-    host._owner = path._owner = scheme._owner = query._owner = port._owner = this;
+    _state = state;
   }
 
-  TSMBuffer _bufp = nullptr;               // These two gets setup via initializing, pointing
-                                           // to appropriate headers
+  TSMBuffer           _bufp     = nullptr; // These two gets setup via initializing, to appropriate headers
   TSMLoc              _hdr_loc  = nullptr; // Do not release any of this within the URL classes!
   TSMLoc              _urlp     = nullptr; // This is owned by us.
   Cript::Transaction *_state    = nullptr; // Pointer into the owning Context's State
-  bool                _modified = false;   // We have pending changes on the path components or
-                                           // query parameters?
+  bool                _modified = false;   // We have pending changes on the path/query components
 
 }; // End class Url
 
@@ -588,12 +613,17 @@ class URL : public Cript::Url
   using self_type  = URL;
 
 public:
-  URL() = default;
+  URL()                             = default;
+  URL(const self_type &)            = delete;
+  void operator=(const self_type &) = delete;
 
-  URL(const URL &)            = delete;
-  void operator=(const URL &) = delete;
+  static self_type &_get(Cript::Context *context);
 
-  static URL &_get(Cript::Context *context);
+  [[nodiscard]] bool
+  ReadOnly() const override
+  {
+    return true;
+  }
 
 }; // End class Pristine::URL
 
@@ -607,18 +637,18 @@ class URL : public Cript::Url
   using self_type  = URL;
 
 public:
-  URL()                       = default;
-  URL(const URL &)            = delete;
-  void operator=(const URL &) = delete;
+  URL()                             = default;
+  URL(const self_type &)            = delete;
+  void operator=(const self_type &) = delete;
 
   // We must not release the bufp etc. since it comes from the RRI structure
   void
-  reset() override
+  Reset() override
   {
   }
 
-  static URL &_get(Cript::Context *context);
-  bool        _update(Cript::Context *context);
+  static self_type &_get(Cript::Context *context);
+  bool              _update(Cript::Context *context);
 
 private:
   void _initialize(Cript::Context *context);
@@ -637,18 +667,24 @@ namespace From
     using self_type  = URL;
 
   public:
-    URL()                       = default;
-    URL(const URL &)            = delete;
-    void operator=(const URL &) = delete;
+    URL()                             = default;
+    URL(const self_type &)            = delete;
+    void operator=(const self_type &) = delete;
 
     // We must not release the bufp etc. since it comes from the RRI structure
     void
-    reset() override
+    Reset() override
     {
     }
 
-    static URL &_get(Cript::Context *context);
-    bool        _update(Cript::Context *context);
+    [[nodiscard]] bool
+    ReadOnly() const override
+    {
+      return true;
+    }
+
+    static self_type &_get(Cript::Context *context);
+    bool              _update(Cript::Context *context);
 
   private:
     void _initialize(Cript::Context *context);
@@ -665,18 +701,24 @@ namespace To
     using self_type  = URL;
 
   public:
-    URL()                       = default;
-    URL(const URL &)            = delete;
-    void operator=(const URL &) = delete;
+    URL()                             = default;
+    URL(const self_type &)            = delete;
+    void operator=(const self_type &) = delete;
 
     // We must not release the bufp etc. since it comes from the RRI structure
     void
-    reset() override
+    Reset() override
     {
     }
 
-    static URL &_get(Cript::Context *context);
-    bool        _update(Cript::Context *context);
+    [[nodiscard]] bool
+    ReadOnly() const override
+    {
+      return true;
+    }
+
+    static self_type &_get(Cript::Context *context);
+    bool              _update(Cript::Context *context);
 
   private:
     void _initialize(Cript::Context *context);
@@ -695,12 +737,12 @@ class URL : public Cript::Url // ToDo: This can maybe be a subclass of Client::U
   using self_type  = URL;
 
 public:
-  URL()                       = default;
-  URL(const URL &)            = delete;
-  void operator=(const URL &) = delete;
+  URL()                             = default;
+  URL(const self_type &)            = delete;
+  void operator=(const self_type &) = delete;
 
-  static URL &_get(Cript::Context *context);
-  bool        _update(Cript::Context *context);
+  static self_type &_get(Cript::Context *context);
+  bool              _update(Cript::Context *context);
 
 private:
   void
@@ -708,8 +750,8 @@ private:
   {
     Url::_initialize(state);
 
-    _bufp    = req->bufp();
-    _hdr_loc = req->mloc();
+    _bufp    = req->BufP();
+    _hdr_loc = req->MLoc();
   }
 
 }; // End class Cache::URL
@@ -724,12 +766,12 @@ class URL : public Cript::Url
   using self_type  = URL;
 
 public:
-  URL()                       = default;
-  URL(const URL &)            = delete;
-  void operator=(const URL &) = delete;
+  URL()                             = default;
+  URL(const self_type &)            = delete;
+  void operator=(const self_type &) = delete;
 
-  static URL &_get(Cript::Context *context);
-  bool        _update(Cript::Context *context);
+  static self_type &_get(Cript::Context *context);
+  bool              _update(Cript::Context *context);
 
 private:
   void
@@ -737,8 +779,8 @@ private:
   {
     Url::_initialize(state);
 
-    _bufp    = req->bufp();
-    _hdr_loc = req->mloc();
+    _bufp    = req->BufP();
+    _hdr_loc = req->MLoc();
   }
 
 }; // End class Cache::URL
@@ -759,7 +801,7 @@ template <> struct formatter<Cript::Url::Scheme> {
   auto
   format(Cript::Url::Scheme &scheme, FormatContext &ctx) -> decltype(ctx.out())
   {
-    return fmt::format_to(ctx.out(), "{}", scheme.getSV());
+    return fmt::format_to(ctx.out(), "{}", scheme.GetSV());
   }
 };
 
@@ -774,7 +816,7 @@ template <> struct formatter<Cript::Url::Host> {
   auto
   format(Cript::Url::Host &host, FormatContext &ctx) -> decltype(ctx.out())
   {
-    return fmt::format_to(ctx.out(), "{}", host.getSV());
+    return fmt::format_to(ctx.out(), "{}", host.GetSV());
   }
 };
 
@@ -804,7 +846,7 @@ template <> struct formatter<Cript::Url::Path::String> {
   auto
   format(Cript::Url::Path::String &path, FormatContext &ctx) -> decltype(ctx.out())
   {
-    return fmt::format_to(ctx.out(), "{}", path.getSV());
+    return fmt::format_to(ctx.out(), "{}", path.GetSV());
   }
 };
 
@@ -819,7 +861,7 @@ template <> struct formatter<Cript::Url::Path> {
   auto
   format(Cript::Url::Path &path, FormatContext &ctx) -> decltype(ctx.out())
   {
-    return fmt::format_to(ctx.out(), "{}", path.getSV());
+    return fmt::format_to(ctx.out(), "{}", path.GetSV());
   }
 };
 
@@ -834,7 +876,7 @@ template <> struct formatter<Cript::Url::Query::Parameter> {
   auto
   format(Cript::Url::Query::Parameter &param, FormatContext &ctx) -> decltype(ctx.out())
   {
-    return fmt::format_to(ctx.out(), "{}", param.getSV());
+    return fmt::format_to(ctx.out(), "{}", param.GetSV());
   }
 };
 
@@ -849,7 +891,22 @@ template <> struct formatter<Cript::Url::Query> {
   auto
   format(Cript::Url::Query &query, FormatContext &ctx) -> decltype(ctx.out())
   {
-    return fmt::format_to(ctx.out(), "{}", query.getSV());
+    return fmt::format_to(ctx.out(), "{}", query.GetSV());
+  }
+};
+
+template <> struct formatter<Cript::Url::Matrix> {
+  constexpr auto
+  parse(format_parse_context &ctx) -> decltype(ctx.begin())
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto
+  format(Cript::Url::Matrix &matrix, FormatContext &ctx) -> decltype(ctx.out())
+  {
+    return fmt::format_to(ctx.out(), "{}", matrix.GetSV());
   }
 };
 
