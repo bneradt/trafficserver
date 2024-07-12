@@ -25,6 +25,7 @@ class Context;
 #include "ts/apidefs.h"
 #include "ts/ts.h"
 
+#include "cripts/Lulu.hpp"
 #include "cripts/Matcher.hpp"
 
 namespace Cript
@@ -42,19 +43,18 @@ class IP : public swoc::IPAddr
 
 public:
   using super_type::IPAddr;
+  IP(const self_type &)             = delete;
+  void operator=(const self_type &) = delete;
 
-  IP(const IP &)             = delete;
-  void operator=(const IP &) = delete;
-
-  Cript::string_view getSV(unsigned ipv4_cidr = 32, unsigned ipv6_cidr = 128);
+  Cript::string_view GetSV(unsigned ipv4_cidr = 32, unsigned ipv6_cidr = 128);
   Cript::string_view
   string(unsigned ipv4_cidr = 32, unsigned ipv6_cidr = 128)
   {
-    return getSV(ipv4_cidr, ipv6_cidr);
+    return GetSV(ipv4_cidr, ipv6_cidr);
   }
 
-  uint64_t hasher(unsigned ipv4_cidr = 32, unsigned ipv6_cidr = 128);
-  bool     sample(double rate, uint32_t seed = 0, unsigned ipv4_cidr = 32, unsigned ipv6_cidr = 128);
+  uint64_t Hasher(unsigned ipv4_cidr = 32, unsigned ipv6_cidr = 128);
+  bool     Sample(double rate, uint32_t seed = 0, unsigned ipv4_cidr = 32, unsigned ipv6_cidr = 128);
 
 private:
   char     _str[INET6_ADDRSTRLEN + 1];
@@ -77,8 +77,8 @@ class ConnBase
   public:
     friend class ConnBase;
 
-    Dscp()                       = default;
-    void operator=(const Dscp &) = delete;
+    Dscp()                            = default;
+    void operator=(const self_type &) = delete;
 
     // This is not perfect, but there's currently no ATS Get() mechanism to see a connections
     // current DSCP options.
@@ -88,7 +88,7 @@ class ConnBase
     operator=(int val)
     {
       TSAssert(_owner);
-      _owner->setDscp(val);
+      _owner->SetDscp(val);
       _val = val;
     }
 
@@ -105,32 +105,14 @@ class ConnBase
   public:
     friend class ConnBase;
 
-    Pacing()                       = default;
-    void operator=(const Pacing &) = delete;
+    Pacing()                          = default;
+    void operator=(const self_type &) = delete;
 
     // This is not perfect, but there's currently no ATS Get() mechanism to see a connections
     // current PACING options.
     operator integer() const { return _val; }
 
-    void
-    operator=(uint32_t val)
-    {
-      TSAssert(_owner);
-      if (val == 0) {
-        val = Off;
-      }
-
-#ifdef SO_MAX_PACING_RATE
-      int connfd = _owner->fd();
-      int res    = setsockopt(connfd, SOL_SOCKET, SO_MAX_PACING_RATE, (char *)&val, sizeof(val));
-
-      // EBADF indicates possible client abort
-      if ((res < 0) && (errno != EBADF)) {
-        TSError("[fq_pacing] Error setting SO_MAX_PACING_RATE, errno=%d", errno);
-      }
-#endif
-      _val = val;
-    }
+    void operator=(uint32_t val);
 
     static constexpr uint32_t Off = std::numeric_limits<uint32_t>::max();
 
@@ -147,15 +129,15 @@ class ConnBase
   public:
     friend class ConnBase;
 
-    Congestion()                       = default;
-    void operator=(const Congestion &) = delete;
+    Congestion()                      = default;
+    void operator=(const self_type &) = delete;
 
     self_type &
-    operator=(Cript::string_view const &str)
+    operator=([[maybe_unused]] Cript::string_view const &str)
     {
       TSAssert(_owner);
 #if defined(TCP_CONGESTION)
-      int connfd = _owner->fd();
+      int connfd = _owner->FD();
       int res    = setsockopt(connfd, IPPROTO_TCP, TCP_CONGESTION, str.data(), str.size());
 
       // EBADF indicates possible client abort
@@ -179,8 +161,8 @@ class ConnBase
   public:
     friend class ConnBase;
 
-    Mark()                       = default;
-    void operator=(const Mark &) = delete;
+    Mark()                            = default;
+    void operator=(const self_type &) = delete;
 
     // Same here, no API in ATS to Get() the mark on a VC.
     operator integer() const { return _val; }
@@ -189,7 +171,7 @@ class ConnBase
     operator=(int val)
     {
       TSAssert(_owner);
-      _owner->setMark(val);
+      _owner->SetMark(val);
       _val = val;
     }
 
@@ -206,8 +188,8 @@ class ConnBase
   public:
     friend class ConnBase;
 
-    Geo()                       = default;
-    void operator=(const Geo &) = delete;
+    Geo()                             = default;
+    void operator=(const self_type &) = delete;
 
     [[nodiscard]] Cript::string ASN() const;
     [[nodiscard]] Cript::string ASNName() const;
@@ -225,13 +207,14 @@ class ConnBase
   public:
     friend class ConnBase;
 
-    TcpInfo()                       = default;
-    void operator=(const TcpInfo &) = delete;
+    TcpInfo()                         = default;
+    TcpInfo(const self_type &)        = delete;
+    void operator=(const self_type &) = delete;
 
-    Cript::string_view log();
+    Cript::string_view Log();
 
     [[nodiscard]] bool
-    ready() const
+    Ready() const
     {
       return _ready;
     }
@@ -306,42 +289,43 @@ class ConnBase
   }; // End class ConnBase::TcpInfo
 
 public:
-  void operator=(const ConnBase &) = delete;
-
   ConnBase() { dscp._owner = congestion._owner = tcpinfo._owner = geo._owner = pacing._owner = mark._owner = this; }
 
-  [[nodiscard]] virtual int fd() const = 0; // This needs the txnp from the Context
+  ConnBase(const self_type &)       = delete;
+  void operator=(const self_type &) = delete;
+
+  [[nodiscard]] virtual int FD() const = 0; // This needs the txnp from the Context
 
   [[nodiscard]] struct sockaddr const *
-  socket() const
+  Socket() const
   {
     TSAssert(_vc);
     return TSNetVConnRemoteAddrGet(_vc);
   }
 
   [[nodiscard]] Cript::IP
-  ip() const
+  IP() const
   {
-    TSAssert(initialized());
-    return Cript::IP{socket()};
+    TSAssert(Initialized());
+    return Cript::IP{Socket()};
   }
 
   [[nodiscard]] bool
-  initialized() const
+  Initialized() const
   {
     return _state != nullptr;
   }
 
   [[nodiscard]] bool
-  isInternal() const
+  IsInternal() const
   {
     return TSHttpTxnIsInternal(_state->txnp);
   }
 
-  [[nodiscard]] virtual Cript::IP localIP() const  = 0;
-  [[nodiscard]] virtual int       count() const    = 0;
-  virtual void                    setDscp(int val) = 0;
-  virtual void                    setMark(int val) = 0;
+  [[nodiscard]] virtual Cript::IP LocalIP() const  = 0;
+  [[nodiscard]] virtual int       Count() const    = 0;
+  virtual void                    SetDscp(int val) = 0;
+  virtual void                    SetMark(int val) = 0;
 
   Dscp       dscp;
   Congestion congestion;
@@ -370,31 +354,30 @@ class Connection : public detail::ConnBase
   using self_type = Connection;
 
 public:
-  Connection() = default;
+  Connection()                      = default;
+  Connection(const self_type &)     = delete;
+  void operator=(const self_type &) = delete;
 
-  void operator=(const Connection &) = delete;
-  Connection(const Connection &)     = delete;
-
-  [[nodiscard]] int  fd() const override;
-  [[nodiscard]] int  count() const override;
+  [[nodiscard]] int  FD() const override;
+  [[nodiscard]] int  Count() const override;
   static Connection &_get(Cript::Context *context);
 
   void
-  setDscp(int val) override
+  SetDscp(int val) override
   {
     TSHttpTxnClientPacketDscpSet(_state->txnp, val);
   }
 
   void
-  setMark(int val) override
+  SetMark(int val) override
   {
     TSHttpTxnClientPacketMarkSet(_state->txnp, val);
   }
 
   [[nodiscard]] Cript::IP
-  localIP() const override
+  LocalIP() const override
   {
-    return Cript::IP(TSHttpTxnIncomingAddrGet(_state->txnp));
+    return Cript::IP{TSHttpTxnIncomingAddrGet(_state->txnp)};
   }
 
 }; // End class Client::Connection
@@ -409,30 +392,30 @@ class Connection : public detail::ConnBase
   using self_type = Connection;
 
 public:
-  Connection()                       = default;
-  void operator=(const Connection &) = delete;
-  Connection(const Connection &)     = delete;
+  Connection()                      = default;
+  Connection(const self_type &)     = delete;
+  void operator=(const self_type &) = delete;
 
-  [[nodiscard]] int  fd() const override;
-  [[nodiscard]] int  count() const override;
+  [[nodiscard]] int  FD() const override;
+  [[nodiscard]] int  Count() const override;
   static Connection &_get(Cript::Context *context);
 
   void
-  setDscp(int val) override
+  SetDscp(int val) override
   {
     TSHttpTxnServerPacketDscpSet(_state->txnp, val);
   }
 
   void
-  setMark(int val) override
+  SetMark(int val) override
   {
     TSHttpTxnServerPacketMarkSet(_state->txnp, val);
   }
 
   [[nodiscard]] Cript::IP
-  localIP() const override
+  LocalIP() const override
   {
-    return Cript::IP(TSHttpTxnOutgoingAddrGet(_state->txnp));
+    return Cript::IP{TSHttpTxnOutgoingAddrGet(_state->txnp)};
   }
 
 }; // End class Server::Connection
@@ -453,7 +436,7 @@ template <> struct formatter<Cript::IP> {
   auto
   format(Cript::IP &ip, FormatContext &ctx) -> decltype(ctx.out())
   {
-    return format_to(ctx.out(), "{}", ip.getSV());
+    return format_to(ctx.out(), "{}", ip.GetSV());
   }
 };
 } // namespace fmt

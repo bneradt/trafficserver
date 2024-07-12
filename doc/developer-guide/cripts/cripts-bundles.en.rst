@@ -34,6 +34,11 @@ turning these common patterns into easily reusable components. A bundle
 must be activated in the ``do_create_instance()`` hook of a Cript. This
 does *not* exclude doing additional hooks in the Cript itself.
 
+.. note::
+   The member variables of a bundle are always lower case, and not
+   Pascal case like methods. This is because even though they technically
+   are functions, they act more like variables with a value.
+
 The following bundles are available in the core today:
 
 ============================   ====================================================================
@@ -41,7 +46,8 @@ Bundle                         Description
 ============================   ====================================================================
 ``Bundle::Common``             For DSCP and an overridable Cache-Control header.
 ``Bundle::LogsMetrics``        Log sampling, TCPInfo  and per-remap metrics.
-``Bundle::Headers``            For removing or adding headers
+``Bundle::Headers``            For removing or adding headers.
+``Bundle::Caching``            Various cache controlling behavior.
 ============================   ====================================================================
 
 This example shows how a Cript would enable both of these bundles with all features:
@@ -55,13 +61,22 @@ This example shows how a Cript would enable both of these bundles with all featu
 
    do_create_instance()
    {
-     Bundle::Common::activate().dscp(0x2e)
-                               .cache_control("max-age=3600");
+     Bundle::Common::Activate().dscp(10)
+                               .via_header("client", "basic")
+                               .set_config({{"proxy.config.srv_enabled", 0},
+                                            {"proxy.config.http.response_server_str", "ATS"});
 
-     Bundle::LogsMetrics::activate().logsample(100)
+     Bundle::LogsMetrics::Activate().logsample(100)
                                     .tcpinfo(true)
                                     .propstats("example.com");
+
+     Bundle::Caching::Activate().cache_control("max-age=259200")
+                                .disable(true)
+
    }
+
+The ``set_config()`` function can also take a single configuration and value, without the need
+to make a list.
 
 .. note::
    You don't have to activate all components of a Bundle, just leave it out if you don't need it.
@@ -71,6 +86,24 @@ This example shows how a Cript would enable both of these bundles with all featu
    with the appropriate include directives. This is because the list of Bundles may grow over time,
    as well as the build system allowing for custom bundles locally.
 
+.. _cripts-bundles-via-header:
+
+Via Header
+==========
+
+The ``Bundle::Common`` bundle has a function called ``via_header()`` that adds a Via header to the
+client response or the origin request. The first argument is ``client`` or ``origin``, and the second
+argument is the type of Via header to be used:
+
+============================   ====================================================================
+Type                           Description
+============================   ====================================================================
+``disable``                    No Via header added.
+``protocol``                   Add the basic protocol and proxy identifier.
+``basic``                      Add basic transaction codes.
+``detailed``                   Add detailed transaction codes.
+``full``                       Add full user agent connection protocol tags.
+============================   ====================================================================
 
 .. _cripts-bundles-headers:
 
@@ -95,7 +128,7 @@ operators from the ``header_rewrite`` plugin. For example:
 
    do_create_instance()
    {
-     Bundle::Headers::activate().rm_headers({"X-Header1", "X-Header2"})
+     Bundle::Headers::Activate().rm_headers({"X-Header1", "X-Header2"})
                                 .add_headers({{"X-Header3", "value3"},
                                               {"X-Header4", "%{FROM-URL:PATH}"},
                                               {"X-Header5", "%{ID:UNIQUE}"} });

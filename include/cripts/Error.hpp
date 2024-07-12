@@ -17,10 +17,12 @@
 */
 #pragma once
 
+#include <utility>
+
 #include "ts/ts.h"
 #include "ts/remap.h"
 
-#include <utility>
+#include "cripts/Lulu.hpp"
 
 namespace Cript
 {
@@ -30,31 +32,33 @@ class Context;
 class Error
 {
 public:
-  class Message
+  class Reason
   {
-    using self_type = Message;
+    using self_type = Reason;
 
   public:
-    Message()                       = default;
-    Message(const Message &)        = delete;
-    void operator=(const Message &) = delete;
+    Reason()                          = default;
+    Reason(const self_type &)         = delete;
+    void operator=(const self_type &) = delete;
 
     static void _set(Cript::Context *context, const Cript::string_view msg);
 
-    [[nodiscard]] Cript::string_view
-    message() const
-    {
-      return {_message.c_str(), _message.size()};
-    }
-
   private:
-    void
-    setter(const Cript::string_view msg)
+    friend class Error;
+
+    [[nodiscard]] Cript::string_view
+    _getter() const
     {
-      _message = msg;
+      return {_reason.c_str(), _reason.size()};
     }
 
-    Cript::string _message;
+    void
+    _setter(const Cript::string_view msg)
+    {
+      _reason = msg;
+    }
+
+    Cript::string _reason;
   };
 
 #undef Status
@@ -64,9 +68,9 @@ public:
     using self_type = Status;
 
   public:
-    Status()                       = default;
-    Status(const Status &)         = delete;
-    void operator=(const Status &) = delete;
+    Status()                          = default;
+    Status(const self_type &)         = delete;
+    void operator=(const self_type &) = delete;
 
     static void _set(Cript::Context *context, TSHttpStatus _status);
 
@@ -76,15 +80,19 @@ public:
       _set(context, static_cast<TSHttpStatus>(_status));
     }
 
+    static TSHttpStatus _get(Cript::Context *context);
+
+  private:
+    friend class Error;
+
     [[nodiscard]] TSHttpStatus
-    status() const
+    _getter() const
     {
       return _status;
     }
 
-  private:
     void
-    setter(TSHttpStatus status)
+    _setter(TSHttpStatus status)
     {
       _status = status;
     }
@@ -97,22 +105,22 @@ public:
   Error() = default;
 
   [[nodiscard]] bool
-  failed() const
+  Failed() const
   {
     return _failed;
   }
 
   void
-  fail()
+  Fail()
   {
     _failed = true;
   }
 
   // Check if we have an error, and set appropriate exit codes etc.
-  void execute(Cript::Context *context);
+  void Execute(Cript::Context *context);
 
 private:
-  Message _message;
-  Status  _status;
-  bool    _failed = false;
+  Reason _reason;
+  Status _status;
+  bool   _failed = false;
 };

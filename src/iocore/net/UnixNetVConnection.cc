@@ -1021,7 +1021,7 @@ UnixNetVConnection::startEvent(int /* event ATS_UNUSED */, Event *e)
 }
 
 int
-UnixNetVConnection::acceptEvent(int event, Event *e)
+UnixNetVConnection::acceptEvent(int /* event ATS_UNUSED */, Event *e)
 {
   EThread    *t = (e == nullptr) ? this_ethread() : e->ethread;
   NetHandler *h = get_NetHandler(t);
@@ -1135,7 +1135,7 @@ UnixNetVConnection::mainEvent(int event, Event *e)
 }
 
 int
-UnixNetVConnection::populate(Connection &con_in, Continuation *c, void *arg)
+UnixNetVConnection::populate(Connection &con_in, Continuation *c, void * /* arg ATS_UNUSED */)
 {
   this->con.move(con_in);
   this->mutex  = c->mutex;
@@ -1511,7 +1511,7 @@ UnixNetVConnection::protocol_contains(std::string_view tag) const
 }
 
 int
-UnixNetVConnection::set_tcp_congestion_control(int side)
+UnixNetVConnection::set_tcp_congestion_control([[maybe_unused]] int side)
 {
 #ifdef TCP_CONGESTION
   std::string_view ccp;

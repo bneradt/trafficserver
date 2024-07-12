@@ -53,61 +53,61 @@ namespace Bundle
 const Cript::string Headers::_name = "Bundle::Headers";
 
 Headers::self_type &
-Headers::rm_headers(const Cript::string_view target, const std::vector<Cript::string> &headers)
+Headers::rm_headers(const Cript::string_view target, const HeaderList &headers)
 {
   switch (header_target(target)) {
   case CLIENT_REQUEST:
-    _client_request.rm_headers = headers;
-    needCallback(Cript::Callbacks::DO_REMAP);
+    _client_request.rm_headers.insert(_client_request.rm_headers.end(), headers.begin(), headers.end());
+    NeedCallback(Cript::Callbacks::DO_REMAP);
     break;
   case CLIENT_RESPONSE:
-    _client_response.rm_headers = headers;
-    needCallback(Cript::Callbacks::DO_SEND_RESPONSE);
+    _client_response.rm_headers.insert(_client_response.rm_headers.end(), headers.begin(), headers.end());
+    NeedCallback(Cript::Callbacks::DO_SEND_RESPONSE);
     break;
   case SERVER_REQUEST:
-    _server_request.rm_headers = headers;
-    needCallback(Cript::Callbacks::DO_SEND_REQUEST);
+    _client_response.rm_headers.insert(_client_response.rm_headers.end(), headers.begin(), headers.end());
+    NeedCallback(Cript::Callbacks::DO_SEND_REQUEST);
     break;
   case SERVER_RESPONSE:
-    _server_response.rm_headers = headers;
-    needCallback(Cript::Callbacks::DO_READ_RESPONSE);
+    _client_response.rm_headers.insert(_client_response.rm_headers.end(), headers.begin(), headers.end());
+    NeedCallback(Cript::Callbacks::DO_READ_RESPONSE);
     break;
   default:
-    TSReleaseAssert(!"Invalid target for rm_headers()");
+    CFatal("[Cripts::Headers] Unknown header target: %s.", target.data());
   }
 
   return *this;
 }
 
 Headers::self_type &
-Headers::set_headers(const Cript::string_view target, const std::vector<std::pair<Cript::string, Cript::string>> &headers)
+Headers::set_headers(const Cript::string_view target, const HeaderValueList &headers)
 {
-  std::vector<std::pair<Cript::string, detail::HRWBridge *>> hdrs;
-
-  hdrs.reserve(headers.size());
-  for (const auto &hdr : headers) {
-    hdrs.emplace_back(hdr.first, Headers::bridgeFactory(hdr.second));
-  }
+  detail::HeadersType::HeaderValueList *hdrs = nullptr;
 
   switch (header_target(target)) {
   case CLIENT_REQUEST:
-    _client_request.set_headers = hdrs;
-    needCallback(Cript::Callbacks::DO_REMAP);
+    hdrs = &_client_request.set_headers;
+    NeedCallback(Cript::Callbacks::DO_REMAP);
     break;
   case CLIENT_RESPONSE:
-    _client_response.set_headers = hdrs;
-    needCallback(Cript::Callbacks::DO_SEND_RESPONSE);
+    hdrs = &_client_response.set_headers;
+    NeedCallback(Cript::Callbacks::DO_SEND_RESPONSE);
     break;
   case SERVER_REQUEST:
-    _server_request.set_headers = hdrs;
-    needCallback(Cript::Callbacks::DO_SEND_REQUEST);
+    hdrs = &_server_request.set_headers;
+    NeedCallback(Cript::Callbacks::DO_SEND_REQUEST);
     break;
   case SERVER_RESPONSE:
-    _server_response.set_headers = hdrs;
-    needCallback(Cript::Callbacks::DO_READ_RESPONSE);
+    hdrs = &_server_response.set_headers;
+    NeedCallback(Cript::Callbacks::DO_READ_RESPONSE);
     break;
   default:
-    TSReleaseAssert(!"Invalid target for set_headers()");
+    CFatal("[Cripts::Headers] Unknown header target: %s.", target.data());
+  }
+
+  hdrs->reserve(headers.size());
+  for (const auto &hdr : headers) {
+    hdrs->emplace_back(hdr.first, Headers::BridgeFactory(hdr.second));
   }
 
   return *this;
@@ -116,7 +116,7 @@ Headers::set_headers(const Cript::string_view target, const std::vector<std::pai
 void
 Headers::doRemap(Cript::Context *context)
 {
-  borrow req = Client::Request::get();
+  borrow req = Client::Request::Get();
 
   for (auto &header : _client_request.rm_headers) {
     req[header] = "";
@@ -130,7 +130,7 @@ Headers::doRemap(Cript::Context *context)
 void
 Headers::doSendResponse(Cript::Context *context)
 {
-  borrow resp = Client::Response::get();
+  borrow resp = Client::Response::Get();
 
   for (auto &header : _client_response.rm_headers) {
     resp[header] = "";
@@ -144,7 +144,7 @@ Headers::doSendResponse(Cript::Context *context)
 void
 Headers::doSendRequest(Cript::Context *context)
 {
-  borrow req = Server::Request::get();
+  borrow req = Server::Request::Get();
 
   for (auto &header : _server_request.rm_headers) {
     req[header] = "";
@@ -158,7 +158,7 @@ Headers::doSendRequest(Cript::Context *context)
 void
 Headers::doReadResponse(Cript::Context *context)
 {
-  borrow resp = Server::Response::get();
+  borrow resp = Server::Response::Get();
 
   for (auto &header : _server_response.rm_headers) {
     resp[header] = "";
