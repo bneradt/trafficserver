@@ -1,0 +1,75 @@
+#include "ja4.h"
+
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <functional>
+#include <vector>
+
+namespace
+{
+
+constexpr std::array<std::uint16_t, 16> GREASE_values{0x0a0a, 0x1a1a, 0x2a2a, 0x3a3a, 0x4a4a, 0x5a5a, 0x6a6a, 0x7a7a,
+                                                      0x8a8a, 0x9a9a, 0xaaaa, 0xbaba, 0xcaca, 0xdada, 0xeaea, 0xfafa};
+constexpr std::uint16_t                 extension_SNI{0x0};
+constexpr std::uint16_t                 extension_ALPN{0x10};
+
+} // end anonymous namespace
+
+static bool is_GREASE(std::uint16_t value);
+static bool is_ignored_non_GREASE_extension(std::uint16_t extension);
+
+std::vector<std::uint16_t> const &
+JA4::TLSSummary::get_ciphers() const
+{
+  return this->_ciphers;
+}
+
+void
+JA4::TLSSummary::add_cipher(std::uint16_t cipher)
+{
+  if (!is_GREASE(cipher)) {
+    this->_ciphers.push_back(cipher);
+  }
+}
+
+std::vector<std::uint16_t> const &
+JA4::TLSSummary::get_extensions() const
+{
+  return this->_extensions;
+}
+
+void
+JA4::TLSSummary::add_extension(std::uint16_t extension)
+{
+  if (!is_GREASE(extension)) {
+    ++this->_extension_count_including_sni_and_alpn;
+    if (!is_ignored_non_GREASE_extension(extension)) {
+      this->_extensions.push_back(extension);
+    }
+  }
+}
+
+JA4::TLSSummary::difference_type
+JA4::TLSSummary::get_cipher_count() const
+{
+  return this->_ciphers.size();
+}
+
+bool
+is_GREASE(std::uint16_t value)
+{
+  return std::binary_search(GREASE_values.begin(), GREASE_values.end(), value);
+}
+
+JA4::TLSSummary::difference_type
+JA4::TLSSummary::get_extension_count() const
+{
+  return this->_extension_count_including_sni_and_alpn;
+}
+
+bool
+is_ignored_non_GREASE_extension(std::uint16_t extension)
+{
+  return (extension_SNI == extension) || (extension_ALPN == extension);
+}
