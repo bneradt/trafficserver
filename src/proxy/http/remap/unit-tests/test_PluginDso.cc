@@ -35,7 +35,6 @@
 #include "proxy/http/remap/PluginDso.h"
 
 class PluginContext;
-thread_local PluginThreadContext *pluginThreadContext;
 
 std::error_code ec;
 
@@ -43,13 +42,16 @@ std::error_code ec;
 static fs::path sandboxDir     = getTemporaryDir();
 static fs::path runtimeDir     = sandboxDir / fs::path("runtime");
 static fs::path searchDir      = sandboxDir / fs::path("search");
-static fs::path pluginBuildDir = fs::current_path() / fs::path("unit-tests/.libs");
+static fs::path pluginBuildDir = fs::path{SRC_BUILD_DIR} / "src/proxy/http/remap/unit-tests/.libs";
 
 /* The following are paths used in all scenarios in the unit tests */
-static fs::path configPath      = fs::path("plugin_v1.so");
-static fs::path pluginBuildPath = pluginBuildDir / configPath;
-static fs::path effectivePath   = searchDir / configPath;
-static fs::path runtimePath     = runtimeDir / configPath;
+static fs::path configPath             = fs::path("plugin_v1.so");
+static fs::path invalidSoPath          = fs::path("invalid.so");
+static fs::path pluginBuildPath        = pluginBuildDir / configPath;
+static fs::path effectivePath          = searchDir / configPath;
+static fs::path effectivePathInvalidSo = searchDir / invalidSoPath;
+static fs::path runtimePathInvalid     = runtimeDir / invalidSoPath;
+static fs::path runtimePath            = runtimeDir / configPath;
 
 void
 clean()
@@ -110,7 +112,7 @@ SCENARIO("loading plugins", "[plugin][core]")
 
     WHEN("loading a valid plugin")
     {
-      bool result = plugin.load(error);
+      bool result = plugin.load(error, fs::path()); // Dummy compiler path.
 
       THEN("expect it to successfully load")
       {
@@ -125,7 +127,7 @@ SCENARIO("loading plugins", "[plugin][core]")
 
     WHEN("loading a valid plugin")
     {
-      bool result = plugin.load(error);
+      bool result = plugin.load(error, fs::path()); // Dummy compiler path.
 
       THEN("expect saving the right DSO file modification time")
       {
@@ -142,7 +144,7 @@ SCENARIO("loading plugins", "[plugin][core]")
     {
       CHECK(fs::remove_all(runtimeDir, ec) > 0);
       CHECK_FALSE(fs::exists(runtimePath));
-      bool result = plugin.load(error);
+      bool result = plugin.load(error, fs::path()); // Dummy compiler path.
 
       THEN("expect it to fail")
       {
@@ -155,12 +157,12 @@ SCENARIO("loading plugins", "[plugin][core]")
     WHEN("loading a valid plugin twice in a row")
     {
       /* First attempt OK */
-      bool result = plugin.load(error);
+      bool result = plugin.load(error, fs::path()); // Dummy compiler path.
       CHECK(true == result);
       CHECK(error.empty());
 
       /* Second attempt */
-      result = plugin.load(error);
+      result = plugin.load(error, fs::path()); // Dummy compiler path.
 
       THEN("expect it to fail the second attempt")
       {
@@ -190,7 +192,7 @@ SCENARIO("loading plugins", "[plugin][core]")
     WHEN("unloading a valid plugin twice in a row")
     {
       /* First attempt OK */
-      bool result = plugin.load(error);
+      bool result = plugin.load(error, fs::path()); // Dummy compiler path.
       CHECK(true == result);
       CHECK(error.empty());
       result = plugin.unload(error);
@@ -214,7 +216,7 @@ SCENARIO("loading plugins", "[plugin][core]")
       CHECK_FALSE(fs::exists(runtimePath));
 
       /* Load and make sure it is loaded */
-      CHECK(plugin.load(error));
+      CHECK(plugin.load(error, fs::path())); // Dummy compiler path.
       /* Effective and runtime path set */
       CHECK(effectivePath == plugin.effectivePath());
       CHECK(runtimePath == plugin.runtimePath());
@@ -243,7 +245,7 @@ SCENARIO("loading plugins", "[plugin][core]")
         PluginDsoUnitTest localPlugin(configPath, effectivePath, runtimePath);
 
         /* Load and make sure it is loaded */
-        CHECK(localPlugin.load(error));
+        CHECK(localPlugin.load(error, fs::path())); // Dummy compiler path.
         /* Effective and runtime path set */
         CHECK(effectivePath == localPlugin.effectivePath());
         CHECK(runtimePath == localPlugin.runtimePath());
@@ -269,7 +271,7 @@ SCENARIO("loading plugins", "[plugin][core]")
 
     WHEN("loading the plugin")
     {
-      bool result = plugin.load(error);
+      bool result = plugin.load(error, fs::path()); // Dummy compiler path.
 
       THEN("expect the load to fail")
       {
@@ -289,31 +291,31 @@ SCENARIO("loading plugins", "[plugin][core]")
     CHECK(fs::create_directories(searchDir, ec));
     CHECK(fs::create_directories(runtimeDir, ec));
     /* Create an invalid plugin and make sure the effective path to it exists */
-    std::ofstream file(effectivePath.string());
+    std::ofstream file(effectivePathInvalidSo.string());
     file << "Invalid plugin DSO content";
     file.close();
-    CHECK(fs::exists(effectivePath));
+    CHECK(fs::exists(effectivePathInvalidSo));
 
     /* Instantiate and initialize a plugin DSO instance. */
     std::string       error;
-    PluginDsoUnitTest plugin(configPath, effectivePath, runtimePath);
+    PluginDsoUnitTest plugin(invalidSoPath, effectivePathInvalidSo, runtimePathInvalid);
 
     WHEN("loading an invalid plugin")
     {
-      bool result = plugin.load(error);
+      bool result = plugin.load(error, fs::path()); // Dummy compiler path.
 
       THEN("expect it to fail to load")
       {
         /* After calling load() the following should be set correctly */
-        CHECK(effectivePath == plugin.effectivePath());
-        CHECK(runtimePath == plugin.runtimePath());
+        CHECK(effectivePathInvalidSo == plugin.effectivePath());
+        CHECK(runtimePathInvalid == plugin.runtimePath());
 
         /* But the load should fail and an error should be returned */
         CHECK(false == result);
         CHECK_FALSE(error.empty());
 
         /* Runtime DSO should not exist since the load failed. */
-        CHECK_FALSE(fs::exists(runtimePath));
+        CHECK_FALSE(fs::exists(runtimePathInvalid));
       }
       CHECK(fs::remove_all(sandboxDir, ec) > 0);
     }
@@ -341,7 +343,7 @@ SCENARIO("looking for symbols inside a plugin DSO", "[plugin][core]")
   /* Now test away. */
   GIVEN("plugin loaded successfully")
   {
-    CHECK(plugin.load(error));
+    CHECK(plugin.load(error, fs::path())); // Dummy compiler path.
 
     WHEN("looking for an existing symbol")
     {

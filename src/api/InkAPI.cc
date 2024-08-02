@@ -7131,6 +7131,9 @@ _conf_to_memberp(TSOverridableConfigKey conf, OverridableHttpConfigParams *overr
   case TS_CONFIG_HTTP_CHUNKING_SIZE:
     ret = _memberp_to_generic(&overridableHttpConfig->http_chunking_size, conv);
     break;
+  case TS_CONFIG_HTTP_DROP_CHUNKED_TRAILERS:
+    ret = _memberp_to_generic(&overridableHttpConfig->http_drop_chunked_trailers, conv);
+    break;
   case TS_CONFIG_HTTP_FLOW_CONTROL_ENABLED:
     ret = _memberp_to_generic(&overridableHttpConfig->flow_control_enabled, conv);
     break;
@@ -7828,11 +7831,10 @@ TSVConnTunnel(TSVConn sslp)
 TSSslConnection
 TSVConnSslConnectionGet(TSVConn sslp)
 {
-  TSSslConnection    ssl    = nullptr;
-  NetVConnection    *vc     = reinterpret_cast<NetVConnection *>(sslp);
-  SSLNetVConnection *ssl_vc = dynamic_cast<SSLNetVConnection *>(vc);
-  if (ssl_vc != nullptr) {
-    ssl = reinterpret_cast<TSSslConnection>(ssl_vc->ssl);
+  TSSslConnection ssl   = nullptr;
+  NetVConnection *netvc = reinterpret_cast<NetVConnection *>(sslp);
+  if (auto tbs = netvc->get_service<TLSBasicSupport>(); tbs) {
+    ssl = reinterpret_cast<TSSslConnection>(tbs->get_tls_handle());
   }
   return ssl;
 }
@@ -8642,7 +8644,7 @@ TSRemapToUrlGet(TSHttpTxn txnp, TSMLoc *urlLocp)
 void *
 TSRemapDLHandleGet(TSRemapPluginInfo plugin_info)
 {
-  sdk_assert(sdk_sanity_check_null_ptr(plugin_info));
+  sdk_assert(sdk_sanity_check_null_ptr(plugin_info) == TS_SUCCESS);
   RemapPluginInfo *info = reinterpret_cast<RemapPluginInfo *>(plugin_info);
 
   return info->dlh();
