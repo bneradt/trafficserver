@@ -67,6 +67,12 @@ TLSBasicSupport::clear()
   this->_tls_handshake_end_time   = 0;
 }
 
+TLSHandle
+TLSBasicSupport::get_tls_handle() const
+{
+  return this->_get_ssl_object();
+}
+
 const char *
 TLSBasicSupport::get_tls_protocol_name() const
 {
@@ -98,7 +104,7 @@ TLSBasicSupport::get_tls_curve() const
     return nullptr;
   }
   ssl_curve_id curve = this->_get_tls_curve();
-#ifndef OPENSSL_IS_BORINGSSL
+#if !HAVE_SSL_GET_CURVE_NAME
   if (curve == NID_undef) {
     return nullptr;
   }
