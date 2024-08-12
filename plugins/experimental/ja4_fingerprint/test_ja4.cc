@@ -32,12 +32,12 @@
 #include <string>
 #include <string_view>
 
-static std::string call_JA4(JA4::TLSSummary const &TLS_summary);
+static std::string call_JA4(JA4::TLSClientHelloSummary const &TLS_summary);
 static std::string inc(std::string_view sv);
 
 TEST_CASE("JA4")
 {
-  JA4::TLSSummary TLS_summary;
+  JA4::TLSClientHelloSummary TLS_summary;
 
   SECTION("Given the protocol is TCP, "
           "when we create a JA4 fingerprint, "
@@ -394,7 +394,7 @@ TEST_CASE("JA4")
 }
 
 std::string
-call_JA4(JA4::TLSSummary const &TLS_summary)
+call_JA4(JA4::TLSClientHelloSummary const &TLS_summary)
 {
   return JA4::make_JA4_fingerprint(TLS_summary, [](std::string_view sv) { return sv; });
 }

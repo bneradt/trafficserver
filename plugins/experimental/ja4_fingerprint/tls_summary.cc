@@ -1,6 +1,6 @@
 /** @file ja3_fingerprint.cc
  *
-  TLSSummary data structure for JA4 fingerprint calculation.
+  TLSClientHelloSummary data structure for JA4 fingerprint calculation.
 
   @section license License
 
@@ -44,13 +44,13 @@ static bool is_GREASE(std::uint16_t value);
 static bool is_ignored_non_GREASE_extension(std::uint16_t extension);
 
 std::vector<std::uint16_t> const &
-JA4::TLSSummary::get_ciphers() const
+JA4::TLSClientHelloSummary::get_ciphers() const
 {
   return this->_ciphers;
 }
 
 void
-JA4::TLSSummary::add_cipher(std::uint16_t cipher)
+JA4::TLSClientHelloSummary::add_cipher(std::uint16_t cipher)
 {
   if (is_GREASE(cipher)) {
     return;
@@ -60,13 +60,13 @@ JA4::TLSSummary::add_cipher(std::uint16_t cipher)
 }
 
 std::vector<std::uint16_t> const &
-JA4::TLSSummary::get_extensions() const
+JA4::TLSClientHelloSummary::get_extensions() const
 {
   return this->_extensions;
 }
 
 void
-JA4::TLSSummary::add_extension(std::uint16_t extension)
+JA4::TLSClientHelloSummary::add_extension(std::uint16_t extension)
 {
   if (is_GREASE(extension)) {
     return;
@@ -78,8 +78,8 @@ JA4::TLSSummary::add_extension(std::uint16_t extension)
   }
 }
 
-JA4::TLSSummary::difference_type
-JA4::TLSSummary::get_cipher_count() const
+JA4::TLSClientHelloSummary::difference_type
+JA4::TLSClientHelloSummary::get_cipher_count() const
 {
   return this->_ciphers.size();
 }
@@ -90,8 +90,8 @@ is_GREASE(std::uint16_t value)
   return std::binary_search(GREASE_values.begin(), GREASE_values.end(), value);
 }
 
-JA4::TLSSummary::difference_type
-JA4::TLSSummary::get_extension_count() const
+JA4::TLSClientHelloSummary::difference_type
+JA4::TLSClientHelloSummary::get_extension_count() const
 {
   return this->_extension_count_including_sni_and_alpn;
 }

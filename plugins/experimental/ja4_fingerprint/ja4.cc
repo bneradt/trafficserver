@@ -47,7 +47,7 @@ constexpr std::size_t U16_HEX_BUF_SIZE{4};
 } // end anonymous namespace
 
 std::string
-JA4::make_JA4_a_raw(TLSSummary const &TLS_summary)
+JA4::make_JA4_a_raw(TLSClientHelloSummary const &TLS_summary)
 {
   std::string result;
   result.push_back(convert_protocol_to_char(TLS_summary.protocol));
@@ -113,7 +113,7 @@ convert_ALPN_to_two_char_string(std::string_view ALPN)
 }
 
 std::string
-JA4::make_JA4_b_raw(TLSSummary const &TLS_summary)
+JA4::make_JA4_b_raw(TLSClientHelloSummary const &TLS_summary)
 {
   std::string result;
   std::vector temp = TLS_summary.get_ciphers();
@@ -128,7 +128,7 @@ JA4::make_JA4_b_raw(TLSSummary const &TLS_summary)
 }
 
 std::string
-JA4::make_JA4_c_raw(TLSSummary const &TLS_summary)
+JA4::make_JA4_c_raw(TLSClientHelloSummary const &TLS_summary)
 {
   std::string result;
   std::vector temp = TLS_summary.get_extensions();

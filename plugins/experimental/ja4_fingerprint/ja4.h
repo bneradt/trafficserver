@@ -48,7 +48,7 @@ enum class SNI {
 /**
  * Represents the data sent in a TLS Client Hello needed for JA4 fingerprints.
  */
-class TLSSummary
+class TLSClientHelloSummary
 {
 public:
   using difference_type = std::iterator_traits<std::vector<std::uint16_t>::iterator>::difference_type;
@@ -85,7 +85,7 @@ private:
 };
 
 /**
- * Calculate the a portion of the JA4 fingerprint for the given TLS summary.
+ * Calculate the a portion of the JA4 fingerprint for the given client hello.
  *
  * The a portion of the fingerprint encodes the protocol, TLS version, SNI
  * type, number of cipher suites, number of extensions, and first ALPN value.
@@ -96,10 +96,10 @@ private:
  * @param TLS_summary The TLS client hello.
  * @return Returns a string containing the a portion of the JA4 fingerprint.
  */
-std::string make_JA4_a_raw(TLSSummary const &TLS_summary);
+std::string make_JA4_a_raw(TLSClientHelloSummary const &TLS_summary);
 
 /**
- * Calculate the b portion of the JA4 fingerprint for the given TLS summary.
+ * Calculate the b portion of the JA4 fingerprint for the given client hello.
  *
  * The b portion of the fingerprint is a comma-delimited list of lowercase hex
  * numbers representing the cipher suites in sorted order. GREASE values are
@@ -111,10 +111,10 @@ std::string make_JA4_a_raw(TLSSummary const &TLS_summary);
  * @param TLS_summary The TLS client hello.
  * @return Returns a string containing the b portion of the JA4 fingerprint.
  */
-std::string make_JA4_b_raw(TLSSummary const &TLS_summary);
+std::string make_JA4_b_raw(TLSClientHelloSummary const &TLS_summary);
 
 /**
- * Calculate the c portion of the JA4 fingerprint for the given TLS summary.
+ * Calculate the c portion of the JA4 fingerprint for the given client hello.
  *
  * The b portion of the fingerprint is a comma-delimited list of lowercase hex
  * numbers representing the extensions in sorted order. GREASE values and the
@@ -126,10 +126,10 @@ std::string make_JA4_b_raw(TLSSummary const &TLS_summary);
  * @param TLS_summary The TLS client hello.
  * @return Returns a string containing the c portion of the JA4 fingerprint.
  */
-std::string make_JA4_c_raw(TLSSummary const &TLS_summary);
+std::string make_JA4_c_raw(TLSClientHelloSummary const &TLS_summary);
 
 /**
- * Calculate the JA4 fingerprint for the given TLS Client Hello data.
+ * Calculate the JA4 fingerprint for the given TLS client hello.
  *
  * @param TLS_summary The TLS client hello. If there was no ALPN in the
  * Client Hello, TLS_summary.ALPN should either be empty or set to "00".
@@ -142,7 +142,7 @@ std::string make_JA4_c_raw(TLSSummary const &TLS_summary);
  */
 template <typename UnaryOp>
 std::string
-make_JA4_fingerprint(TLSSummary const &TLS_summary, UnaryOp hasher)
+make_JA4_fingerprint(TLSClientHelloSummary const &TLS_summary, UnaryOp hasher)
 {
   std::string result;
   result.append(make_JA4_a_raw(TLS_summary));
