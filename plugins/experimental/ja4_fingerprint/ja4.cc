@@ -38,6 +38,7 @@ static std::string filter_only_digits(std::string_view src);
 static char        convert_SNI_to_char(JA4::SNI SNI_type);
 static std::string convert_count_to_two_digit_string(std::size_t count);
 static std::string convert_ALPN_to_two_char_string(std::string_view ALPN);
+static void        remove_trailing_character(std::string &s);
 static std::string hexify(std::uint16_t n);
 
 std::string
@@ -115,12 +116,9 @@ JA4::make_JA4_b_raw(TLSSummary const &TLS_summary)
 
   for (auto cipher : temp) {
     result.append(hexify(cipher));
-    // There is an extra delimiter on the end of the string.
     result.push_back(',');
   }
-  if (!temp.empty()) {
-    result.pop_back();
-  }
+  remove_trailing_character(result);
   return result;
 }
 
@@ -135,11 +133,16 @@ JA4::make_JA4_c_raw(TLSSummary const &TLS_summary)
     result.append(hexify(extension));
     result.push_back(',');
   }
-  if (!temp.empty()) {
-    // There is an extra delimiter on the end of the string.
-    result.pop_back();
-  }
+  remove_trailing_character(result);
   return result;
+}
+
+void
+remove_trailing_character(std::string &s)
+{
+  if (!s.empty()) {
+    s.pop_back();
+  }
 }
 
 std::string
