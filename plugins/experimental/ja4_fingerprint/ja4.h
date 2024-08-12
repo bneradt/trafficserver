@@ -90,8 +90,8 @@ private:
  * The a portion of the fingerprint encodes the protocol, TLS version, SNI
  * type, number of cipher suites, number of extensions, and first ALPN value.
  *
- * For more information see
- * https://github.com/FoxIO-LLC/ja4/blob/main-technical_details/JA4.md.
+ * For more information see:
+ * https://github.com/FoxIO-LLC/ja4/blob/main/technical_details/JA4.md.
  *
  * @param TLS_summary The TLS client hello.
  * @return Returns a string containing the a portion of the JA4 fingerprint.
@@ -105,8 +105,8 @@ std::string make_JA4_a_raw(TLSSummary const &TLS_summary);
  * numbers representing the cipher suites in sorted order. GREASE values are
  * ignored.
  *
- * For more information see
- * https://github.com/FoxIO-LLC/ja4/blob/main-technical_details/JA4.md.
+ * For more information see:
+ * https://github.com/FoxIO-LLC/ja4/blob/main/technical_details/JA4.md.
  *
  * @param TLS_summary The TLS client hello.
  * @return Returns a string containing the b portion of the JA4 fingerprint.
@@ -120,8 +120,8 @@ std::string make_JA4_b_raw(TLSSummary const &TLS_summary);
  * numbers representing the extensions in sorted order. GREASE values and the
  * SNI and ALPN extensions are ignored.
  *
- * For more information see
- * https://github.com/FoxIO-LLC/ja4/blob/main-technical_details/JA4.md.
+ * For more information see:
+ * https://github.com/FoxIO-LLC/ja4/blob/main/technical_details/JA4.md.
  *
  * @param TLS_summary The TLS client hello.
  * @return Returns a string containing the c portion of the JA4 fingerprint.
