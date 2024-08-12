@@ -41,6 +41,11 @@ static std::string convert_ALPN_to_two_char_string(std::string_view ALPN);
 static void        remove_trailing_character(std::string &s);
 static std::string hexify(std::uint16_t n);
 
+namespace
+{
+constexpr std::size_t U16_HEX_BUF_SIZE{4};
+} // end anonymous namespace
+
 std::string
 JA4::make_JA4_a_raw(TLSSummary const &TLS_summary)
 {
@@ -148,7 +153,7 @@ remove_trailing_character(std::string &s)
 std::string
 hexify(std::uint16_t n)
 {
-  char result[5]{};
-  std::sprintf(result, "%.4x", n);
+  char result[U16_HEX_BUF_SIZE + 1]{};
+  std::snprintf(result, sizeof(result), "%.4x", n);
   return result;
 }
