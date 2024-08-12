@@ -52,9 +52,11 @@ JA4::TLSSummary::get_ciphers() const
 void
 JA4::TLSSummary::add_cipher(std::uint16_t cipher)
 {
-  if (!is_GREASE(cipher)) {
-    this->_ciphers.push_back(cipher);
+  if (is_GREASE(cipher)) {
+    return;
   }
+
+  this->_ciphers.push_back(cipher);
 }
 
 std::vector<std::uint16_t> const &
@@ -66,11 +68,13 @@ JA4::TLSSummary::get_extensions() const
 void
 JA4::TLSSummary::add_extension(std::uint16_t extension)
 {
-  if (!is_GREASE(extension)) {
-    ++this->_extension_count_including_sni_and_alpn;
-    if (!is_ignored_non_GREASE_extension(extension)) {
-      this->_extensions.push_back(extension);
-    }
+  if (is_GREASE(extension)) {
+    return;
+  }
+
+  ++this->_extension_count_including_sni_and_alpn;
+  if (!is_ignored_non_GREASE_extension(extension)) {
+    this->_extensions.push_back(extension);
   }
 }
 
