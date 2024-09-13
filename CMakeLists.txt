@@ -18,6 +18,7 @@
 # Adjust default RelWithDebInfo flags to be in line with "Release with Debug".
 # The default RelWithDebInfo uses -O2, but Release uses -O3. This difference can be astonishing to users
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g -DNDEBUG")
+set(CMAKE_CXX_FLAGS_RELEASE "-march=westmere -mtune=westmere")
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
   message(FATAL_ERROR "In source builds are disabled.  Use a preset, -B or run from a different directory")
