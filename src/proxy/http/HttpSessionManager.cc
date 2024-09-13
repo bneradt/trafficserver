@@ -190,10 +190,16 @@ ServerSessionPool::acquireSession(sockaddr const *addr, CryptoHash const &hostna
     // Note the port is matched as part of the address key so it doesn't need to be checked again.
     if (match_style & (~TS_SERVER_SESSION_SHARING_MATCH_MASK_IP)) {
       while (iter != end) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-overread"
+        // Work around a GCC 11 compiler bug that incorrectly warns about a string overread:
+        // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=101361
+        // This impacted ylinux edge 1.1 builds.
         if ((!(match_style & TS_SERVER_SESSION_SHARING_MATCH_MASK_HOSTONLY) || iter->hostname_hash == hostname_hash) &&
             (!(match_style & TS_SERVER_SESSION_SHARING_MATCH_MASK_SNI) || validate_sni(sm, iter->get_netvc())) &&
             (!(match_style & TS_SERVER_SESSION_SHARING_MATCH_MASK_HOSTSNISYNC) || validate_host_sni(sm, iter->get_netvc())) &&
             (!(match_style & TS_SERVER_SESSION_SHARING_MATCH_MASK_CERT) || validate_cert(sm, iter->get_netvc()))) {
+#pragma GCC diagnostic pop
           zret = HSM_DONE;
           break;
         }
