@@ -1254,6 +1254,7 @@ SSLMultiCertConfigLoader::init_server_ssl_ctx(CertLoadData const &data, const SS
     Dbg(dbg_ctl_ssl_load, "Creating new context %p cert_count=%ld initial: %s", ctx, cert_names_list.size(),
         cert_names_list[0].c_str());
 
+    SSL_CTX_set_min_proto_version(ctx, TLS1_VERSION);
     SSL_CTX_set_options(ctx, _params->ssl_ctx_options);
 
     if (_params->server_tls_ver_min >= 0 || _params->server_tls_ver_max >= 0) {
@@ -1555,20 +1556,15 @@ SSLMultiCertConfigLoader::_set_cipher_suites([[maybe_unused]] SSL_CTX *ctx)
 }
 
 bool
-SSLMultiCertConfigLoader::_set_curves([[maybe_unused]] SSL_CTX *ctx)
+SSLMultiCertConfigLoader::_set_curves(SSL_CTX *ctx)
 {
-#if defined(SSL_CTX_set1_groups_list) || defined(SSL_CTX_set1_curves_list)
   if (this->_params->server_groups_list != nullptr) {
-#ifdef SSL_CTX_set1_groups_list
     if (!SSL_CTX_set1_groups_list(ctx, this->_params->server_groups_list)) {
-#else
-    if (!SSL_CTX_set1_curves_list(ctx, this->_params->server_groups_list)) {
-#endif
       SSLError("invalid groups list for server in %s", ts::filename::RECORDS);
       return false;
     }
   }
-#endif
+
   return true;
 }
 
