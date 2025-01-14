@@ -24,7 +24,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
 endif()
 
 cmake_minimum_required(VERSION 3.20..3.27)
-project(ats VERSION 10.0.1)
+project(ats VERSION 10.0.3)
 
 set(TS_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
 set(TS_VERSION_MINOR ${PROJECT_VERSION_MINOR})
@@ -135,6 +135,7 @@ option(EXTERNAL_YAML_CPP "Use external yaml-cpp (default OFF)")
 option(EXTERNAL_LIBSWOC "Use external libswoc (default OFF)")
 option(LINK_PLUGINS "Link core libraries to plugins (default OFF)")
 option(ENABLE_PROBES "Enable ATS SystemTap probes (default OFF)")
+option(ENABLE_VERIFY_PLUGINS "Enable plugin verification tests (default ON)" ON)
 
 # Setup user
 # NOTE: this is the user trafficserver runs as
@@ -576,7 +577,6 @@ endif(HOST_OS STREQUAL "linux")
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL AppleClang)
   set(CMAKE_MACOSX_RPATH 1)
-  link_libraries("-ld_classic")
 endif()
 
 if(HOST_OS STREQUAL "freebsd")

@@ -47,6 +47,7 @@
 #include "proxy/http/HttpBodyFactory.h"
 #include "proxy/IPAllow.h"
 #include "iocore/utils/Machine.h"
+#include "ts/ats_probe.h"
 
 DbgCtl HttpTransact::State::_dbg_ctl{"http"};
 
@@ -521,8 +522,7 @@ HttpTransact::is_server_negative_cached(State *s)
     //   down to 2*down_server_timeout
     if (s->dns_info.active &&
         ts_clock::from_time_t(s->client_request_time) + s->txn_conf->down_server_timeout < s->dns_info.active->last_fail_time()) {
-      s->dns_info.active->last_failure = TS_TIME_ZERO;
-      s->dns_info.active->fail_count   = 0;
+      s->dns_info.active->mark_up();
       ink_assert(!"extreme clock skew");
       return true;
     }
@@ -5022,6 +5022,17 @@ HttpTransact::merge_response_header_with_cached_header(HTTPHdr *cached_header, H
           MIMEField &field2{*spot2};
           name2 = field2.name_get(&name_len2);
 
+          // It is specified above that content type should not
+          // be altered here however when a duplicate header
+          // is present, all headers following are delete and
+          // re-added back. This includes content type if it follows
+          // any duplicate header. This leads to the loss of
+          // content type in the client response.
+          // This ensures that it is not altered when duplicate
+          // headers are present.
+          if (name2 == MIME_FIELD_CONTENT_TYPE) {
+            continue;
+          }
           cached_header->field_delete(name2, name_len2);
         }
         dups_seen = true;
@@ -8251,6 +8262,71 @@ HttpTransact::milestone_update_api_time(State *s)
   s->state_machine->milestone_update_api_time();
 }
 
+void
+HttpTransact::origin_server_connection_speed(ink_hrtime transfer_time, int64_t nbytes)
+{
+  float bytes_per_hrtime =
+    (transfer_time == 0) ? (nbytes) : (static_cast<float>(nbytes) / static_cast<float>(static_cast<int64_t>(transfer_time)));
+  int bytes_per_sec = static_cast<int>(bytes_per_hrtime * HRTIME_SECOND);
+
+  if (bytes_per_sec <= 100) {
+    Metrics::Counter::increment(http_rsb.user_agent_speed_bytes_per_sec_100);
+  } else if (bytes_per_sec <= 1024) {
+    Metrics::Counter::increment(http_rsb.user_agent_speed_bytes_per_sec_1k);
+  } else if (bytes_per_sec <= 10240) {
+    Metrics::Counter::increment(http_rsb.user_agent_speed_bytes_per_sec_10k);
+  } else if (bytes_per_sec <= 102400) {
+    Metrics::Counter::increment(http_rsb.user_agent_speed_bytes_per_sec_100k);
+  } else if (bytes_per_sec <= 1048576) {
+    Metrics::Counter::increment(http_rsb.user_agent_speed_bytes_per_sec_1M);
+  } else if (bytes_per_sec <= 10485760) {
+    Metrics::Counter::increment(http_rsb.user_agent_speed_bytes_per_sec_10M);
+  } else if (bytes_per_sec <= 104857600) {
+    Metrics::Counter::increment(http_rsb.user_agent_speed_bytes_per_sec_100M);
+  } else if (bytes_per_sec <= 2 * 104857600) {
+    Metrics::Counter::increment(http_rsb.user_agent_speed_bytes_per_sec_200M);
+  } else if (bytes_per_sec <= 4 * 104857600) {
+    Metrics::Counter::increment(http_rsb.user_agent_speed_bytes_per_sec_400M);
+  } else if (bytes_per_sec <= 8 * 104857600) {
+    Metrics::Counter::increment(http_rsb.user_agent_speed_bytes_per_sec_800M);
+  } else {
+    Metrics::Counter::increment(http_rsb.user_agent_speed_bytes_per_sec_1G);
+  }
+  return;
+}
+
+void
+HttpTransact::user_agent_connection_speed(ink_hrtime transfer_time, int64_t nbytes)
+{
+  float bytes_per_hrtime =
+    (transfer_time == 0) ? (nbytes) : (static_cast<float>(nbytes) / static_cast<float>(static_cast<int64_t>(transfer_time)));
+  int64_t bytes_per_sec = static_cast<int64_t>(bytes_per_hrtime * HRTIME_SECOND);
+
+  if (bytes_per_sec <= 100) {
+    Metrics::Counter::increment(http_rsb.origin_server_speed_bytes_per_sec_100);
+  } else if (bytes_per_sec <= 1024) {
+    Metrics::Counter::increment(http_rsb.origin_server_speed_bytes_per_sec_1k);
+  } else if (bytes_per_sec <= 10240) {
+    Metrics::Counter::increment(http_rsb.origin_server_speed_bytes_per_sec_10k);
+  } else if (bytes_per_sec <= 102400) {
+    Metrics::Counter::increment(http_rsb.origin_server_speed_bytes_per_sec_100k);
+  } else if (bytes_per_sec <= 1048576) {
+    Metrics::Counter::increment(http_rsb.origin_server_speed_bytes_per_sec_1M);
+  } else if (bytes_per_sec <= 10485760) {
+    Metrics::Counter::increment(http_rsb.origin_server_speed_bytes_per_sec_10M);
+  } else if (bytes_per_sec <= 104857600) {
+    Metrics::Counter::increment(http_rsb.origin_server_speed_bytes_per_sec_100M);
+  } else if (bytes_per_sec <= 2 * 104857600) {
+    Metrics::Counter::increment(http_rsb.origin_server_speed_bytes_per_sec_200M);
+  } else if (bytes_per_sec <= 4 * 104857600) {
+    Metrics::Counter::increment(http_rsb.origin_server_speed_bytes_per_sec_400M);
+  } else if (bytes_per_sec <= 8 * 104857600) {
+    Metrics::Counter::increment(http_rsb.origin_server_speed_bytes_per_sec_800M);
+  } else {
+    Metrics::Counter::increment(http_rsb.origin_server_speed_bytes_per_sec_1G);
+  }
+}
+
 /*
  * added request_process_time stat for loadshedding foo
  */
@@ -8569,8 +8645,8 @@ HttpTransact::client_result_stat(State *s, ink_hrtime total_time, ink_hrtime req
 }
 
 void
-HttpTransact::update_size_and_time_stats(State *s, ink_hrtime total_time, ink_hrtime /* user_agent_write_time ATS_UNUSED */,
-                                         ink_hrtime /* origin_server_read_time ATS_UNUSED */, int user_agent_request_header_size,
+HttpTransact::update_size_and_time_stats(State *s, ink_hrtime total_time, ink_hrtime user_agent_write_time,
+                                         ink_hrtime origin_server_read_time, int user_agent_request_header_size,
                                          int64_t user_agent_request_body_size, int user_agent_response_header_size,
                                          int64_t user_agent_response_body_size, int origin_server_request_header_size,
                                          int64_t origin_server_request_body_size, int origin_server_response_header_size,
@@ -8700,6 +8776,14 @@ HttpTransact::update_size_and_time_stats(State *s, ink_hrtime total_time, ink_hr
     Metrics::Counter::increment(http_rsb.origin_server_response_header_total_size, origin_server_response_header_size);
     Metrics::Counter::increment(http_rsb.origin_server_request_document_total_size, origin_server_request_body_size);
     Metrics::Counter::increment(http_rsb.origin_server_response_document_total_size, origin_server_response_body_size);
+  }
+
+  if (user_agent_write_time >= 0) {
+    user_agent_connection_speed(user_agent_write_time, user_agent_response_size);
+  }
+
+  if (origin_server_request_header_size > 0 && origin_server_read_time > 0) {
+    origin_server_connection_speed(origin_server_read_time, origin_server_response_size);
   }
 
   if (s->method == HTTP_WKSIDX_PUSH) {
