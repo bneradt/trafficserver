@@ -33,6 +33,7 @@
 
 #include "tscore/ink_inet.h"
 
+#include <string>
 #include <vector>
 
 class SSLNetVConnection;
@@ -314,4 +315,34 @@ public:
 private:
   uint32_t server_max_early_data = 0;
 #endif
+};
+
+/**
+   Override proxy.config.ssl.server.cipher_suite by server_cipher_suite in sni.yaml
+ */
+class ServerCipherSuite : public ActionItem
+{
+public:
+  ServerCipherSuite(std::string const &p) : server_cipher_suite(p) {}
+  ~ServerCipherSuite() override {}
+
+  int SNIAction(SSL &ssl, const Context &ctx) const override;
+
+private:
+  std::string const server_cipher_suite{};
+};
+
+/**
+   Override proxy.config.ssl.server.TLSv1_3.cipher_suites by server_TLSv1_3_cipher_suites in sni.yaml
+ */
+class ServerTLSv1_3CipherSuites : public ActionItem
+{
+public:
+  ServerTLSv1_3CipherSuites(std::string const &p) : server_TLSV1_3_cipher_suites(p) {}
+  ~ServerTLSv1_3CipherSuites() override {}
+
+  int SNIAction(SSL &ssl, const Context &ctx) const override;
+
+private:
+  std::string const server_TLSV1_3_cipher_suites{};
 };
