@@ -34,6 +34,10 @@
 #include "jsonrpc/CtrlRPCRequests.h"
 #include "jsonrpc/ctrl_yaml_codecs.h"
 
+extern std::unordered_map<int, std::function<void()>> Signal_Handler;
+extern void                                           subscribe_to_signal_handler(int signal_num, std::function<void()> handler);
+extern void                                           unsubscribe_signal(int signal_num);
+
 namespace
 {
 /// We use yamlcpp as codec implementation.

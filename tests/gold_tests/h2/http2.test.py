@@ -24,7 +24,7 @@ Test a basic remap of a http/2 connection
 '''
 
 Test.SkipUnless(Condition.HasCurlFeature('http2'))
-Test.ContinueOnFail = True
+#Test.ContinueOnFail = True
 
 # ----
 # Setup Origin Server
@@ -206,6 +206,7 @@ tr.Processes.Default.Command = 'curl -s -k -H "Transfer-Encoding: chunked" -d "{
     post_body, ts.Variables.ssl_port)
 tr.Processes.Default.ReturnCode = 0
 tr.Processes.Default.Streams.All = "gold/post_chunked.gold"
+tr.TimeOut = 60
 tr.StillRunningAfter = server
 
 # Test Case 7: Post with big chunked body
@@ -216,6 +217,7 @@ tr.Processes.Default.Command = 'curl -s -k -H "Transfer-Encoding: chunked" -d @b
     ts.Variables.ssl_port)
 tr.Processes.Default.ReturnCode = 0
 tr.Processes.Default.Streams.All = "gold/post_chunked.gold"
+tr.TimeOut = 60
 tr.StillRunningAfter = server
 
 # Test Case 8: Huge response header
@@ -226,6 +228,7 @@ tr = Test.AddTestRun("huge response header")
 tr.Processes.Default.Command = f'curl -vs -k --http2 https://127.0.0.1:{ts.Variables.ssl_port}/huge_resp_hdrs |& grep -v "bytes data"'
 tr.Processes.Default.ReturnCode = 0
 # Different versions of curl will have different cases for HTTP/2 field names.
+tr.TimeOut = 60
 tr.Processes.Default.Streams.stdout = Testers.GoldFile("gold/http2_8_stdout.gold", case_insensitive=True)
 tr.StillRunningAfter = server
 
@@ -236,4 +239,5 @@ tr.Processes.Default.ReturnCode = 0
 tr.Processes.Default.Streams.stdout = "gold/http2_9_stdout.gold"
 # Different versions of curl will have different cases for HTTP/2 field names.
 tr.Processes.Default.Streams.stderr = Testers.GoldFile("gold/http2_9_stderr.gold", case_insensitive=True)
+tr.TimeOut = 60
 tr.StillRunningAfter = server

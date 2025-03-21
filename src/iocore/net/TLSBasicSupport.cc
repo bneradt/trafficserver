@@ -187,6 +187,22 @@ TLSBasicSupport::get_tls_cert_to_verify() const
 }
 
 void
+TLSBasicSupport::set_legacy_cipher_suite(std::string const &cipher_suite)
+{
+  auto ssl = this->_get_ssl_object();
+  SSL_set_cipher_list(ssl, cipher_suite.c_str());
+}
+
+void
+TLSBasicSupport::set_cipher_suite([[maybe_unused]] std::string const &cipher_suite)
+{
+#if TS_USE_TLS_SET_CIPHERSUITES
+  auto ssl = this->_get_ssl_object();
+  SSL_set_ciphersuites(ssl, cipher_suite.c_str());
+#endif
+}
+
+void
 TLSBasicSupport::_record_tls_handshake_begin_time()
 {
   this->_tls_handshake_begin_time = ink_get_hrtime();
