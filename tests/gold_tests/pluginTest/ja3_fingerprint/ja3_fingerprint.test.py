@@ -82,11 +82,12 @@ class JA3FingerprintTest:
         self._server.Streams.All += Testers.ContainsExpression("http2-request", "Verify the HTTP/2 request was received.")
         if not self._test_remap:
             # Verify --preserve worked.
-            self._server.Streams.All += Testers.ContainsExpression("x-ja3-raw: .*,", "Verify the new raw header was added.")
             self._server.Streams.All += Testers.ContainsExpression(
-                "x-ja3-raw: first-signature", "Verify the already-existing raw header was preserved.")
+                "x-ja3-raw: .*,", "Verify the new raw header was added.", reflags=re.IGNORECASE)
+            self._server.Streams.All += Testers.ContainsExpression(
+                "x-ja3-raw: first-signature", "Verify the already-existing raw header was preserved.", reflags=re.IGNORECASE)
             self._server.Streams.All += Testers.ExcludesExpression(
-                "x-ja3-raw: first-signature;", "Verify no extra values were added due to preserve.")
+                "x-ja3-raw: first-signature;", "Verify no extra values were added due to preserve.", reflags=re.IGNORECASE)
 
     def _configure_trafficserver(self) -> None:
         """Configure Traffic Server to be used in the test."""

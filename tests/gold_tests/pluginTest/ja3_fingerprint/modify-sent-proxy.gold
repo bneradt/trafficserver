@@ -2,5 +2,5 @@
 -- State Machine Id``
 POST /some/path/http2``
 ``
-x-ja3-sig: ``
+X-JA3-Sig: ``
 ``
