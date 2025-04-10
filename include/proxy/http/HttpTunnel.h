@@ -111,8 +111,7 @@ struct ChunkedHandler {
   bool drop_chunked_trailers = false;
 
   bool strict_chunk_parsing = true;
-
-  bool truncation = false;
+  bool truncation           = false;
 
   /** The number of bytes to skip from the reader because they are not body bytes.
    *
@@ -485,6 +484,9 @@ private:
   /// Corresponds to proxy.config.http.drop_chunked_trailers having a value of 1.
   bool http_drop_chunked_trailers = false;
 
+  /// Corresponds to proxy.config.http.strict_chunk_parsing having a value of 1.
+  bool http_strict_chunk_parsing = false;
+
   /** The number of body bytes processed in this last execution of the tunnel.
    *
    * This accounting is used to determine how many bytes to copy into the body
@@ -499,9 +501,6 @@ private:
    * told us to via nbytes.
    */
   int64_t body_bytes_copied = 0;
-
-  /// Corresponds to proxy.config.http.strict_chunk_parsing having a value of 1.
-  bool http_strict_chunk_parsing = false;
 };
 
 ////

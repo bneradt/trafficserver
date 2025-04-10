@@ -21,11 +21,10 @@ if(NOT DEFINED PACKAGE_VERSION)
 endif()
 set(PACKAGE_BUGREPORT "dev@trafficserver.apache.org")
 
-# TODO: Use layouts
 set(prefix ${CMAKE_INSTALL_PREFIX})
-set(exp_bindir ${CMAKE_INSTALL_PREFIX}/bin)
-set(exp_runtimedir ${CMAKE_INSTALL_PREFIX}/var/trafficserver)
-set(exp_logdir ${CMAKE_INSTALL_PREFIX}/var/log/trafficserver)
+set(exp_bindir ${CMAKE_INSTALL_FULL_BINDIR})
+set(exp_runtimedir ${CMAKE_INSTALL_FULL_RUNSTATEDIR})
+set(exp_logdir ${CMAKE_INSTALL_FULL_LOGDIR})
 set(pkgsysuser ${TS_PKGSYSUSER})
 set(pkgsysgroup ${TS_PKGSYSGROUP})
 
