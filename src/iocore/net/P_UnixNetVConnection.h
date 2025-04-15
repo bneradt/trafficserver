@@ -36,20 +36,17 @@
 #include "tscore/ink_sock.h"
 #include "iocore/net/ConnectionTracker.h"
 #include "iocore/net/NetVConnection.h"
-#include "P_UnixNetState.h"
 #include "P_Connection.h"
 #include "P_NetAccept.h"
 #include "iocore/net/NetEvent.h"
 
-#if HAVE_STRUCT_MPTCP_INFO_SUBFLOWS
+#if defined(HAVE_STRUCT_MPTCP_INFO_SUBFLOWS)
 #include <linux/mptcp.h>
 #endif
 
 class UnixNetVConnection;
 class NetHandler;
 struct PollDescriptor;
-
-enum tcp_congestion_control_t { CLIENT_SIDE, SERVER_SIDE };
 
 // WARNING:  many or most of the member functions of UnixNetVConnection should only be used when it is instantiated
 // directly.  They should not be used when UnixNetVConnection is a base class.
@@ -60,12 +57,6 @@ public:
   VIO *do_io_write(Continuation *c, int64_t nbytes, IOBufferReader *buf, bool owner = false) override;
 
   bool get_data(int id, void *data) override;
-
-  const char *
-  get_server_name() const override
-  {
-    return nullptr;
-  }
 
   void do_io_close(int lerrno = -1) override;
   void do_io_shutdown(ShutdownHowTo_t howto) override;
@@ -82,17 +73,17 @@ public:
   // called when handing an  event from this NetVConnection,//
   // or the NetVConnection creation callback.               //
   ////////////////////////////////////////////////////////////
-  virtual void  set_active_timeout(ink_hrtime timeout_in) override;
-  virtual void  set_inactivity_timeout(ink_hrtime timeout_in) override;
-  virtual void  set_default_inactivity_timeout(ink_hrtime timeout_in) override;
-  virtual bool  is_default_inactivity_timeout() override;
-  virtual void  cancel_active_timeout() override;
-  virtual void  cancel_inactivity_timeout() override;
+  void          set_active_timeout(ink_hrtime timeout_in) override;
+  void          set_inactivity_timeout(ink_hrtime timeout_in) override;
+  void          set_default_inactivity_timeout(ink_hrtime timeout_in) override;
+  bool          is_default_inactivity_timeout() override;
+  void          cancel_active_timeout() override;
+  void          cancel_inactivity_timeout() override;
   void          set_action(Continuation *c) override;
   const Action *get_action() const;
-  virtual void  add_to_keep_alive_queue() override;
-  virtual void  remove_from_keep_alive_queue() override;
-  virtual bool  add_to_active_queue() override;
+  void          add_to_keep_alive_queue() override;
+  void          remove_from_keep_alive_queue() override;
+  bool          add_to_active_queue() override;
   virtual void  remove_from_active_queue();
 
   // The public interface is VIO::reenable()
@@ -157,8 +148,8 @@ public:
   }
 
   // NetEvent
-  virtual void net_read_io(NetHandler *nh, EThread *lthread) override;
-  virtual void net_write_io(NetHandler *nh, EThread *lthread) override;
+  virtual void net_read_io(NetHandler *nh) override;
+  virtual void net_write_io(NetHandler *nh) override;
   virtual void free_thread(EThread *t) override;
   virtual int
   close() override
@@ -168,7 +159,7 @@ public:
   virtual int
   get_fd() override
   {
-    return this->con.fd;
+    return this->con.sock.get_fd();
   }
 
   virtual EThread *
@@ -202,7 +193,7 @@ public:
   int             readSignalAndUpdate(int event);
   void            readReschedule(NetHandler *nh);
   void            writeReschedule(NetHandler *nh);
-  void            netActivity(EThread *lthread);
+  void            netActivity();
   /**
    * If the current object's thread does not match the t argument, create a new
    * NetVC in the thread t context based on the socket and ssl information in the
@@ -234,14 +225,12 @@ public:
   ink_hrtime get_inactivity_timeout() override;
   ink_hrtime get_active_timeout() override;
 
-  virtual void set_local_addr() override;
-  void         set_mptcp_state() override;
-  virtual void set_remote_addr() override;
-  void         set_remote_addr(const sockaddr *) override;
-  int          set_tcp_congestion_control(int side) override;
-  void         apply_options() override;
-
-  friend void write_to_net_io(NetHandler *, UnixNetVConnection *, EThread *);
+  void set_local_addr() override;
+  void set_mptcp_state() override;
+  void set_remote_addr() override;
+  void set_remote_addr(const sockaddr *) override;
+  int  set_tcp_congestion_control(tcp_congestion_control_side side) override;
+  void apply_options() override;
 
   // set_context() should be called before calling this member function.
   void mark_as_tunnel_endpoint() override;
@@ -299,7 +288,7 @@ UnixNetVConnection::set_local_addr()
   // This call will fail if fd is closed already. That is ok, because the
   // `local_addr` is checked within get_local_addr() and the `got_local_addr`
   // is set only with a valid `local_addr`.
-  ATS_UNUSED_RETURN(safe_getsockname(con.fd, &local_addr.sa, &local_sa_size));
+  ATS_UNUSED_RETURN(safe_getsockname(get_fd(), &local_addr.sa, &local_sa_size));
 }
 
 // Update the internal VC state variable for MPTCP
@@ -311,16 +300,16 @@ UnixNetVConnection::set_mptcp_state()
   int               minfo_len = sizeof(minfo);
 
   Dbg(_dbg_ctl_socket_mptcp, "MPTCP_INFO and struct mptcp_info defined");
-  if (0 == safe_getsockopt(con.fd, SOL_MPTCP, MPTCP_INFO, &minfo, &minfo_len)) {
+  if (0 == safe_getsockopt(get_fd(), SOL_MPTCP, MPTCP_INFO, &minfo, &minfo_len)) {
     if (minfo_len > 0) {
-      Dbg(_dbg_ctl_socket_mptcp, "MPTCP socket state (remote key received): %d",
+      Dbg(_dbg_ctl_socket_mptcp, "MPTCP socket state (remote key received): %lu",
           (minfo.mptcpi_flags & MPTCP_INFO_FLAG_REMOTE_KEY_RECEIVED));
       mptcp_state = (minfo.mptcpi_flags & MPTCP_INFO_FLAG_REMOTE_KEY_RECEIVED);
       return;
     }
   } else {
     mptcp_state = 0;
-    Dbg(_dbg_ctl_socket_mptcp, "MPTCP failed getsockopt(%d, MPTCP_INFO): %s", con.fd, strerror(errno));
+    Dbg(_dbg_ctl_socket_mptcp, "MPTCP failed getsockopt(%d, MPTCP_INFO): %s", get_fd(), strerror(errno));
   }
 #endif
 }
@@ -369,7 +358,7 @@ inline UnixNetVConnection::~UnixNetVConnection()
 inline SOCKET
 UnixNetVConnection::get_socket()
 {
-  return con.fd;
+  return get_fd();
 }
 
 inline void
@@ -383,9 +372,3 @@ UnixNetVConnection::get_action() const
 {
   return &action_;
 }
-
-// declarations for local use (within the net module)
-
-void write_to_net(NetHandler *nh, UnixNetVConnection *vc, EThread *thread);
-void write_to_net_io(NetHandler *nh, UnixNetVConnection *vc, EThread *thread);
-void net_activity(UnixNetVConnection *vc, EThread *thread);

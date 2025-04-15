@@ -18,7 +18,7 @@
 add_library(aio STATIC)
 add_library(ts::aio ALIAS aio)
 
-target_sources(aio PRIVATE AIO.cc Inline.cc AIO_fault_injection.cc)
+target_sources(aio PRIVATE AIO.cc AIO_fault_injection.cc)
 
 target_link_libraries(aio PUBLIC ts::inkevent ts::tscore)
 if(TS_USE_LINUX_IO_URING)
@@ -34,3 +34,5 @@ if(BUILD_TESTING)
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/src/iocore/aio
   )
 endif()
+
+clang_tidy_check(aio)

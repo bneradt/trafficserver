@@ -25,6 +25,7 @@
 #include "proxy/http/HttpDebugNames.h"
 #include "proxy/ProxySession.h"
 #include "iocore/net/TLSBasicSupport.h"
+#include "private/SSLProxySession.h"
 
 std::map<int, std::function<PoolableSession *()>> ProtocolSessionCreateMap;
 
@@ -334,7 +335,11 @@ ProxySession::reenable(VIO *vio)
 bool
 ProxySession::support_sni() const
 {
-  return _vc ? _vc->support_sni() : false;
+  if (this->_vc) {
+    return this->_vc->get_service<TLSSNISupport>() != nullptr;
+  } else {
+    return false;
+  }
 }
 
 PoolableSession *

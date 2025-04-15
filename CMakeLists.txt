@@ -24,7 +24,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
 endif()
 
 cmake_minimum_required(VERSION 3.20..3.27)
-project(ats VERSION 10.0.0)
+project(ats VERSION 10.1.0)
 
 set(TS_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
 set(TS_VERSION_MINOR ${PROJECT_VERSION_MINOR})
@@ -45,7 +45,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 list(APPEND CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE -DATS_BUILD)
 
+# Setup default install directory
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  set(CMAKE_INSTALL_PREFIX
+      /usr/local/trafficserver
+      CACHE PATH "Default install path" FORCE
+  )
+endif()
+
 include(layout)
+include(ClangTidy)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   add_compile_definitions(DEBUG _DEBUG)
@@ -130,6 +139,7 @@ if(ENABLE_DISK_FAILURE_TESTS)
   add_compile_definitions("AIO_FAULT_INJECTION")
 endif()
 option(ENABLE_AUTEST "Setup autest (default OFF)")
+option(ENABLE_AUTEST_UDS "Setup autest with curl using UDS (default OFF)")
 option(ENABLE_BENCHMARKS "Build benchmarks (default OFF)")
 option(EXTERNAL_YAML_CPP "Use external yaml-cpp (default OFF)")
 option(EXTERNAL_LIBSWOC "Use external libswoc (default OFF)")
@@ -159,14 +169,6 @@ else()
   set(TS_PKGSYSGROUP ${WITH_GROUP})
 endif()
 set(TS_PKGSYSUSER ${WITH_USER})
-
-# Setup default install directory
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-  set(CMAKE_INSTALL_PREFIX
-      /usr/local/trafficserver
-      CACHE PATH "Default install path" FORCE
-  )
-endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL Linux)
   set(DEFAULT_POSIX_CAP ON)
@@ -324,8 +326,8 @@ if(ENABLE_ASAN)
   if(ENABLE_JEMALLOC OR ENABLE_MIMALLOC)
     message(FATAL_ERROR "ENABLE_JEMALLOC and ENABLE_MIMALLOC are not compatible with asan builds")
   endif()
-  add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
-  add_link_options(-fsanitize=address)
+  add_compile_options(-g -fsanitize=address -fno-omit-frame-pointer)
+  add_link_options(-g -fsanitize=address)
 endif()
 
 if(ENABLE_PROBES)
@@ -462,7 +464,7 @@ check_symbol_exists(BIO_set_ex_data "openssl/bio.h" HAVE_BIO_SET_EX_DATA)
 check_symbol_exists(BIO_meth_get_ctrl "openssl/bio.h" HAVE_BIO_METH_GET_CTRL)
 check_symbol_exists(BIO_meth_get_create "openssl/bio.h" HAVE_BIO_METH_GET_CREATE)
 check_symbol_exists(BIO_meth_get_destroy "openssl/bio.h" HAVE_BIO_METH_GET_DESTROY)
-check_symbol_exists(HMAC_CTX_new "openssl/hmac.h" HAVE_HMAC_CTX_NEW)
+check_symbol_exists(CRYPTO_set_ex_data "openssl/bio.h" HAVE_CRYPTO_SET_EX_DATA)
 check_symbol_exists(DH_get_2048_256 "openssl/dh.h" TS_USE_GET_DH_2048_256)
 check_symbol_exists(OPENSSL_NO_TLS_3 "openssl/ssl.h" TS_NO_USE_TLS12)
 check_symbol_exists(SSL_CTX_set_client_hello_cb "openssl/ssl.h" HAVE_SSL_CTX_SET_CLIENT_HELLO_CB)
@@ -513,12 +515,27 @@ endif()
 
 check_source_compiles(
   C "#include <openssl/ssl.h>
-  void main() { int x = SSL_CTRL_GET_EXTRA_CHAIN_CERTS; }" HAVE_NATIVE_DUAL_CERT_SUPPORT
+  int main() { int x = SSL_CTRL_GET_EXTRA_CHAIN_CERTS; return 0; }" HAVE_NATIVE_DUAL_CERT_SUPPORT
+)
+check_source_compiles(
+  C "#include <openssl/ex_data.h>
+  int main() { CRYPTO_EX_unused x; return 0; }" HAVE_CRYPTO_EX_UNUSED
+)
+check_cxx_source_compiles(
+  "#include <openssl/crypto.h>
+  #if __has_include(<openssl/ex_data.h>)
+  #include <openssl/ex_data.h>
+  #endif
+  int main() {
+  CRYPTO_EX_dup *cb = [] (CRYPTO_EX_DATA *to, const CRYPTO_EX_DATA *from, void **from_d, int idx, long argl, void *argp) -> int { return 0; };
+  return 0;
+  }"
+  HAVE_CRYPTO_EX_DUP_TYPE1
 )
 
-set(CMAKE_REQUIRED_INCLUDES netinet/in.h netinet/tcp.h)
+set(CMAKE_EXTRA_INCLUDE_FILES netinet/in.h netinet/tcp.h)
 check_type_size("struct tcp_info" STRUCT_TCP_INFO)
-unset(CMAKE_REQUIRED_INCLUDES)
+unset(CMAKE_EXTRA_INCLUDE_FILES)
 
 # Since Linux 2.6.12
 check_struct_has_member("struct tcp_info" tcpi_total_retrans "linux/tcp.h" HAVE_STRUCT_TCP_INFO_TCPI_TOTAL_RETRANS)
@@ -529,6 +546,7 @@ check_struct_has_member("struct tcp_info" __tcpi_retrans "netinet/tcp.h" HAVE_ST
 check_struct_has_member("struct sockaddr" sa_len "netinet/in.h" HAVE_STRUCT_SOCKADDR_SA_LEN)
 check_struct_has_member("struct sockaddr_in" sin_len "netinet/in.h" HAVE_STRUCT_SOCKADDR_IN_SIN_LEN)
 check_struct_has_member("struct sockaddr_in6" sin6_len "netinet/in.h" HAVE_STRUCT_SOCKADDR_IN6_SIN6_LEN)
+check_struct_has_member("struct sockaddr_un" sun_len "sys/un.h" HAVE_STRUCT_SOCKADDR_UN_SUN_LEN)
 check_struct_has_member("struct stat" st_mtimespec "sys/stat.h" HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC)
 check_struct_has_member("struct stat" st_mtim "sys/stat.h" HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC)
 check_struct_has_member("struct mptcp_info" mptcpi_subflows "linux/mptcp.h" HAVE_STRUCT_MPTCP_INFO_SUBFLOWS)
@@ -539,6 +557,7 @@ find_package(resolv)
 if(ENABLE_DOCS OR ENABLE_AUTEST)
   find_package(Python3 REQUIRED)
   find_program(PipEnv pipenv REQUIRED)
+  find_program(NETCAT_PROGRAM nc REQUIRED)
 endif()
 
 if(ENABLE_DOCS)
@@ -623,7 +642,7 @@ add_subdirectory(lib)
 # Keep this after lib because lib is made up of third party libraries, so if
 # there are warnings, we can't do anything about it.
 # Note: -DCMAKE_COMPILE_WARNING_AS_ERROR=ON will turn warnings into errors.
-add_compile_options(-pipe -Wall -Wextra -Wno-unused-parameter)
+add_compile_options(-pipe -Wall -Wextra)
 add_compile_options(
   "$<$<COMPILE_LANGUAGE:CXX>:-Wno-noexcept-type;-Wsuggest-override;-Wno-vla-extension;-fno-strict-aliasing>"
 )

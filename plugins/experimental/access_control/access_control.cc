@@ -155,7 +155,8 @@ AccessToken::validateTiming(time_t time)
   /* Validate and check expiration timestamp */
   if (!_expiration.empty()) {
     if (0 == (t = string2time(_expiration))) {
-      return _state = INVALID_FIELD_VALUE;
+      // Case of setting Session Cookie by absense of Expires attribute
+      return _state = VALID;
     } else {
       if (time > t) {
         return _state = TOO_LATE;
@@ -359,7 +360,7 @@ static const std::map<String, String> _digestAlgosMap = createStaticDigestAlgoMa
  * @param message input message
  * @param messageLen input message length
  * @param buffer output buffer for storing the message digest
- * @param len output buffer length
+ * @param len output buffer length (must be at least MAX_MSDIGEST_BUFFER_SIZE)
  * @return number of characters actually written to the output buffer.
  */
 size_t

@@ -19,20 +19,16 @@
   limitations under the License.
  */
 
-#include "tscore/ink_config.h"
-#include "records/RecHttp.h"
-#include "tscore/ink_platform.h"
-#include "tscore/Filenames.h"
-#include "tscore/X509HostnameValidator.h"
-
-#include "P_Net.h"
 #include "P_SSLClientUtils.h"
 #include "P_SSLConfig.h"
 #include "P_SSLNetVConnection.h"
 #include "P_TLSKeyLogger.h"
+#include "SSLSessionCache.h"
 #include "iocore/net/YamlSNIConfig.h"
 #include "iocore/net/SSLDiags.h"
-#include "SSLSessionCache.h"
+#include "tscore/ink_config.h"
+#include "tscore/Filenames.h"
+#include "tscore/X509HostnameValidator.h"
 
 #include <openssl/err.h>
 #include <openssl/pem.h>
@@ -130,12 +126,14 @@ verify_callback(int signature_ok, X509_STORE_CTX *ctx)
       return !enforce_mode;
     }
   }
-  // If the previous configured checks passed, give the hook a try
-  netvc->set_verify_cert(ctx);
-  netvc->callHooks(TS_EVENT_SSL_VERIFY_SERVER);
-  netvc->set_verify_cert(nullptr);
 
-  if (netvc->getSSLHandshakeStatus() == SSLHandshakeStatus::SSL_HANDSHAKE_ERROR) {
+  // If the previous configured checks passed, give the hook a try
+  TLSBasicSupport *tbs = TLSBasicSupport::getInstance(ssl);
+  if (tbs == nullptr) {
+    Dbg(dbg_ctl_ssl_verify, "call back on stale netvc");
+    return false;
+  }
+  if (tbs->verify_certificate(ctx) == 1) {
     // Verify server hook failed and set the status to SSL_HANDSHAKE_ERROR
     unsigned char *sni_name;
     char           buff[INET6_ADDRSTRLEN];

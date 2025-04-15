@@ -32,6 +32,7 @@ cd "$SCRIPT_DIR"
 export PYTHONPATH=$(pwd):$PYTHONPATH
 export PYTHONPATH=$(pwd)/gold_tests/remap:$PYTHONPATH
 ./test-env-check.sh || fail "Failed Python environment checks."
+hash nc 2>/dev/null || fail "Netcat is not installed."
 # this is for rhel or centos systems
 echo "Environment config finished. Running AuTest..."
 exec pipenv run env \

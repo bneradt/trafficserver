@@ -21,17 +21,19 @@
   limitations under the License.
  */
 
+#include "../P_CacheInternal.h"
+#include "api/HttpAPIHooks.h"
+#include "iocore/net/NetProcessor.h"
+#include "records/RecordsConfig.h"
 #include "tscore/ink_config.h"
-#include <string_view>
-#include "proxy/HttpAPIHooks.h"
-#include "iocore/net/SSLAPIHooks.h"
+#include "tscore/Layout.h"
 
 #define CATCH_CONFIG_MAIN
 #include "main.h"
+#include "swoc/swoc_file.h"
 
 #include <unistd.h>
-
-#include "swoc/swoc_file.h"
+#include <string_view>
 
 #define THREADS        1
 #define DIAGS_LOG_FILE "diags.log"

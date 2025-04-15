@@ -32,6 +32,7 @@
 #include "proxy/http/HttpConfig.h"
 #include "proxy/hdrs/HTTP.h"
 #include "iocore/eventsystem/ConfigProcessor.h"
+#include "iocore/eventsystem/UnixSocket.h"
 #include "../../iocore/net/P_Net.h"
 #include "../../records/P_RecUtils.h"
 #include "records/RecHttp.h"
@@ -291,6 +292,7 @@ register_stat_callbacks()
   http_rsb.cache_open_write_adjust_thread    = Metrics::Counter::createPtr("proxy.process.http.cache.open_write.adjust_thread");
   http_rsb.cache_open_write_begin_time       = Metrics::Counter::createPtr("proxy.process.http.milestone.cache_open_write_begin");
   http_rsb.cache_open_write_end_time         = Metrics::Counter::createPtr("proxy.process.http.milestone.cache_open_write_end");
+  http_rsb.cache_open_write_fail_count       = Metrics::Counter::createPtr("proxy.process.http.cache_open_write_fail_count");
   http_rsb.cache_read_error                  = Metrics::Counter::createPtr("proxy.process.http.cache_read_error");
   http_rsb.cache_read_errors                 = Metrics::Counter::createPtr("proxy.process.http.cache_read_errors");
   http_rsb.cache_updates                     = Metrics::Counter::createPtr("proxy.process.http.cache_updates");
@@ -484,6 +486,7 @@ register_stat_callbacks()
   http_rsb.total_client_connections          = Metrics::Counter::createPtr("proxy.process.http.total_client_connections");
   http_rsb.total_client_connections_ipv4     = Metrics::Counter::createPtr("proxy.process.http.total_client_connections_ipv4");
   http_rsb.total_client_connections_ipv6     = Metrics::Counter::createPtr("proxy.process.http.total_client_connections_ipv6");
+  http_rsb.total_client_connections_uds      = Metrics::Counter::createPtr("proxy.process.http.total_client_connections_uds");
   http_rsb.total_incoming_connections        = Metrics::Counter::createPtr("proxy.process.http.total_incoming_connections");
   http_rsb.total_parent_marked_down_count    = Metrics::Counter::createPtr("proxy.process.http.total_parent_marked_down_count");
   http_rsb.total_parent_proxy_connections    = Metrics::Counter::createPtr("proxy.process.http.total_parent_proxy_connections");
@@ -831,6 +834,7 @@ HttpConfig::startup()
   HttpEstablishStaticConfigLongLong(c.oride.flow_high_water_mark, "proxy.config.http.flow_control.high_water");
   HttpEstablishStaticConfigLongLong(c.oride.flow_low_water_mark, "proxy.config.http.flow_control.low_water");
   HttpEstablishStaticConfigByte(c.oride.post_check_content_length_enabled, "proxy.config.http.post.check.content_length.enabled");
+  HttpEstablishStaticConfigByte(c.oride.cache_post_method, "proxy.config.http.cache.post_method");
   HttpEstablishStaticConfigByte(c.oride.request_buffer_enabled, "proxy.config.http.request_buffer_enabled");
   HttpEstablishStaticConfigByte(c.strict_uri_parsing, "proxy.config.http.strict_uri_parsing");
 
@@ -965,7 +969,6 @@ HttpConfig::startup()
   HttpEstablishStaticConfigByte(c.oride.cache_ignore_auth, "proxy.config.http.cache.ignore_authentication");
   HttpEstablishStaticConfigByte(c.oride.cache_urls_that_look_dynamic, "proxy.config.http.cache.cache_urls_that_look_dynamic");
   HttpEstablishStaticConfigByte(c.oride.cache_ignore_query, "proxy.config.http.cache.ignore_query");
-  HttpEstablishStaticConfigByte(c.cache_post_method, "proxy.config.http.cache.post_method");
 
   HttpEstablishStaticConfigByte(c.oride.ignore_accept_mismatch, "proxy.config.http.cache.ignore_accept_mismatch");
   HttpEstablishStaticConfigByte(c.oride.ignore_accept_language_mismatch, "proxy.config.http.cache.ignore_accept_language_mismatch");
@@ -1129,6 +1132,7 @@ HttpConfig::reconfigure()
   params->oride.http_chunking_size = m_master.oride.http_chunking_size;
 
   params->oride.post_check_content_length_enabled = INT_TO_BOOL(m_master.oride.post_check_content_length_enabled);
+  params->oride.cache_post_method                 = INT_TO_BOOL(m_master.oride.cache_post_method);
 
   params->oride.request_buffer_enabled = INT_TO_BOOL(m_master.oride.request_buffer_enabled);
 
@@ -1195,7 +1199,7 @@ HttpConfig::reconfigure()
   params->oride.sock_packet_notsent_lowat = m_master.oride.sock_packet_notsent_lowat;
 
   // Clear the TCP Fast Open option if it is not supported on this host.
-  if ((params->oride.sock_option_flag_out & NetVCOptions::SOCK_OPT_TCP_FAST_OPEN) && !SocketManager::fastopen_supported()) {
+  if ((params->oride.sock_option_flag_out & NetVCOptions::SOCK_OPT_TCP_FAST_OPEN) && !UnixSocket::client_fastopen_supported()) {
     Status("disabling unsupported TCP Fast Open flag on proxy.config.net.sock_option_flag_out");
     params->oride.sock_option_flag_out &= ~NetVCOptions::SOCK_OPT_TCP_FAST_OPEN;
   }
@@ -1258,7 +1262,6 @@ HttpConfig::reconfigure()
   params->oride.cache_ignore_auth              = INT_TO_BOOL(m_master.oride.cache_ignore_auth);
   params->oride.cache_urls_that_look_dynamic   = INT_TO_BOOL(m_master.oride.cache_urls_that_look_dynamic);
   params->oride.cache_ignore_query             = INT_TO_BOOL(m_master.oride.cache_ignore_query);
-  params->cache_post_method                    = INT_TO_BOOL(m_master.cache_post_method);
 
   params->oride.ignore_accept_mismatch          = m_master.oride.ignore_accept_mismatch;
   params->oride.ignore_accept_language_mismatch = m_master.oride.ignore_accept_language_mismatch;

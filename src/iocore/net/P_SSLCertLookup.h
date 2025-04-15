@@ -23,12 +23,15 @@
 
 #pragma once
 
+#include "iocore/eventsystem/ConfigProcessor.h"
+#include "iocore/net/SSLTypes.h"
+#include "records/RecCore.h"
+
 #include <set>
 #include <openssl/ssl.h>
 #include <mutex>
 #include <unordered_map>
-
-#include "iocore/eventsystem/ConfigProcessor.h"
+#include <utility>
 
 struct SSLConfigParams;
 struct SSLContextStorage;
@@ -40,14 +43,6 @@ struct SSLContextStorage;
 enum class SSLCertContextOption {
   OPT_NONE,  ///< Nothing special. Implies valid context.
   OPT_TUNNEL ///< Just tunnel, don't terminate.
-};
-
-/** Used to discern the context type when BoringSSL is used for the SSL implementation.
- */
-enum class SSLCertContextType {
-  GENERIC, ///< Generic Context (can be either EC or RSA)
-  RSA,     ///< RSA-based Context
-  EC       ///< EC-based Context
 };
 
 /**
@@ -84,9 +79,7 @@ struct ssl_ticket_key_block {
   ssl_ticket_key_t keys[];
 };
 
-using shared_SSLMultiCertConfigParams = std::shared_ptr<SSLMultiCertConfigParams>;
-using shared_SSL_CTX                  = std::shared_ptr<SSL_CTX>;
-using shared_ssl_ticket_key_block     = std::shared_ptr<ssl_ticket_key_block>;
+using shared_ssl_ticket_key_block = std::shared_ptr<ssl_ticket_key_block>;
 
 /** A certificate context.
 
@@ -111,13 +104,14 @@ public:
   {
   }
 
-  SSLCertContext(shared_SSL_CTX sc, SSLCertContextType ctx_type, shared_SSLMultiCertConfigParams u)
-    : ctx_mutex(), ctx(sc), ctx_type(ctx_type), opt(u->opt), userconfig(u), keyblock(nullptr)
+  SSLCertContext(shared_SSL_CTX sc, SSLCertContextType ctx_type, const shared_SSLMultiCertConfigParams &u)
+    : ctx_mutex(), ctx(std::move(sc)), ctx_type(ctx_type), opt(u->opt), userconfig(u), keyblock(nullptr)
   {
   }
 
-  SSLCertContext(shared_SSL_CTX sc, SSLCertContextType ctx_type, shared_SSLMultiCertConfigParams u, shared_ssl_ticket_key_block kb)
-    : ctx_mutex(), ctx(sc), ctx_type(ctx_type), opt(u->opt), userconfig(u), keyblock(kb)
+  SSLCertContext(shared_SSL_CTX sc, SSLCertContextType ctx_type, const shared_SSLMultiCertConfigParams &u,
+                 shared_ssl_ticket_key_block kb)
+    : ctx_mutex(), ctx(std::move(sc)), ctx_type(ctx_type), opt(u->opt), userconfig(u), keyblock(std::move(kb))
   {
   }
 

@@ -31,18 +31,16 @@
  ****************************************************************************/
 #pragma once
 
-#include "tscore/ink_platform.h"
 #include "ts/apidefs.h"
 
-#include "../eventsystem/P_EventSystem.h"
 #include "P_UnixNetVConnection.h"
-#include "P_UnixNet.h"
 #include "iocore/net/TLSALPNSupport.h"
 #include "iocore/net/TLSSessionResumptionSupport.h"
 #include "iocore/net/TLSSNISupport.h"
 #include "iocore/net/TLSEarlyDataSupport.h"
 #include "iocore/net/TLSTunnelSupport.h"
 #include "iocore/net/TLSBasicSupport.h"
+#include "iocore/net/TLSEventSupport.h"
 #include "iocore/net/TLSCertSwitchSupport.h"
 #include "P_SSLUtils.h"
 #include "P_SSLConfig.h"
@@ -67,7 +65,7 @@
 #define SSL_TLSEXT_ERR_NOACK 3
 #endif
 
-#define SSL_OP_HANDSHAKE 0x16
+constexpr char SSL_OP_HANDSHAKE = 0x16;
 
 // TS-2503: dynamic TLS record sizing
 // For smaller records, we should also reserve space for various TCP options
@@ -75,19 +73,18 @@
 // (another 20-60 bytes on average, depending on the negotiated ciphersuite [2]).
 // All in all: 1500 - 40 (IP) - 20 (TCP) - 40 (TCP options) - TLS overhead (60-100)
 // For larger records, the size is determined by TLS protocol record size
-#define SSL_DEF_TLS_RECORD_SIZE           1300  // 1500 - 40 (IP) - 20 (TCP) - 40 (TCP options) - TLS overhead (60-100)
-#define SSL_MAX_TLS_RECORD_SIZE           16383 // 2^14 - 1
-#define SSL_DEF_TLS_RECORD_BYTE_THRESHOLD 1000000
-#define SSL_DEF_TLS_RECORD_MSEC_THRESHOLD 1000
+constexpr uint32_t SSL_DEF_TLS_RECORD_SIZE           = 1300; // 1500 - 40 (IP) - 20 (TCP) - 40 (TCP options) - TLS overhead (60-100)
+constexpr uint32_t SSL_MAX_TLS_RECORD_SIZE           = 16383; // 2^14 - 1
+constexpr int64_t  SSL_DEF_TLS_RECORD_BYTE_THRESHOLD = 1000000;
+constexpr int      SSL_DEF_TLS_RECORD_MSEC_THRESHOLD = 1000;
 
 struct SSLCertLookup;
 
-typedef enum {
-  SSL_HOOK_OP_DEFAULT,                     ///< Null / initialization value. Do normal processing.
-  SSL_HOOK_OP_TUNNEL,                      ///< Switch to blind tunnel
-  SSL_HOOK_OP_TERMINATE,                   ///< Termination connection / transaction.
-  SSL_HOOK_OP_LAST = SSL_HOOK_OP_TERMINATE ///< End marker value.
-} SslVConnOp;
+enum class SslVConnOp {
+  SSL_HOOK_OP_DEFAULT,  ///< Null / initialization value. Do normal processing.
+  SSL_HOOK_OP_TUNNEL,   ///< Switch to blind tunnel
+  SSL_HOOK_OP_TERMINATE ///< Termination connection / transaction.
+};
 
 enum class SSLHandshakeStatus { SSL_HANDSHAKE_ONGOING, SSL_HANDSHAKE_DONE, SSL_HANDSHAKE_ERROR };
 
@@ -105,9 +102,10 @@ class SSLNetVConnection : public UnixNetVConnection,
                           public TLSEarlyDataSupport,
                           public TLSTunnelSupport,
                           public TLSCertSwitchSupport,
+                          public TLSEventSupport,
                           public TLSBasicSupport
 {
-  typedef UnixNetVConnection super; ///< Parent type.
+  using super = UnixNetVConnection; ///< Parent type.
 
 public:
   int  sslStartHandShake(int event, int &err) override;
@@ -124,12 +122,6 @@ public:
     return retval;
   }
 
-  SSLHandshakeStatus
-  getSSLHandshakeStatus() const
-  {
-    return sslHandshakeStatus;
-  }
-
   bool
   getSSLHandShakeComplete() const override
   {
@@ -144,7 +136,7 @@ public:
 
   int     sslServerHandShakeEvent(int &err);
   int     sslClientHandShakeEvent(int &err);
-  void    net_read_io(NetHandler *nh, EThread *lthread) override;
+  void    net_read_io(NetHandler *nh) override;
   int64_t load_buffer_and_write(int64_t towrite, MIOBufferAccessor &buf, int64_t &total_written, int &needs) override;
   void    do_io_close(int lerrno = -1) override;
 
@@ -195,9 +187,6 @@ public:
   // Copy up here so we overload but don't override
   using super::reenable;
 
-  /// Reenable the VC after a pre-accept or SNI hook is called.
-  virtual void reenable(NetHandler *nh, int event = TS_EVENT_CONTINUE);
-
   int64_t read_raw_data();
 
   void
@@ -227,80 +216,6 @@ public:
     this->handShakeBioStored = 0;
   }
 
-  // Returns true if all the hooks reenabled
-  bool callHooks(TSEvent eventId);
-
-  // Returns true if we have already called at
-  // least some of the hooks
-  bool
-  calledHooks(TSEvent eventId) const
-  {
-    bool retval = false;
-    switch (this->sslHandshakeHookState) {
-    case HANDSHAKE_HOOKS_PRE:
-    case HANDSHAKE_HOOKS_PRE_INVOKE:
-      if (eventId == TS_EVENT_VCONN_START) {
-        if (curHook) {
-          retval = true;
-        }
-      }
-      break;
-    case HANDSHAKE_HOOKS_CLIENT_HELLO:
-    case HANDSHAKE_HOOKS_CLIENT_HELLO_INVOKE:
-      if (eventId == TS_EVENT_VCONN_START) {
-        retval = true;
-      } else if (eventId == TS_EVENT_SSL_CLIENT_HELLO) {
-        if (curHook) {
-          retval = true;
-        }
-      }
-      break;
-    case HANDSHAKE_HOOKS_SNI:
-      if (eventId == TS_EVENT_VCONN_START || eventId == TS_EVENT_SSL_CLIENT_HELLO) {
-        retval = true;
-      } else if (eventId == TS_EVENT_SSL_SERVERNAME) {
-        if (curHook) {
-          retval = true;
-        }
-      }
-      break;
-    case HANDSHAKE_HOOKS_CERT:
-    case HANDSHAKE_HOOKS_CERT_INVOKE:
-      if (eventId == TS_EVENT_VCONN_START || eventId == TS_EVENT_SSL_CLIENT_HELLO || eventId == TS_EVENT_SSL_SERVERNAME) {
-        retval = true;
-      } else if (eventId == TS_EVENT_SSL_CERT) {
-        if (curHook) {
-          retval = true;
-        }
-      }
-      break;
-    case HANDSHAKE_HOOKS_CLIENT_CERT:
-    case HANDSHAKE_HOOKS_CLIENT_CERT_INVOKE:
-      if (eventId == TS_EVENT_SSL_VERIFY_CLIENT || eventId == TS_EVENT_VCONN_START) {
-        retval = true;
-      }
-      break;
-
-    case HANDSHAKE_HOOKS_OUTBOUND_PRE:
-    case HANDSHAKE_HOOKS_OUTBOUND_PRE_INVOKE:
-      if (eventId == TS_EVENT_VCONN_OUTBOUND_START) {
-        if (curHook) {
-          retval = true;
-        }
-      }
-      break;
-
-    case HANDSHAKE_HOOKS_VERIFY_SERVER:
-      retval = (eventId == TS_EVENT_SSL_VERIFY_SERVER);
-      break;
-
-    case HANDSHAKE_HOOKS_DONE:
-      retval = true;
-      break;
-    }
-    return retval;
-  }
-
   int         populate_protocol(std::string_view *results, int n) const override;
   const char *protocol_contains(std::string_view tag) const override;
 
@@ -317,22 +232,8 @@ public:
 
   std::shared_ptr<SSL_SESSION> client_sess = nullptr;
 
-  // The serverName is either a pointer to the (null-terminated) name fetched from the
-  // SSL object or the empty string.
-  const char *
-  get_server_name() const override
-  {
-    return get_sni_server_name() ? get_sni_server_name() : "";
-  }
-
-  bool
-  support_sni() const override
-  {
-    return true;
-  }
-
   /// Set by asynchronous hooks to request a specific operation.
-  SslVConnOp hookOpRequested = SSL_HOOK_OP_DEFAULT;
+  SslVConnOp hookOpRequested = SslVConnOp::SSL_HOOK_OP_DEFAULT;
 
   // noncopyable
   SSLNetVConnection(const SSLNetVConnection &)            = delete;
@@ -340,27 +241,6 @@ public:
 
   bool          protocol_mask_set = false;
   unsigned long protocol_mask     = 0;
-
-  // Only applies during the VERIFY certificate hooks (client and server side)
-  // Means to give the plugin access to the data structure passed in during the underlying
-  // openssl callback so the plugin can make more detailed decisions about the
-  // validity of the certificate in their cases
-  X509_STORE_CTX *
-  get_verify_cert()
-  {
-    return verify_cert;
-  }
-  void
-  set_verify_cert(X509_STORE_CTX *ctx)
-  {
-    verify_cert = ctx;
-  }
-
-  const char *
-  get_sni_servername() const override
-  {
-    return SSL_get_servername(this->ssl, TLSEXT_NAMETYPE_host_name);
-  }
 
   bool
   peer_provided_cert() const override
@@ -407,14 +287,24 @@ public:
     return _ca_cert_dir.get();
   }
 
+  // TLSEventSupport
+  /// Reenable the VC after a pre-accept or SNI hook is called.
+  void            reenable(int event = TS_EVENT_CONTINUE) override;
+  Continuation   *getContinuationForTLSEvents() override;
+  EThread        *getThreadForTLSEvents() override;
+  Ptr<ProxyMutex> getMutexForTLSEvents() override;
+
 protected:
+  // TLSBasicSupport
   SSL *
   _get_ssl_object() const override
   {
     return this->ssl;
   }
   ssl_curve_id _get_tls_curve() const override;
+  int          _verify_certificate(X509_STORE_CTX *ctx) override;
 
+  // TLSSessionResumptionSupport
   const IpEndpoint &
   _getLocalEndpoint() override
   {
@@ -422,12 +312,23 @@ protected:
   }
 
   // TLSSNISupport
-  void      _fire_ssl_servername_event() override;
   in_port_t _get_local_port() override;
 
   bool           _isTryingRenegotiation() const override;
   shared_SSL_CTX _lookupContextByName(const std::string &servername, SSLCertContextType ctxType) override;
   shared_SSL_CTX _lookupContextByIP() override;
+
+  // TLSEventSupport
+  bool
+  _is_tunneling_requested() const override
+  {
+    return SslVConnOp::SSL_HOOK_OP_TUNNEL == hookOpRequested;
+  }
+  void
+  _switch_to_tunneling_mode() override
+  {
+    this->attributes = HttpProxyPort::TRANSPORT_BLIND_TUNNEL;
+  }
 
 private:
   std::string_view map_tls_protocol_to_tag(const char *proto_string) const;
@@ -449,31 +350,7 @@ private:
 
   int sent_cert = 0;
 
-  /// The current hook.
-  /// @note For @C SSL_HOOKS_INVOKE, this is the hook to invoke.
-  class APIHook *curHook = nullptr;
-
-  enum SSLHandshakeHookState {
-    HANDSHAKE_HOOKS_PRE,
-    HANDSHAKE_HOOKS_PRE_INVOKE,
-    HANDSHAKE_HOOKS_CLIENT_HELLO,
-    HANDSHAKE_HOOKS_CLIENT_HELLO_INVOKE,
-    HANDSHAKE_HOOKS_SNI,
-    HANDSHAKE_HOOKS_CERT,
-    HANDSHAKE_HOOKS_CERT_INVOKE,
-    HANDSHAKE_HOOKS_CLIENT_CERT,
-    HANDSHAKE_HOOKS_CLIENT_CERT_INVOKE,
-    HANDSHAKE_HOOKS_OUTBOUND_PRE,
-    HANDSHAKE_HOOKS_OUTBOUND_PRE_INVOKE,
-    HANDSHAKE_HOOKS_VERIFY_SERVER,
-    HANDSHAKE_HOOKS_DONE
-  } sslHandshakeHookState = HANDSHAKE_HOOKS_PRE;
-
-  static char const *get_ssl_handshake_hook_state_name(SSLHandshakeHookState state);
-
   int64_t redoWriteSize = 0;
-
-  X509_STORE_CTX *verify_cert = nullptr;
 
   // Null-terminated string, or nullptr if there is no SNI server name.
   std::unique_ptr<char[]> _ca_cert_file;
@@ -495,7 +372,7 @@ private:
   UnixNetVConnection *_migrateFromSSL();
   void                _propagateHandShakeBuffer(UnixNetVConnection *target, EThread *t);
 
-  int         _ssl_read_from_net(EThread *lthread, int64_t &ret);
+  int         _ssl_read_from_net(int64_t &ret);
   ssl_error_t _ssl_read_buffer(void *buf, int64_t nbytes, int64_t &nread);
   ssl_error_t _ssl_write_buffer(const void *buf, int64_t nbytes, int64_t &nwritten);
   ssl_error_t _ssl_connect();
@@ -505,6 +382,6 @@ private:
   void _out_context_tunnel() override;
 };
 
-typedef int (SSLNetVConnection::*SSLNetVConnHandler)(int, void *);
+using SSLNetVConnHandler = int (SSLNetVConnection::*)(int, void *);
 
 extern ClassAllocator<SSLNetVConnection> sslNetVCAllocator;

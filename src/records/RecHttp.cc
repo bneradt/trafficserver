@@ -21,18 +21,14 @@
   limitations under the License.
 */
 
-#include "swoc/swoc_ip.h"
-
 #include "records/RecCore.h"
 #include "records/RecHttp.h"
-#include "tscore/ink_defs.h"
-#include "tscore/TextBuffer.h"
 #include "tscore/Tokenizer.h"
 #include <cstring>
 #include <strings.h>
 #include "tscore/ink_inet.h"
+#include "tscore/TextBuffer.h"
 #include "swoc/BufferWriter.h"
-#include "swoc/bwf_ip.h"
 #include <cstring>
 #include <string_view>
 #include <unordered_set>
@@ -374,7 +370,12 @@ HttpProxyPort::processOptions(const char *opts)
   }
 
   for (auto item : values) {
-    if (isdigit(item[0])) { // leading digit -> port value
+    if (item[0] == '/') {
+      m_family    = AF_UNIX;
+      m_unix_path = UnAddr(item);
+      af_set_p    = true;
+      zret        = true;
+    } else if (isdigit(item[0])) { // leading digit -> port value
       char *ptr;
       int   port = strtoul(item, &ptr, 10);
       if (ptr == item) {
@@ -412,11 +413,19 @@ HttpProxyPort::processOptions(const char *opts)
     } else if (0 == strcasecmp(OPT_BLIND_TUNNEL, item)) {
       m_type = TRANSPORT_BLIND_TUNNEL;
     } else if (0 == strcasecmp(OPT_IPV6, item)) {
-      m_family = AF_INET6;
-      af_set_p = true;
+      if (m_family != AF_UNIX) {
+        m_family = AF_INET6;
+        af_set_p = true;
+      } else {
+        Warning("Invalid ipv6 specification after unix domain path specified");
+      }
     } else if (0 == strcasecmp(OPT_IPV4, item)) {
-      m_family = AF_INET;
-      af_set_p = true;
+      if (m_family != AF_UNIX) {
+        m_family = AF_INET;
+        af_set_p = true;
+      } else {
+        Warning("Invalid ipv4 specification after unix domain path specified");
+      }
     } else if (0 == strcasecmp(OPT_SSL, item)) {
       m_type = TRANSPORT_SSL;
 #if TS_USE_QUIC == 1

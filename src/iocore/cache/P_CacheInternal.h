@@ -23,19 +23,13 @@
 
 #pragma once
 
-#include "iocore/eventsystem/Continuation.h"
-#include "tscore/ink_platform.h"
-#include "tscore/InkErrno.h"
-
-#include "proxy/hdrs/HTTP.h"
-#include "P_CacheHttp.h"
 #include "P_CacheHosting.h"
+#include "iocore/eventsystem/Continuation.h"
+#include "P_CacheHttp.h"
 #include "tsutil/Metrics.h"
 
-#include "iocore/cache/CacheVC.h"
-#include "iocore/cache/CacheEvacuateDocVC.h"
-
-using ts::Metrics;
+#include "CacheVC.h"
+#include "CacheEvacuateDocVC.h"
 
 struct EvacuationBlock;
 
@@ -100,6 +94,8 @@ extern CacheStatsBlock cache_rsb;
 
 // Configuration
 extern int cache_config_dir_sync_frequency;
+extern int cache_config_dir_sync_delay;
+extern int cache_config_dir_sync_max_write;
 extern int cache_config_http_max_alts;
 extern int cache_config_log_alternate_eviction;
 extern int cache_config_permit_pinning;
@@ -148,7 +144,13 @@ extern CacheSync                         *cacheDirSync;
 // Function Prototypes
 int                 cache_write(CacheVC *, CacheHTTPInfoVector *);
 int                 get_alternate_index(CacheHTTPInfoVector *cache_vector, CacheKey key);
-CacheEvacuateDocVC *new_DocEvacuator(int nbytes, Stripe *stripe);
+CacheEvacuateDocVC *new_DocEvacuator(int nbytes, StripeSM *stripe);
+
+struct AIO_failure_handler : public Continuation {
+  int handle_disk_failure(int event, void *data);
+
+  AIO_failure_handler() : Continuation(new_ProxyMutex()) { SET_HANDLER(&AIO_failure_handler::handle_disk_failure); }
+};
 
 // inline Functions
 
@@ -175,14 +177,14 @@ free_CacheVCCommon(CacheVC *cont)
   static DbgCtl dbg_ctl{"cache_free"};
   Dbg(dbg_ctl, "free %p", cont);
   ProxyMutex *mutex  = cont->mutex.get();
-  Stripe     *stripe = cont->stripe;
+  StripeSM   *stripe = cont->stripe;
 
   if (stripe) {
-    Metrics::Gauge::decrement(cache_rsb.status[cont->op_type].active);
-    Metrics::Gauge::decrement(stripe->cache_vol->vol_rsb.status[cont->op_type].active);
+    ts::Metrics::Gauge::decrement(cache_rsb.status[cont->op_type].active);
+    ts::Metrics::Gauge::decrement(stripe->cache_vol->vol_rsb.status[cont->op_type].active);
     if (cont->closed > 0) {
-      Metrics::Counter::increment(cache_rsb.status[cont->op_type].success);
-      Metrics::Counter::increment(stripe->cache_vol->vol_rsb.status[cont->op_type].success);
+      ts::Metrics::Counter::increment(cache_rsb.status[cont->op_type].success);
+      ts::Metrics::Counter::increment(stripe->cache_vol->vol_rsb.status[cont->op_type].success);
     } // else abort,cancel
   }
   ink_assert(mutex->thread_holding == this_ethread());
@@ -215,7 +217,7 @@ free_CacheVCCommon(CacheVC *cont)
 
   ats_free(cont->scan_stripe_map);
 
-  memset((char *)&cont->vio, 0, cont->size_to_init);
+  memset(reinterpret_cast<char *>(&cont->vio), 0, cont->size_to_init);
 #ifdef DEBUG
   SET_CONTINUATION_HANDLER(cont, &CacheVC::dead);
 #endif
@@ -243,7 +245,7 @@ CacheVC::calluser(int event)
 {
   recursive++;
   ink_assert(!stripe || this_ethread() != stripe->mutex->thread_holding);
-  vio.cont->handleEvent(event, (void *)&vio);
+  vio.cont->handleEvent(event, &vio);
   recursive--;
   if (closed) {
     die();
@@ -309,7 +311,7 @@ CacheVC::die()
     return EVENT_CONT;
   } else {
     if (is_io_in_progress()) {
-      save_handler = (ContinuationHandler)&CacheVC::openReadClose;
+      save_handler = reinterpret_cast<ContinuationHandler>(&CacheVC::openReadClose);
     } else {
       SET_HANDLER(&CacheVC::openReadClose);
       if (!recursive) {
@@ -366,137 +368,13 @@ CacheVC::writer_done()
   // original writer, since we never choose a writer that started
   // after the reader. The original writer was deallocated and then
   // reallocated for the same first_key
-  for (; w && (w != write_vc || w->start_time > start_time); w = (CacheVC *)w->opendir_link.next) {
+  for (; w && (w != write_vc || w->start_time > start_time); w = w->opendir_link.next) {
     ;
   }
   if (!w) {
     return true;
   }
   return false;
-}
-
-inline int
-Stripe::close_write(CacheVC *cont)
-{
-  return open_dir.close_write(cont);
-}
-
-// Returns 0 on success or a positive error code on failure
-inline int
-Stripe::open_write(CacheVC *cont, int allow_if_writers, int max_writers)
-{
-  Stripe *stripe    = this;
-  bool    agg_error = false;
-  if (!cont->f.remove) {
-    agg_error = (!cont->f.update && this->get_agg_todo_size() > cache_config_agg_write_backlog);
-#ifdef CACHE_AGG_FAIL_RATE
-    agg_error = agg_error || ((uint32_t)mutex->thread_holding->generator.random() < (uint32_t)(UINT_MAX * CACHE_AGG_FAIL_RATE));
-#endif
-  }
-
-  if (agg_error) {
-    Metrics::Counter::increment(cache_rsb.write_backlog_failure);
-    Metrics::Counter::increment(stripe->cache_vol->vol_rsb.write_backlog_failure);
-
-    return ECACHE_WRITE_FAIL;
-  }
-
-  if (open_dir.open_write(cont, allow_if_writers, max_writers)) {
-    return 0;
-  }
-  return ECACHE_DOC_BUSY;
-}
-
-inline int
-Stripe::close_write_lock(CacheVC *cont)
-{
-  EThread *t = cont->mutex->thread_holding;
-  CACHE_TRY_LOCK(lock, mutex, t);
-  if (!lock.is_locked()) {
-    return -1;
-  }
-  return close_write(cont);
-}
-
-inline int
-Stripe::open_write_lock(CacheVC *cont, int allow_if_writers, int max_writers)
-{
-  EThread *t = cont->mutex->thread_holding;
-  CACHE_TRY_LOCK(lock, mutex, t);
-  if (!lock.is_locked()) {
-    return -1;
-  }
-  return open_write(cont, allow_if_writers, max_writers);
-}
-
-inline OpenDirEntry *
-Stripe::open_read_lock(CryptoHash *key, EThread *t)
-{
-  CACHE_TRY_LOCK(lock, mutex, t);
-  if (!lock.is_locked()) {
-    return nullptr;
-  }
-  return open_dir.open_read(key);
-}
-
-inline int
-Stripe::begin_read_lock(CacheVC *cont)
-{
-  // no need for evacuation as the entire document is already in memory
-  if (cont->f.single_fragment) {
-    return 0;
-  }
-
-  EThread *t = cont->mutex->thread_holding;
-  CACHE_TRY_LOCK(lock, mutex, t);
-  if (!lock.is_locked()) {
-    return -1;
-  }
-  return begin_read(cont);
-}
-
-inline int
-Stripe::close_read_lock(CacheVC *cont)
-{
-  EThread *t = cont->mutex->thread_holding;
-  CACHE_TRY_LOCK(lock, mutex, t);
-  if (!lock.is_locked()) {
-    return -1;
-  }
-  return close_read(cont);
-}
-
-inline int
-dir_delete_lock(CacheKey *key, Stripe *stripe, ProxyMutex *m, Dir *del)
-{
-  EThread *thread = m->thread_holding;
-  CACHE_TRY_LOCK(lock, stripe->mutex, thread);
-  if (!lock.is_locked()) {
-    return -1;
-  }
-  return dir_delete(key, stripe, del);
-}
-
-inline int
-dir_insert_lock(CacheKey *key, Stripe *stripe, Dir *to_part, ProxyMutex *m)
-{
-  EThread *thread = m->thread_holding;
-  CACHE_TRY_LOCK(lock, stripe->mutex, thread);
-  if (!lock.is_locked()) {
-    return -1;
-  }
-  return dir_insert(key, stripe, to_part);
-}
-
-inline int
-dir_overwrite_lock(CacheKey *key, Stripe *stripe, Dir *to_part, ProxyMutex *m, Dir *overwrite, bool must_overwrite = true)
-{
-  EThread *thread = m->thread_holding;
-  CACHE_TRY_LOCK(lock, stripe->mutex, thread);
-  if (!lock.is_locked()) {
-    return -1;
-  }
-  return dir_overwrite(key, stripe, to_part, overwrite, must_overwrite);
 }
 
 void inline rand_CacheKey(CacheKey *next_key)
@@ -553,16 +431,14 @@ free_CacheRemoveCont(CacheRemoveCont *cache_rm)
 }
 
 inline int
-CacheRemoveCont::event_handler(int event, void *data)
+CacheRemoveCont::event_handler(int /* event ATS_UNUSED */, void * /* data ATS_UNUSED */)
 {
-  (void)event;
-  (void)data;
   free_CacheRemoveCont(this);
   return EVENT_DONE;
 }
 
 struct CacheHostRecord;
-class Stripe;
+class StripeSM;
 class CacheHostTable;
 
 struct Cache {
@@ -574,24 +450,24 @@ struct Cache {
   int       total_initialized_vol = 0;
   CacheType scheme                = CACHE_NONE_TYPE;
 
-  ReplaceablePtr<CacheHostTable> hosttable;
+  mutable ReplaceablePtr<CacheHostTable> hosttable;
 
   int open(bool reconfigure, bool fix);
   int close();
 
-  Action *lookup(Continuation *cont, const CacheKey *key, CacheFragType type, const char *hostname, int host_len);
-  Action *open_read(Continuation *cont, const CacheKey *key, CacheFragType type, const char *hostname, int len);
-  Action *open_write(Continuation *cont, const CacheKey *key, CacheFragType frag_type, int options = 0,
-                     time_t pin_in_cache = (time_t)0, const char *hostname = nullptr, int host_len = 0);
+  Action *lookup(Continuation *cont, const CacheKey *key, CacheFragType type, const char *hostname, int host_len) const;
+  Action *open_read(Continuation *cont, const CacheKey *key, CacheFragType type, const char *hostname, int len) const;
+  Action *open_write(Continuation *cont, const CacheKey *key, CacheFragType frag_type, int options = 0, time_t pin_in_cache = 0,
+                     const char *hostname = nullptr, int host_len = 0) const;
   Action *remove(Continuation *cont, const CacheKey *key, CacheFragType type = CACHE_FRAG_TYPE_HTTP, const char *hostname = nullptr,
-                 int host_len = 0);
-  Action *scan(Continuation *cont, const char *hostname = nullptr, int host_len = 0, int KB_per_second = 2500);
+                 int host_len = 0) const;
+  Action *scan(Continuation *cont, const char *hostname = nullptr, int host_len = 0, int KB_per_second = 2500) const;
 
   Action     *open_read(Continuation *cont, const CacheKey *key, CacheHTTPHdr *request, const HttpConfigAccessor *params,
-                        CacheFragType type, const char *hostname, int host_len);
-  Action     *open_write(Continuation *cont, const CacheKey *key, CacheHTTPInfo *old_info, time_t pin_in_cache = (time_t)0,
+                        CacheFragType type, const char *hostname, int host_len) const;
+  Action     *open_write(Continuation *cont, const CacheKey *key, CacheHTTPInfo *old_info, time_t pin_in_cache = 0,
                          const CacheKey *key1 = nullptr, CacheFragType type = CACHE_FRAG_TYPE_HTTP, const char *hostname = nullptr,
-                         int host_len = 0);
+                         int host_len = 0) const;
   static void generate_key(CryptoHash *hash, CacheURL *url);
   static void generate_key(HttpCacheKey *hash, CacheURL *url, bool ignore_query = false, cache_generation_t generation = -1);
 
@@ -599,7 +475,7 @@ struct Cache {
 
   int open_done();
 
-  Stripe *key_to_stripe(const CacheKey *key, const char *hostname, int host_len);
+  StripeSM *key_to_stripe(const CacheKey *key, const char *hostname, int host_len) const;
 
   Cache() {}
 };
@@ -624,6 +500,6 @@ inline unsigned int
 cache_hash(const CryptoHash &hash)
 {
   uint64_t     f     = hash.fold();
-  unsigned int mhash = (unsigned int)(f >> 32);
+  unsigned int mhash = static_cast<unsigned int>(f >> 32);
   return mhash;
 }

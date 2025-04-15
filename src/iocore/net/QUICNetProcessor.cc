@@ -19,21 +19,21 @@
   limitations under the License.
  */
 
-#include "tscore/ink_config.h"
-#include "tscore/Layout.h"
-
 #include "P_Net.h"
 #include "P_QUICNet.h"
-#include "records/RecHttp.h"
-
 #include "P_QUICNetProcessor.h"
 #include "P_QUICPacketHandler.h"
 #include "P_QUICNetVConnection.h"
+#include "P_UDPNet.h"
+#include "P_UnixNet.h"
+#include "P_UnixUDPConnection.h"
+#include "iocore/eventsystem/UnixSocket.h"
+#include "iocore/net/PollCont.h"
+#include "iocore/net/UDPNet.h"
 #include "iocore/net/quic/QUICGlobals.h"
 #include "iocore/net/quic/QUICTypes.h"
 #include "iocore/net/quic/QUICConfig.h"
 #include "iocore/net/QUICMultiCertConfigLoader.h"
-
 //
 // Global Data
 //
@@ -84,7 +84,9 @@ QUICNetProcessor::start(int, size_t /* stacksize ATS_UNUSED */)
   QUICCertConfig::startup();
   QUICConfig::scoped_config params;
 
-  quiche_enable_debug_logging(debug_log, NULL);
+  if (dbg_ctl_vv_quiche.tag_on()) {
+    quiche_enable_debug_logging(debug_log, NULL);
+  }
   this->_quiche_config = quiche_config_new(QUICHE_PROTOCOL_VERSION);
 
   std::string quic_app_protos = "\02h3\x05h3-29\x05h3-27";
@@ -246,8 +248,8 @@ QUICNetProcessor::main_accept(Continuation *cont, SOCKET fd, AcceptOptions const
   ink_assert(0 < opt.local_port && opt.local_port < 65536);
   accept_ip.network_order_port() = htons(opt.local_port);
 
-  na->accept_fn = net_accept;
-  na->server.fd = fd;
+  na->accept_fn   = net_accept;
+  na->server.sock = UnixSocket{fd};
   ats_ip_copy(&na->server.accept_addr, &accept_ip);
 
   na->action_         = new NetAcceptAction();

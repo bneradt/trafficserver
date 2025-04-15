@@ -24,12 +24,14 @@
 
 #pragma once
 
+#include "iocore/eventsystem/Freer.h"
 #include "proxy/http/remap/UrlMapping.h"
 #include "proxy/http/remap/UrlMappingPathIndex.h"
 #include "proxy/http/HttpTransact.h"
 #include "tsutil/Regex.h"
 #include "proxy/http/remap/PluginFactory.h"
 #include "proxy/http/remap/NextHopStrategyFactory.h"
+#include "proxy/http/remap/RemapConfig.h"
 
 #include <memory>
 
@@ -51,15 +53,10 @@ enum mapping_type {
   NONE
 };
 
-enum class ACLBehaviorPolicy {
-  ACL_BEHAVIOR_LEGACY = 0,
-  ACL_BEHAVIOR_MODERN,
-};
-
 /**
  *
  **/
-class UrlRewrite : public RefCountObj
+class UrlRewrite : public RefCountObjInHeap
 {
 public:
   using URLTable = std::unordered_map<std::string, UrlMappingPathIndex *>;

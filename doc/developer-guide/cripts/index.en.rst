@@ -26,6 +26,7 @@ Cripts
    :maxdepth: 2
 
    cripts-overview.en
+   cripts-global.en
    cripts-variables.en
    cripts-urls.en
    cripts-headers.en
@@ -34,4 +35,5 @@ Cripts
    cripts-crypto.en
    cripts-misc.en
    cripts-bundles.en
+   cripts-convenience.en
    cripts-examples.en

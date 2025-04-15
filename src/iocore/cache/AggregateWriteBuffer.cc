@@ -21,14 +21,28 @@
   limitations under the License.
  */
 
-#include "iocore/cache/AggregateWriteBuffer.h"
-
-#include "iocore/aio/AIO_fault_injection.h"
-
+#include "P_CacheDoc.h"
+#include "AggregateWriteBuffer.h"
 #include "tscore/ink_assert.h"
-#include "tscore/ink_platform.h"
 
 #include <cstring>
+
+void
+AggregateWriteBuffer::add(Doc const *doc, int approx_size)
+{
+  std::memcpy(this->_buffer + this->_buffer_pos, doc, doc->len);
+  this->_buffer_pos += approx_size;
+  this->add_bytes_pending_aggregation(-approx_size);
+}
+
+Doc *
+AggregateWriteBuffer::emplace(int approx_size)
+{
+  Doc *result{new (this->_buffer + this->_buffer_pos) Doc};
+  this->_buffer_pos += approx_size;
+  this->add_bytes_pending_aggregation(-approx_size);
+  return result;
+}
 
 bool
 AggregateWriteBuffer::flush(int fd, off_t write_pos) const
@@ -44,6 +58,6 @@ AggregateWriteBuffer::flush(int fd, off_t write_pos) const
 void
 AggregateWriteBuffer::copy_from(char *dest, int offset, size_t nbytes) const
 {
-  ink_assert((offset + nbytes) <= (unsigned)this->_buffer_pos);
+  ink_assert((offset + nbytes) <= static_cast<size_t>(this->_buffer_pos));
   memcpy(dest, this->_buffer + offset, nbytes);
 }

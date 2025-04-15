@@ -126,7 +126,7 @@ span of bytes. Internally each stripe is treated almost entirely independently.
 The data structures described in this section are duplicated for each stripe.
 
 Internally the term *volume* is used for these stripes and implemented primarily
-in :cpp:class:`Stripe`. What a user thinks of as a volume (and what this document
+in :cpp:class:`StripeSM`. What a user thinks of as a volume (and what this document
 calls a *cache volume*) is represented by :cpp:class:`CacheVol`.
 
 .. note::
@@ -390,7 +390,7 @@ if needed to store the object.
    ``Doc`` layout 3.2.0
 
 This had the problem that with only one fragment table it could not be reliable
-for objects with more than one alternate[#multiple-alternates]_. Therefore, the
+for objects with more than one alternate [#multiple-alternates]_. Therefore, the
 fragment data was moved from being a separate variable length section of the
 metadata to being directly incorporated in to the :cpp:class:`CacheHTTPInfoVector`,
 yielding a layout of the following form.
@@ -505,7 +505,7 @@ Disk Failure
 
 The cache is designed to be relatively resistant to disk failures. Because each
 :term:`storage unit` in each :term:`cache volume` is mostly independent, the
-loss of a disk simply means that the corresponding :cpp:class:`Stripe` instances
+loss of a disk simply means that the corresponding :cpp:class:`StripeSM` instances
 (one per cache volume that uses the storage unit) becomes unusable. The primary
 issue is updating the volume assignment table to both preserve assignments for
 objects on still operational volumes while distributing the assignments from the
@@ -720,7 +720,7 @@ The set of things which can affect cacheability are:
 * Plugin operations.
 
 The initial internal checks, along with their :file:`records.yaml`
-overrides[#cacheability-overrides]_, are done in ``HttpTransact::is_request_cache_lookupable``.
+overrides [#cacheability-overrides]_, are done in ``HttpTransact::is_request_cache_lookupable``.
 
 The checks that are done are:
 
@@ -778,7 +778,7 @@ The basic steps to a cache lookup are:
 
 #. The cache stripe is determined (based on the cache key).
 
-   The :term:`cache key` is used as a hash key in to an array of :cpp:class:`Stripe` instances by
+   The :term:`cache key` is used as a hash key in to an array of :cpp:class:`StripeSM` instances by
    :func:`Cache::key_to_stripe`. The construction and arrangement of this array is the essence of how
    volumes are assigned.
 
@@ -939,7 +939,7 @@ Aggregation Buffer
 ------------------
 
 Disk writes to cache are handled through an *aggregation buffer*. There is one
-for each :cpp:class:`Stripe` instance. To minimize the number of system calls data
+for each :cpp:class:`StripeSM` instance. To minimize the number of system calls data
 is written to disk in units of roughly :ref:`target fragment size <target-fragment-size>`
 bytes. The algorithm used is simple: data is piled up in the aggregation buffer
 until no more will fit without going over the target fragment size, at which
@@ -974,11 +974,11 @@ In some cases this is not acceptable and the object is *evacuated* by reading
 it from the cache and then writing it back to cache which moves the physical
 storage of the object from in front of the write cursor to behind the write
 cursor. Objects that are evacuated are handled in this way based on data in
-stripe data structures (attached to the :cpp:class:`Stripe` instance).
+stripe data structures (attached to the :cpp:class:`StripeSM` instance).
 
 Evacuation data structures are defined by dividing up the volume content into
 a disjoint and contiguous set of regions of ``EVACUATION_BUCKET_SIZE`` bytes.
-The :cpp:member:`Stripe::evacuate` member is an array with an element for each
+The :cpp:member:`PreservationTable::evacuate` member is an array with an element for each
 evacuation region. Each element is a doubly linked list of :cpp:class:`EvacuationBlock`
 instances. Each instance contains a :cpp:class:`Dir` that specifies the fragment
 to evacuate. It is assumed that an evacuation block is placed in the evacuation
@@ -1004,14 +1004,14 @@ if the count goes to zero. If the ``EvacuationBlock`` already exists with a
 count of zero, the count is not modified and the number of readers is not
 tracked, so the evacuation is valid as long as the object exists.
 
-Evacuation is driven by cache writes, essentially in :cpp:member:`Stripe::aggWrite`.
+Evacuation is driven by cache writes, essentially in :cpp:member:`StripeSM::aggWrite`.
 This method processes the pending cache virtual connections that are trying to
 write to the stripe. Some of these may be evacuation virtual connections. If so
 then the completion callback for that virtual connection is called as the data
 is put in to the aggregation buffer.
 
 When no more cache virtual connections can be processed (due to an empty queue
-or the aggregation buffer filling) then :cpp:member:`Stripe::evac_range` is called
+or the aggregation buffer filling) then :cpp:member:`StripeSM::evac_range` is called
 to clear the range to be overwritten plus an additional :c:macro:`EVACUATION_SIZE`
 range. The buckets covering that range are checked. If there are any items in
 the buckets a new cache virtual connection (a *doc evacuator*) is created and
@@ -1021,7 +1021,7 @@ the read completes it is checked for validity and if valid, the cache virtual
 connection for it is placed at the front of the write queue for the stripe and
 the write aggregation resumed.
 
-Before doing a write, the method :cpp:member:`Stripe::evac_range()` is called to
+Before doing a write, the method :cpp:member:`StripeSM::evac_range()` is called to
 start an evacuation. If any fragments are found in the buckets in the range the
 earliest such fragment (smallest offset, closest to the write cursor) is
 selected and read from disk and the aggregation buffer write is suspended. The

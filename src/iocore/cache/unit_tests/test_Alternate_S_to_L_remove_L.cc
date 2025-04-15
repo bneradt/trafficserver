@@ -25,6 +25,9 @@
 #define SMALL_FILE 10 * 1024
 
 #include "main.h"
+#include "../P_CacheInternal.h"
+
+using namespace std::literals;
 
 int  cache_vols           = 1;
 bool reuse_existing_cache = false;
@@ -80,9 +83,8 @@ public:
     REQUIRE(rt);
     MIMEField *field = rt->read_http_info->m_alt->m_response_hdr.field_find(MIME_FIELD_CONTENT_TYPE, MIME_LEN_CONTENT_TYPE);
     REQUIRE(field);
-    int         len;
-    const char *value = field->value_get(&len);
-    REQUIRE(memcmp(value, "text/html;charset=utf-8", len) == 0);
+    auto value{field->value_get()};
+    REQUIRE(value == "text/html;charset=utf-8"sv);
   }
 };
 
@@ -135,9 +137,8 @@ public:
     REQUIRE(rt);
     MIMEField *field = rt->read_http_info->m_alt->m_response_hdr.field_find(MIME_FIELD_CONTENT_TYPE, MIME_LEN_CONTENT_TYPE);
     REQUIRE(field);
-    int         len;
-    const char *value = field->value_get(&len);
-    REQUIRE(memcmp(value, "text/html;charset=utf-8", len) == 0);
+    auto value{field->value_get()};
+    REQUIRE(value == "text/html;charset=utf-8"sv);
   }
 };
 
@@ -217,9 +218,8 @@ public:
     REQUIRE(rt);
     MIMEField *field = rt->read_http_info->m_alt->m_response_hdr.field_find(MIME_FIELD_CONTENT_TYPE, MIME_LEN_CONTENT_TYPE);
     REQUIRE(field);
-    int         len;
-    const char *value = field->value_get(&len);
-    REQUIRE(memcmp(value, "application/x-javascript", len) == 0);
+    auto value{field->value_get()};
+    REQUIRE(value == "application/x-javascript"sv);
   }
 
   void

@@ -32,6 +32,7 @@
 
 #include "P_UDPConnection.h"
 #include "iocore/net/UDPEventIO.h"
+#include "iocore/net/UDPPacket.h"
 
 class UnixUDPConnection : public UDPConnectionInternal
 {
@@ -62,14 +63,14 @@ private:
 TS_INLINE
 UnixUDPConnection::UnixUDPConnection(int the_fd)
 {
-  fd = the_fd;
+  sock = UnixSocket{the_fd};
   SET_HANDLER(&UnixUDPConnection::callbackHandler);
 }
 
 TS_INLINE void
 UnixUDPConnection::init(int the_fd)
 {
-  fd              = the_fd;
+  sock            = UnixSocket{the_fd};
   onCallbackQueue = 0;
   callbackAction  = nullptr;
   ethread         = nullptr;
@@ -93,7 +94,7 @@ UnixUDPConnection::errorAndDie(int e)
 TS_INLINE Action *
 UDPConnection::recv(Continuation *c)
 {
-  UnixUDPConnection *p = (UnixUDPConnection *)this;
+  UnixUDPConnection *p = static_cast<UnixUDPConnection *>(this);
   // register callback interest.
   p->continuation = c;
   ink_assert(c != nullptr);

@@ -20,12 +20,11 @@
   See the License for the specific language governing permissions and
   limitations under the License.
  */
-#include "P_SSLNextProtocolAccept.h"
 #include "iocore/net/SSLSNIConfig.h"
 #include "iocore/net/TLSSNISupport.h"
 #include "tscore/ink_assert.h"
+#include "tscore/ink_config.h"
 #include "tscore/ink_inet.h"
-#include "tscore/Diags.h"
 
 int TLSSNISupport::_ex_data_index = -1;
 
@@ -87,24 +86,14 @@ TLSSNISupport::perform_sni_action(SSL &ssl)
   return SSL_TLSEXT_ERR_OK;
 }
 
-#if TS_USE_HELLO_CB
 void
-#if HAVE_SSL_CTX_SET_CLIENT_HELLO_CB
-TLSSNISupport::on_client_hello(SSL *ssl, int * /* al ATS_UNUSED */, void * /* arg ATS_UNUSED */)
-#elif HAVE_SSL_CTX_SET_SELECT_CERTIFICATE_CB
-TLSSNISupport::on_client_hello(const SSL_CLIENT_HELLO *client_hello)
-#endif
+TLSSNISupport::on_client_hello(ClientHello &client_hello)
 {
   const char          *servername = nullptr;
   const unsigned char *p;
   size_t               remaining, len;
   // Parse the server name if the get extension call succeeds and there are more than 2 bytes to parse
-#if HAVE_SSL_CTX_SET_CLIENT_HELLO_CB
-  if (SSL_client_hello_get0_ext(ssl, TLSEXT_TYPE_server_name, &p, &remaining) && remaining > 2)
-#elif HAVE_SSL_CTX_SET_SELECT_CERTIFICATE_CB
-  if (SSL_early_callback_ctx_extension_get(client_hello, TLSEXT_TYPE_server_name, &p, &remaining) && remaining > 2)
-#endif
-  {
+  if (client_hello.getExtension(TLSEXT_TYPE_server_name, &p, &remaining) && remaining > 2) {
     // Parse to get to the name, originally from test/handshake_helper.c in openssl tree
     /* Extract the length of the supplied list of names. */
     len  = *(p++) << 8;
@@ -132,13 +121,10 @@ TLSSNISupport::on_client_hello(const SSL_CLIENT_HELLO *client_hello)
     this->_set_sni_server_name(std::string_view(servername, len));
   }
 }
-#endif
 
 void
 TLSSNISupport::on_servername(SSL *ssl, int * /* al ATS_UNUSED */, void * /* arg ATS_UNUSED */)
 {
-  this->_fire_ssl_servername_event();
-
   const char *name = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
   if (name) {
     this->_set_sni_server_name(name);
@@ -185,4 +171,14 @@ TLSSNISupport::would_have_actions_for(const char *servername, IpEndpoint remote,
     }
   }
   return retval;
+}
+
+int
+TLSSNISupport::ClientHello::getExtension(int type, const uint8_t **out, size_t *outlen)
+{
+#if HAVE_SSL_CTX_SET_CLIENT_HELLO_CB
+  return SSL_client_hello_get0_ext(this->_chc, type, out, outlen);
+#elif HAVE_SSL_CTX_SET_SELECT_CERTIFICATE_CB
+  return SSL_early_callback_ctx_extension_get(this->_chc, type, out, outlen);
+#endif
 }

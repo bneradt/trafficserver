@@ -29,29 +29,23 @@
    SSL Configurations
  ****************************************************************************/
 
+#include "P_SSLCertLookup.h"
+#include "P_SSLClientUtils.h"
 #include "P_SSLConfig.h"
-
-#include <cstring>
-#include <cmath>
-
+#include "P_SSLUtils.h"
+#include "P_TLSKeyLogger.h"
+#include "SSLSessionCache.h"
+#include "iocore/net/SSLMultiCertConfigLoader.h"
+#include "iocore/net/SSLDiags.h"
+#include "iocore/net/TLSEarlyDataSupport.h"
+#include "iocore/net/YamlSNIConfig.h"
 #include "tscore/ink_config.h"
-#include <openssl/pem.h>
-
-#include "api/InkAPIInternal.h" // Added to include the ssl_hook and lifestyle_hook definitions
-
-#include "tscore/ink_platform.h"
 #include "tscore/Layout.h"
 #include "records/RecHttp.h"
 
-#include "P_Net.h"
-#include "P_SSLClientUtils.h"
-#include "P_SSLCertLookup.h"
-#include "P_TLSKeyLogger.h"
-#include "iocore/net/SSLDiags.h"
-#include "SSLSessionCache.h"
-#include "SSLSessionTicket.h"
-#include "iocore/net/TLSEarlyDataSupport.h"
-#include "iocore/net/YamlSNIConfig.h"
+#include <openssl/pem.h>
+#include <cstring>
+#include <cmath>
 
 int                SSLConfig::config_index                                = 0;
 int                SSLConfig::configids[]                                 = {0, 0};
@@ -138,6 +132,7 @@ SSLConfigParams::reset()
   ssl_session_cache_timeout            = 0;
   ssl_session_cache_auto_clear         = 1;
   configExitOnLoadError                = 1;
+  clientCertExitOnLoadError            = 0;
 }
 
 void
@@ -513,6 +508,7 @@ SSLConfigParams::initialize()
   ssl_client_cert_path     = nullptr;
   REC_ReadConfigStringAlloc(ssl_client_cert_filename, "proxy.config.ssl.client.cert.filename");
   REC_ReadConfigStringAlloc(ssl_client_cert_path, "proxy.config.ssl.client.cert.path");
+  REC_ReadConfigInteger(clientCertExitOnLoadError, "proxy.config.ssl.client.cert.exit_on_load_fail");
   set_paths_helper(ssl_client_cert_path, ssl_client_cert_filename, &clientCertPathOnly, &clientCertPath);
   ats_free_null(ssl_client_cert_filename);
   ats_free_null(ssl_client_cert_path);
@@ -553,7 +549,13 @@ SSLConfigParams::initialize()
   // can cause HTTP layer to connect using SSL. But only if SSL
   // initialization hasn't failed already.
   client_ctx = this->getCTX(this->clientCertPath, this->clientKeyPath, this->clientCACertFilename, this->clientCACertPath);
-  if (!client_ctx) {
+  if (client_ctx) {
+    return;
+  }
+  // Can't get SSL client context.
+  if (this->clientCertExitOnLoadError) {
+    Emergency("Can't initialize the SSL client, HTTPS in remap rules will not function");
+  } else {
     SSLError("Can't initialize the SSL client, HTTPS in remap rules will not function");
   }
 }
@@ -639,7 +641,7 @@ SSLCertificateConfig::startup()
   // proxy.config.ssl.server.multicert.exit_on_load_fail is true
   SSLConfig::scoped_config params;
   if (!reconfigure() && params->configExitOnLoadError) {
-    Fatal("failed to load SSL certificate file, %s", params->configFilePath);
+    Emergency("failed to load SSL certificate file, %s", params->configFilePath);
   }
 
   return true;
@@ -861,7 +863,7 @@ SSLConfigParams::updateCTX(const std::string &cert_secret_name) const
       // As a fail-safe, handle it if secret_for_updateCTX doesn't or no longer points to a null-terminated string.
       //
       char const *s{expected};
-      for (; *s && (std::size_t(s - expected) < cert_secret_name.size()); ++s) {}
+      for (; *s && (static_cast<std::size_t>(s - expected) < cert_secret_name.size()); ++s) {}
       DbgPrint(dbg_ctl_ssl_config_updateCTX, "Update cert, indirect recusive call caused by call for %.*s", int(s - expected),
                expected);
     }

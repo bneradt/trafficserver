@@ -45,7 +45,6 @@ Plugins that are considered stable are installed by default in |TS| releases.
 .. toctree::
    :hidden:
 
-   AWS S3 Authentication <s3_auth.en>
    AuthProxy <authproxy.en>
    Background Fetch <background_fetch.en>
    Cache Key Manipulation <cachekey.en>
@@ -53,7 +52,6 @@ Plugins that are considered stable are installed by default in |TS| releases.
    Cache Range Requests <cache_range_requests.en>
    Combo Handler <combo_handler.en>
    Configuration Remap <conf_remap.en>
-   Cookie Remap <cookie_remap.en>
    ESI <esi.en>
    Escalate <escalate.en>
    Compress <compress.en>
@@ -63,6 +61,7 @@ Plugins that are considered stable are installed by default in |TS| releases.
    HTTP Stats <http_stats.en>
    JA3 Fingerprint <ja3_fingerprint.en>
    Lua <lua.en>
+   Origin Server Authentication <origin_server_auth.en>
    Regex Remap <regex_remap.en>
    Regex Revalidate <regex_revalidate.en>
    Remap Purge <remap_purge.en>
@@ -76,9 +75,6 @@ Plugins that are considered stable are installed by default in |TS| releases.
 
 :doc:`AuthProxy <authproxy.en>`
    Delegates the authorization decision of a request to an external HTTP service.
-
-:doc:`AWS S3 Authentication <s3_auth.en>`
-   Support for Amazon S3 authentication features.
 
 :doc:`Background Fetch <background_fetch.en>`
    Proactively fetch content from Origin in a way that it will fill the object into cache.
@@ -128,6 +124,9 @@ Plugins that are considered stable are installed by default in |TS| releases.
 :doc:`Lua <lua.en>`
    Allows plugins to be written in Lua instead of C code.
 
+:doc:`Origin Server Authentication <origin_server_auth.en>`
+   Support for Amazon S3 and Google Cloud Services authentication features.
+
 :doc:`Regex Remap <regex_remap.en>`
     Configure remapping rules using regular expressions.
 
@@ -172,6 +171,7 @@ directory of the |TS| source tree. Experimental plugins can be compiled by passi
    Cache Fill <cache_fill.en>
    Certifier <certifier.en>
    Cert Reporting Tool <cert_reporting_tool.en>
+   Cookie Remap <cookie_remap.en>
    GeoIP ACL <geoip_acl.en>
    FQ Pacing <fq_pacing.en>
    Header Frequency <header_freq.en>
@@ -207,6 +207,9 @@ directory of the |TS| source tree. Experimental plugins can be compiled by passi
 
 :doc:`Cert Reporting Tool <cert_reporting_tool.en>`
    Examines and logs information on loaded certificates.
+
+:doc:`Cookie Remap <cookie_remap.en>`
+   Makes decisions on destinations based on cookies.
 
 :doc:`FQ Pacing <fq_pacing.en>`
    FQ Pacing: Rate Limit TCP connections using Linux's Fair Queuing queue discipline

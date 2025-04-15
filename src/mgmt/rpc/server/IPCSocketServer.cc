@@ -36,7 +36,7 @@
 
 #include "tscore/Diags.h"
 #include "tsutil/ts_bw_format.h"
-#include "records/RecProcess.h"
+#include "records/RecCore.h"
 #include "tscore/ink_sock.h"
 
 #include <ts/ts.h>
@@ -124,11 +124,6 @@ get_peereid(int fd, uid_t *euid, gid_t *egid)
 
 namespace rpc::comm
 {
-IPCSocketServer::~IPCSocketServer()
-{
-  unlink(_conf.sockPathName.c_str());
-}
-
 bool
 IPCSocketServer::configure(YAML::Node const &params)
 {
@@ -451,7 +446,6 @@ IPCSocketServer::Config::Config()
 void
 IPCSocketServer::late_check_peer_credentials(int peedFd, TSRPCHandlerOptions const &options, swoc::Errata &errata) const
 {
-  swoc::LocalBufferWriter<256> w;
   // For privileged calls, ensure we have caller credentials and that the caller is privileged.
   auto ecode = [](UnauthorizedErrorCode c) -> std::error_code {
     return std::error_code(static_cast<unsigned>(c), std::generic_category());

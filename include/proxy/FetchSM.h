@@ -29,7 +29,6 @@
 
 #pragma once
 
-#include "../../src/iocore/net/P_Net.h"
 #include "proxy/http/HttpSM.h"
 #include "proxy/http/HttpTunnel.h"
 
@@ -39,6 +38,12 @@ class FetchSM : public Continuation
 {
 public:
   FetchSM() {}
+
+  /** Indicate whether FetchSM dependencies have been initialized by ATS.
+   * @return True if FetchSM dependencies have been initialized, false otherwise.
+   */
+  static bool is_initialized();
+
   void
   init_comm()
   {

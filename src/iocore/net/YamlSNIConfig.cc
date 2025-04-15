@@ -22,7 +22,6 @@
 #include "iocore/net/YamlSNIConfig.h"
 
 #include <utility>
-#include <unordered_map>
 #include <set>
 #include <string_view>
 #include <string>
@@ -45,7 +44,6 @@
 
 #include "tsutil/ts_ip.h"
 
-#include "swoc/bwf_fwd.h"
 #include "tscore/Diags.h"
 #include "tscore/EnumDescriptor.h"
 #include "tscore/ink_assert.h"
@@ -352,8 +350,8 @@ template <> struct convert<YamlSNIConfig::Item> {
       if (!dir.empty() && (dir[0] != '/')) {
         dir = RecConfigReadConfigDir() + '/' + dir;
       }
-      item.verify_client_ca_file = file;
-      item.verify_client_ca_dir  = dir;
+      item.verify_client_ca_file = std::move(file);
+      item.verify_client_ca_dir  = std::move(dir);
 #endif
     }
 

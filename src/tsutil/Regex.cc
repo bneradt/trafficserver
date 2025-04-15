@@ -51,19 +51,6 @@ my_free(void *ptr, void * /*caller*/)
   free(ptr);
 }
 
-class RegexContext; // defined below
-class RegexContextCleanup
-{
-public:
-  void push_back(RegexContext *ctx);
-  ~RegexContextCleanup();
-
-private:
-  std::vector<RegexContext *> _contexts;
-  std::mutex                  _mutex;
-};
-RegexContextCleanup regex_context_cleanup;
-
 //----------------------------------------------------------------------------
 class RegexContext
 {
@@ -71,20 +58,11 @@ public:
   static RegexContext *
   get_instance()
   {
-    if (_shutdown == true) {
-      return nullptr;
-    }
-
-    if (_regex_context == nullptr) {
-      _regex_context = new RegexContext();
-      regex_context_cleanup.push_back(_regex_context);
-    }
-    return _regex_context;
+    thread_local RegexContext ctx;
+    return &ctx;
   }
   ~RegexContext()
   {
-    _shutdown = true;
-
     if (_general_context != nullptr) {
       pcre2_general_context_free(_general_context);
     }
@@ -123,32 +101,11 @@ private:
     _jit_stack       = pcre2_jit_stack_create(4096, 1024 * 1024, nullptr); // 1 page min and 1MB max
     pcre2_jit_stack_assign(_match_context, nullptr, _jit_stack);
   }
-  pcre2_general_context            *_general_context = nullptr;
-  pcre2_compile_context            *_compile_context = nullptr;
-  pcre2_match_context              *_match_context   = nullptr;
-  pcre2_jit_stack                  *_jit_stack       = nullptr;
-  thread_local static RegexContext *_regex_context;
-  static bool                       _shutdown; // flag to indicate destructor was called, so no new instances can be created
+  pcre2_general_context *_general_context = nullptr;
+  pcre2_compile_context *_compile_context = nullptr;
+  pcre2_match_context   *_match_context   = nullptr;
+  pcre2_jit_stack       *_jit_stack       = nullptr;
 };
-
-thread_local RegexContext *RegexContext::_regex_context = nullptr;
-bool                       RegexContext::_shutdown      = false;
-
-//----------------------------------------------------------------------------
-
-RegexContextCleanup::~RegexContextCleanup()
-{
-  std::lock_guard<std::mutex> guard(_mutex);
-  for (auto ctx : _contexts) {
-    delete ctx;
-  }
-}
-void
-RegexContextCleanup::push_back(RegexContext *ctx)
-{
-  std::lock_guard<std::mutex> guard(_mutex);
-  _contexts.push_back(ctx);
-}
 
 } // namespace
 
@@ -385,7 +342,7 @@ DFA::build(const std::string_view pattern, unsigned flags)
 
 //----------------------------------------------------------------------------
 int32_t
-DFA::compile(std::string_view pattern, unsigned flags)
+DFA::compile(const std::string_view pattern, unsigned flags)
 {
   release_assert(_patterns.empty());
   this->build(pattern, flags);
@@ -394,7 +351,7 @@ DFA::compile(std::string_view pattern, unsigned flags)
 
 //----------------------------------------------------------------------------
 int32_t
-DFA::compile(std::string_view *patterns, int npatterns, unsigned flags)
+DFA::compile(const std::string_view *const patterns, int npatterns, unsigned flags)
 {
   _patterns.reserve(npatterns); // try to pre-allocate.
   for (int i = 0; i < npatterns; ++i) {
@@ -405,7 +362,7 @@ DFA::compile(std::string_view *patterns, int npatterns, unsigned flags)
 
 //----------------------------------------------------------------------------
 int32_t
-DFA::compile(const char **patterns, int npatterns, unsigned flags)
+DFA::compile(const char *const *patterns, int npatterns, unsigned flags)
 {
   _patterns.reserve(npatterns); // try to pre-allocate.
   for (int i = 0; i < npatterns; ++i) {

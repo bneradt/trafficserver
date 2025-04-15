@@ -728,8 +728,8 @@ ts.ctx
 
 **context:** do_remap/do_os_response or do_global_* or later
 
-**description:** This table can be used to store per-request Lua context data and has a life time identical to the
-current request.
+**description:** This table can be used to store data in do_remap/do_os_response or do_global_* functions and can be
+retrieved from handler functions hooked from these global functions.
 
 Here is an example:
 
@@ -986,6 +986,25 @@ Then ``GET /st HTTP/1.1\r\nHost: b.tb.cn\r\nUser-Aget: Mozilla/5.0\r\nAccept: */
     User-Agent: Mozilla/5.0
     Accept: */*
 
+
+:ref:`TOP <admin-plugins-ts-lua>`
+
+ts.client_request.get_header_block
+----------------------------------
+**syntax:** *ts.client_request.get_header_block()*
+
+**context:** do_remap/do_os_response or do_global_* or later
+
+**description:** Returns a string holding all the headers for the current client request.
+
+Here is an example:
+
+::
+
+    function do_global_read_request()
+        block = ts.client_request.get_header_block()
+        ts.debug(block)
+    end
 
 :ref:`TOP <admin-plugins-ts-lua>`
 
@@ -2097,17 +2116,19 @@ ts.server_request.server_addr.set_outgoing_addr
 -----------------------------------------------
 **syntax:** *ts.server_request.server_addr.set_outgoing_addr()*
 
-**context:** earlier than or inside function @ TS_LUA_HOOK_SEND_REQUEST_HDR hook point
+**context:** earlier than or inside function @ TS_LUA_HOOK_POST_REMAP hook point
 
 **description**: This function can be used to set outgoing socket address for the request to origin.
 
 The ts.server_request.server_addr.set_outgoing_addr function requires three inputs, ip is a string, port and family is number.
 
+This will not be effective if called in the hook for sending request headers.
+
 Here is an example:
 
 ::
 
-    function do_global_send_request()
+    function do_global_post_remap()
         ts.server_request.server_addr.set_outgoing_addr("192.168.231.17", 80, TS_LUA_AF_INET)
     end
 
@@ -3882,13 +3903,15 @@ We will get the response like this:
 
 :ref:`TOP <admin-plugins-ts-lua>`
 
-ts.sleep
---------
+ts.sleep or ts.sleep_ms
+-----------------------
 **syntax:** *ts.sleep(sec)*
+
+**syntax:** *ts.sleep_ms(msec)*
 
 **context:** *hook point functions added after do_remap*
 
-**description:** Sleeps for the specified seconds without blocking.
+**description:** Sleeps for the specified seconds (or milliseconds) without blocking.
 
 Behind the scene, this method makes use of the ATS event model.
 
@@ -4172,6 +4195,7 @@ Http config constants
     TS_LUA_CONFIG_PLUGIN_VC_DEFAULT_BUFFER_WATER_MARK
     TS_LUA_CONFIG_NET_SOCK_NOTSENT_LOWAT
     TS_LUA_CONFIG_BODY_FACTORY_RESPONSE_SUPPRESSION_MODE
+    TS_LUA_CONFIG_HTTP_CACHE_POST_METHOD
     TS_LUA_CONFIG_LAST_ENTRY
 
 :ref:`TOP <admin-plugins-ts-lua>`

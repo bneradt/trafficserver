@@ -21,13 +21,16 @@
   limitations under the License.
  */
 
+#include "P_CacheHosting.h"
+#include "Stripe.h"
+#include "iocore/cache/CacheDefs.h"
+#include "iocore/eventsystem/Tasks.h"
 #include "swoc/swoc_file.h"
 
-#include "P_Cache.h"
-#include "tscore/Layout.h"
 #include "tscore/HostLookup.h"
 #include "tscore/Tokenizer.h"
 #include "tscore/Filenames.h"
+#include "tsutil/DbgCtl.h"
 
 namespace
 {
@@ -441,7 +444,7 @@ CacheHostRecord::Init(CacheType typ)
     Warning("error: No volumes found for Cache Type %d", type);
     return -1;
   }
-  stripes     = static_cast<Stripe **>(ats_malloc(num_vols * sizeof(Stripe *)));
+  stripes     = static_cast<StripeSM **>(ats_malloc(num_vols * sizeof(StripeSM *)));
   int counter = 0;
   for (i = 0; i < num_cachevols; i++) {
     CacheVol *cachep1 = cp[i];
@@ -523,7 +526,7 @@ CacheHostRecord::Init(matcher_line *line_info, CacheType typ)
               is_vol_present = 1;
               if (cachep->scheme == type) {
                 Dbg(dbg_ctl_cache_hosting, "Host Record: %p, Volume: %d, size: %ld", this, volume_number,
-                    (long)(cachep->size * STORE_BLOCK_SIZE));
+                    (static_cast<long>(cachep->size * STORE_BLOCK_SIZE)));
                 cp[num_cachevols] = cachep;
                 num_cachevols++;
                 num_vols += cachep->num_vols;
@@ -563,7 +566,7 @@ CacheHostRecord::Init(matcher_line *line_info, CacheType typ)
   if (!num_vols) {
     return -1;
   }
-  stripes     = static_cast<Stripe **>(ats_malloc(num_vols * sizeof(Stripe *)));
+  stripes     = static_cast<StripeSM **>(ats_malloc(num_vols * sizeof(StripeSM *)));
   int counter = 0;
   for (i = 0; i < num_cachevols; i++) {
     CacheVol *cachep = cp[i];
@@ -654,6 +657,8 @@ ConfigVolumes::BuildListFromString(char *config_file_path, char *file_buf)
     int         size             = 0;
     int         in_percent       = 0;
     bool        ramcache_enabled = true;
+    int         avg_obj_size     = -1; // Defaults
+    int         fragment_size    = -1;
 
     while (true) {
       // skip all blank spaces at beginning of line
@@ -741,6 +746,20 @@ ConfigVolumes::BuildListFromString(char *config_file_path, char *file_buf)
         } else {
           in_percent = 0;
         }
+      } else if (strcasecmp(tmp, "avg_obj_size") == 0) { // match avg_obj_size
+        tmp          += 13;
+        avg_obj_size  = atoi(tmp);
+
+        while (ParseRules::is_digit(*tmp)) {
+          tmp++;
+        }
+      } else if (strcasecmp(tmp, "fragment_size") == 0) { // match fragment_size
+        tmp           += 14;
+        fragment_size  = atoi(tmp);
+
+        while (ParseRules::is_digit(*tmp)) {
+          tmp++;
+        }
       } else if (strcasecmp(tmp, "ramcache") == 0) { // match ramcache
         tmp += 9;
         if (!strcasecmp(tmp, "false")) {
@@ -767,7 +786,8 @@ ConfigVolumes::BuildListFromString(char *config_file_path, char *file_buf)
       /* add the config */
 
       ConfigVol *configp = new ConfigVol();
-      configp->number    = volume_number;
+
+      configp->number = volume_number;
       if (in_percent) {
         configp->percent    = size;
         configp->in_percent = true;
@@ -776,6 +796,8 @@ ConfigVolumes::BuildListFromString(char *config_file_path, char *file_buf)
       }
       configp->scheme           = scheme;
       configp->size             = size;
+      configp->avg_obj_size     = avg_obj_size;
+      configp->fragment_size    = fragment_size;
       configp->cachep           = nullptr;
       configp->ramcache_enabled = ramcache_enabled;
       cp_queue.enqueue(configp);

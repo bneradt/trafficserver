@@ -21,8 +21,12 @@
   limitations under the License.
  */
 
-#include "P_Cache.h"
+#include "CacheVC.h"
 #include "P_CacheDir.h"
+#include "P_CacheDoc.h"
+#include "P_CacheInternal.h"
+#include "PreservationTable.h"
+#include "Stripe.h"
 
 #include "tscore/hugepages.h"
 #include "tscore/Random.h"
@@ -215,12 +219,12 @@ dir_bucket_loop_check(Dir *start_dir, Dir *seg)
 void
 dir_init_segment(int s, Stripe *stripe)
 {
-  stripe->header->freelist[s] = 0;
-  Dir *seg                    = stripe->dir_segment(s);
+  stripe->directory.header->freelist[s] = 0;
+  Dir *seg                              = stripe->directory.get_segment(s);
   int  l, b;
-  memset(static_cast<void *>(seg), 0, SIZEOF_DIR * DIR_DEPTH * stripe->buckets);
+  memset(static_cast<void *>(seg), 0, SIZEOF_DIR * DIR_DEPTH * stripe->directory.buckets);
   for (l = 1; l < DIR_DEPTH; l++) {
-    for (b = 0; b < stripe->buckets; b++) {
+    for (b = 0; b < stripe->directory.buckets; b++) {
       Dir *bucket = dir_bucket(b, seg);
       dir_free_entry(dir_bucket_row(bucket, l), s, stripe);
     }
@@ -232,7 +236,7 @@ dir_init_segment(int s, Stripe *stripe)
 int
 dir_bucket_loop_fix(Dir *start_dir, int s, Stripe *stripe)
 {
-  if (!dir_bucket_loop_check(start_dir, stripe->dir_segment(s))) {
+  if (!dir_bucket_loop_check(start_dir, stripe->directory.get_segment(s))) {
     Warning("Dir loop exists, clearing segment %d", s);
     dir_init_segment(s, stripe);
     return 1;
@@ -244,10 +248,10 @@ int
 dir_freelist_length(Stripe *stripe, int s)
 {
   int  free = 0;
-  Dir *seg  = stripe->dir_segment(s);
-  Dir *e    = dir_from_offset(stripe->header->freelist[s], seg);
+  Dir *seg  = stripe->directory.get_segment(s);
+  Dir *e    = dir_from_offset(stripe->directory.header->freelist[s], seg);
   if (dir_bucket_loop_fix(e, s, stripe)) {
-    return (DIR_DEPTH - 1) * stripe->buckets;
+    return (DIR_DEPTH - 1) * stripe->directory.buckets;
   }
   while (e) {
     free++;
@@ -261,7 +265,7 @@ dir_bucket_length(Dir *b, int s, Stripe *stripe)
 {
   Dir *e   = b;
   int  i   = 0;
-  Dir *seg = stripe->dir_segment(s);
+  Dir *seg = stripe->directory.get_segment(s);
 #ifdef LOOP_CHECK_MODE
   if (dir_bucket_loop_fix(b, s, vol))
     return 1;
@@ -281,9 +285,9 @@ check_dir(Stripe *stripe)
 {
   int i, s;
   Dbg(dbg_ctl_cache_check_dir, "inside check dir");
-  for (s = 0; s < stripe->segments; s++) {
-    Dir *seg = stripe->dir_segment(s);
-    for (i = 0; i < stripe->buckets; i++) {
+  for (s = 0; s < stripe->directory.segments; s++) {
+    Dir *seg = stripe->directory.get_segment(s);
+    for (i = 0; i < stripe->directory.buckets; i++) {
       Dir *b = dir_bucket(i, seg);
       if (!(dir_bucket_length(b, s, stripe) >= 0)) {
         return 0;
@@ -302,12 +306,12 @@ check_dir(Stripe *stripe)
 inline void
 unlink_from_freelist(Dir *e, int s, Stripe *stripe)
 {
-  Dir *seg = stripe->dir_segment(s);
+  Dir *seg = stripe->directory.get_segment(s);
   Dir *p   = dir_from_offset(dir_prev(e), seg);
   if (p) {
     dir_set_next(p, dir_next(e));
   } else {
-    stripe->header->freelist[s] = dir_next(e);
+    stripe->directory.header->freelist[s] = dir_next(e);
   }
   Dir *n = dir_from_offset(dir_next(e), seg);
   if (n) {
@@ -318,11 +322,11 @@ unlink_from_freelist(Dir *e, int s, Stripe *stripe)
 inline Dir *
 dir_delete_entry(Dir *e, Dir *p, int s, Stripe *stripe)
 {
-  Dir *seg              = stripe->dir_segment(s);
-  int  no               = dir_next(e);
-  stripe->header->dirty = 1;
+  Dir *seg                        = stripe->directory.get_segment(s);
+  int  no                         = dir_next(e);
+  stripe->directory.header->dirty = 1;
   if (p) {
-    unsigned int fo = stripe->header->freelist[s];
+    unsigned int fo = stripe->directory.header->freelist[s];
     unsigned int eo = dir_to_offset(e, seg);
     dir_clear(e);
     dir_set_next(p, no);
@@ -330,7 +334,7 @@ dir_delete_entry(Dir *e, Dir *p, int s, Stripe *stripe)
     if (fo) {
       dir_set_prev(dir_from_offset(fo, seg), eo);
     }
-    stripe->header->freelist[s] = eo;
+    stripe->directory.header->freelist[s] = eo;
   } else {
     Dir *n = next_dir(e, seg);
     if (n) {
@@ -349,7 +353,7 @@ inline void
 dir_clean_bucket(Dir *b, int s, Stripe *stripe)
 {
   Dir *e = b, *p = nullptr;
-  Dir *seg = stripe->dir_segment(s);
+  Dir *seg = stripe->directory.get_segment(s);
 #ifdef LOOP_CHECK_MODE
   int loop_count = 0;
 #endif
@@ -361,14 +365,14 @@ dir_clean_bucket(Dir *b, int s, Stripe *stripe)
         return;
     }
 #endif
-    if (!dir_valid(stripe, e) || !dir_offset(e)) {
+    if (!stripe->dir_valid(e) || !dir_offset(e)) {
       if (dbg_ctl_dir_clean.on()) {
         Dbg(dbg_ctl_dir_clean, "cleaning Stripe:%s: %p tag %X boffset %" PRId64 " b %p p %p bucket len %d", stripe->hash_text.get(),
             e, dir_tag(e), dir_offset(e), b, p, dir_bucket_length(b, s, stripe));
       }
       if (dir_offset(e)) {
-        Metrics::Gauge::decrement(cache_rsb.direntries_used);
-        Metrics::Gauge::decrement(stripe->cache_vol->vol_rsb.direntries_used);
+        ts::Metrics::Gauge::decrement(cache_rsb.direntries_used);
+        ts::Metrics::Gauge::decrement(stripe->cache_vol->vol_rsb.direntries_used);
       }
       e = dir_delete_entry(e, p, s, stripe);
       continue;
@@ -381,8 +385,8 @@ dir_clean_bucket(Dir *b, int s, Stripe *stripe)
 void
 dir_clean_segment(int s, Stripe *stripe)
 {
-  Dir *seg = stripe->dir_segment(s);
-  for (int64_t i = 0; i < stripe->buckets; i++) {
+  Dir *seg = stripe->directory.get_segment(s);
+  for (int64_t i = 0; i < stripe->directory.buckets; i++) {
     dir_clean_bucket(dir_bucket(i, seg), s, stripe);
     ink_assert(!dir_next(dir_bucket(i, seg)) || dir_offset(dir_bucket(i, seg)));
   }
@@ -391,7 +395,7 @@ dir_clean_segment(int s, Stripe *stripe)
 void
 dir_clean_vol(Stripe *stripe)
 {
-  for (int64_t i = 0; i < stripe->segments; i++) {
+  for (int64_t i = 0; i < stripe->directory.segments; i++) {
     dir_clean_segment(i, stripe);
   }
   CHECK_DIR(d);
@@ -400,11 +404,11 @@ dir_clean_vol(Stripe *stripe)
 void
 dir_clear_range(off_t start, off_t end, Stripe *stripe)
 {
-  for (off_t i = 0; i < stripe->buckets * DIR_DEPTH * stripe->segments; i++) {
+  for (off_t i = 0; i < stripe->directory.entries(); i++) {
     Dir *e = dir_index(stripe, i);
     if (dir_offset(e) >= static_cast<int64_t>(start) && dir_offset(e) < static_cast<int64_t>(end)) {
-      Metrics::Gauge::decrement(cache_rsb.direntries_used);
-      Metrics::Gauge::decrement(stripe->cache_vol->vol_rsb.direntries_used);
+      ts::Metrics::Gauge::decrement(cache_rsb.direntries_used);
+      ts::Metrics::Gauge::decrement(stripe->cache_vol->vol_rsb.direntries_used);
       dir_set_offset(e, 0); // delete
     }
   }
@@ -425,22 +429,22 @@ check_bucket_not_contains(Dir *b, Dir *e, Dir *seg)
 }
 
 void
-freelist_clean(int s, Stripe *stripe)
+freelist_clean(int s, StripeSM *stripe)
 {
   dir_clean_segment(s, stripe);
-  if (stripe->header->freelist[s]) {
+  if (stripe->directory.header->freelist[s]) {
     return;
   }
-  Warning("cache directory overflow on '%s' segment %d, purging...", stripe->path, s);
+  Warning("cache directory overflow on '%s' segment %d, purging...", stripe->disk->path, s);
   int  n   = 0;
-  Dir *seg = stripe->dir_segment(s);
-  for (int bi = 0; bi < stripe->buckets; bi++) {
+  Dir *seg = stripe->directory.get_segment(s);
+  for (int bi = 0; bi < stripe->directory.buckets; bi++) {
     Dir *b = dir_bucket(bi, seg);
     for (int l = 0; l < DIR_DEPTH; l++) {
       Dir *e = dir_bucket_row(b, l);
       if (dir_head(e) && !(n++ % 10)) {
-        Metrics::Gauge::decrement(cache_rsb.direntries_used);
-        Metrics::Gauge::decrement(stripe->cache_vol->vol_rsb.direntries_used);
+        ts::Metrics::Gauge::decrement(cache_rsb.direntries_used);
+        ts::Metrics::Gauge::decrement(stripe->cache_vol->vol_rsb.direntries_used);
         dir_set_offset(e, 0); // delete
       }
     }
@@ -449,100 +453,47 @@ freelist_clean(int s, Stripe *stripe)
 }
 
 inline Dir *
-freelist_pop(int s, Stripe *stripe)
+freelist_pop(int s, StripeSM *stripe)
 {
-  Dir *seg = stripe->dir_segment(s);
-  Dir *e   = dir_from_offset(stripe->header->freelist[s], seg);
+  Dir *seg = stripe->directory.get_segment(s);
+  Dir *e   = dir_from_offset(stripe->directory.header->freelist[s], seg);
   if (!e) {
     freelist_clean(s, stripe);
     return nullptr;
   }
-  stripe->header->freelist[s] = dir_next(e);
+  stripe->directory.header->freelist[s] = dir_next(e);
   // if the freelist if bad, punt.
   if (dir_offset(e)) {
     dir_init_segment(s, stripe);
     return nullptr;
   }
-  Dir *h = dir_from_offset(stripe->header->freelist[s], seg);
+  Dir *h = dir_from_offset(stripe->directory.header->freelist[s], seg);
   if (h) {
     dir_set_prev(h, 0);
   }
   return e;
 }
 
-int
-dir_segment_accounted(int s, Stripe *stripe, int offby, int *f, int *u, int *et, int *v, int *av, int *as)
-{
-  int     free = dir_freelist_length(stripe, s);
-  int     used = 0, empty = 0;
-  int     valid = 0, agg_valid = 0;
-  int64_t agg_size = 0;
-  Dir    *seg      = stripe->dir_segment(s);
-  for (int bi = 0; bi < stripe->buckets; bi++) {
-    Dir *b = dir_bucket(bi, seg);
-    Dir *e = b;
-    while (e) {
-      if (!dir_offset(e)) {
-        ink_assert(e == b);
-        empty++;
-      } else {
-        used++;
-        if (dir_valid(stripe, e)) {
-          valid++;
-        }
-        if (dir_agg_valid(stripe, e)) {
-          agg_valid++;
-        }
-        agg_size += dir_approx_size(e);
-      }
-      e = next_dir(e, seg);
-      if (!e) {
-        break;
-      }
-    }
-  }
-  if (f) {
-    *f = free;
-  }
-  if (u) {
-    *u = used;
-  }
-  if (et) {
-    *et = empty;
-  }
-  if (v) {
-    *v = valid;
-  }
-  if (av) {
-    *av = agg_valid;
-  }
-  if (as) {
-    *as = used ? static_cast<int>(agg_size / used) : 0;
-  }
-  ink_assert(stripe->buckets * DIR_DEPTH - (free + used + empty) <= offby);
-  return stripe->buckets * DIR_DEPTH - (free + used + empty) <= offby;
-}
-
 void
 dir_free_entry(Dir *e, int s, Stripe *stripe)
 {
-  Dir         *seg = stripe->dir_segment(s);
-  unsigned int fo  = stripe->header->freelist[s];
+  Dir         *seg = stripe->directory.get_segment(s);
+  unsigned int fo  = stripe->directory.header->freelist[s];
   unsigned int eo  = dir_to_offset(e, seg);
   dir_set_next(e, fo);
   if (fo) {
     dir_set_prev(dir_from_offset(fo, seg), eo);
   }
-  stripe->header->freelist[s] = eo;
+  stripe->directory.header->freelist[s] = eo;
 }
 
 int
-dir_probe(const CacheKey *key, Stripe *stripe, Dir *result, Dir **last_collision)
+dir_probe(const CacheKey *key, StripeSM *stripe, Dir *result, Dir **last_collision)
 {
   ink_assert(stripe->mutex->thread_holding == this_ethread());
-  int  s   = key->slice32(0) % stripe->segments;
-  int  b   = key->slice32(1) % stripe->buckets;
-  Dir *seg = stripe->dir_segment(s);
+  int  s   = key->slice32(0) % stripe->directory.segments;
+  int  b   = key->slice32(1) % stripe->directory.buckets;
+  Dir *seg = stripe->directory.get_segment(s);
   Dir *e = nullptr, *p = nullptr, *collision = *last_collision;
   CHECK_DIR(d);
 #ifdef LOOP_CHECK_MODE
@@ -567,12 +518,12 @@ Lagain:
             // may not accurately reflect the number of documents
             // having the same first_key
             DDbg(dbg_ctl_cache_stats, "Incrementing dir collisions");
-            Metrics::Counter::increment(cache_rsb.directory_collision);
-            Metrics::Counter::increment(stripe->cache_vol->vol_rsb.directory_collision);
+            ts::Metrics::Counter::increment(cache_rsb.directory_collision);
+            ts::Metrics::Counter::increment(stripe->cache_vol->vol_rsb.directory_collision);
           }
           goto Lcont;
         }
-        if (dir_valid(stripe, e)) {
+        if (stripe->dir_valid(e)) {
           DDbg(dbg_ctl_dir_probe_hit, "found %X %X vol %d bucket %d boffset %" PRId64 "", key->slice32(0), key->slice32(1),
                stripe->fd, b, dir_offset(e));
           dir_assign(result, e);
@@ -580,8 +531,8 @@ Lagain:
           ink_assert(dir_offset(e) * CACHE_BLOCK_SIZE < stripe->len);
           return 1;
         } else { // delete the invalid entry
-          Metrics::Gauge::decrement(cache_rsb.direntries_used);
-          Metrics::Gauge::decrement(stripe->cache_vol->vol_rsb.direntries_used);
+          ts::Metrics::Gauge::decrement(cache_rsb.direntries_used);
+          ts::Metrics::Gauge::decrement(stripe->cache_vol->vol_rsb.direntries_used);
           e = dir_delete_entry(e, p, s, stripe);
           continue;
         }
@@ -595,8 +546,8 @@ Lagain:
   }
   if (collision) { // last collision no longer in the list, retry
     DDbg(dbg_ctl_cache_stats, "Incrementing dir collisions");
-    Metrics::Counter::increment(cache_rsb.directory_collision);
-    Metrics::Counter::increment(stripe->cache_vol->vol_rsb.directory_collision);
+    ts::Metrics::Counter::increment(cache_rsb.directory_collision);
+    ts::Metrics::Counter::increment(stripe->cache_vol->vol_rsb.directory_collision);
     collision = nullptr;
     goto Lagain;
   }
@@ -606,13 +557,13 @@ Lagain:
 }
 
 int
-dir_insert(const CacheKey *key, Stripe *stripe, Dir *to_part)
+dir_insert(const CacheKey *key, StripeSM *stripe, Dir *to_part)
 {
   ink_assert(stripe->mutex->thread_holding == this_ethread());
-  int s  = key->slice32(0) % stripe->segments, l;
-  int bi = key->slice32(1) % stripe->buckets;
+  int s  = key->slice32(0) % stripe->directory.segments, l;
+  int bi = key->slice32(1) % stripe->directory.buckets;
   ink_assert(dir_approx_size(to_part) <= MAX_FRAG_SIZE + sizeof(Doc));
-  Dir *seg = stripe->dir_segment(s);
+  Dir *seg = stripe->directory.get_segment(s);
   Dir *e   = nullptr;
   Dir *b   = dir_bucket(bi, seg);
 #if defined(DEBUG) && defined(DO_CHECK_DIR_FAST)
@@ -655,7 +606,7 @@ Llink:
   do {
     prev = last;
     last = next_dir(last, seg);
-  } while (last && (++l <= stripe->buckets * DIR_DEPTH));
+  } while (last && (++l <= stripe->directory.buckets * DIR_DEPTH));
 
   dir_set_next(e, 0);
   dir_set_next(prev, dir_to_offset(e, seg));
@@ -666,20 +617,20 @@ Lfill:
   DDbg(dbg_ctl_dir_insert, "insert %p %X into vol %d bucket %d at %p tag %X %X boffset %" PRId64 "", e, key->slice32(0), stripe->fd,
        bi, e, key->slice32(1), dir_tag(e), dir_offset(e));
   CHECK_DIR(d);
-  stripe->header->dirty = 1;
-  Metrics::Gauge::increment(cache_rsb.direntries_used);
-  Metrics::Gauge::increment(stripe->cache_vol->vol_rsb.direntries_used);
+  stripe->directory.header->dirty = 1;
+  ts::Metrics::Gauge::increment(cache_rsb.direntries_used);
+  ts::Metrics::Gauge::increment(stripe->cache_vol->vol_rsb.direntries_used);
 
   return 1;
 }
 
 int
-dir_overwrite(const CacheKey *key, Stripe *stripe, Dir *dir, Dir *overwrite, bool must_overwrite)
+dir_overwrite(const CacheKey *key, StripeSM *stripe, Dir *dir, Dir *overwrite, bool must_overwrite)
 {
   ink_assert(stripe->mutex->thread_holding == this_ethread());
-  int          s   = key->slice32(0) % stripe->segments, l;
-  int          bi  = key->slice32(1) % stripe->buckets;
-  Dir         *seg = stripe->dir_segment(s);
+  int          s   = key->slice32(0) % stripe->directory.segments, l;
+  int          bi  = key->slice32(1) % stripe->directory.buckets;
+  Dir         *seg = stripe->directory.get_segment(s);
   Dir         *e   = nullptr;
   Dir         *b   = dir_bucket(bi, seg);
   unsigned int t   = DIR_MASK_TAG(key->slice32(2));
@@ -718,8 +669,8 @@ Lagain:
   // get from this row first
   e = b;
   if (dir_is_empty(e)) {
-    Metrics::Gauge::increment(cache_rsb.direntries_used);
-    Metrics::Gauge::increment(stripe->cache_vol->vol_rsb.direntries_used);
+    ts::Metrics::Gauge::increment(cache_rsb.direntries_used);
+    ts::Metrics::Gauge::increment(stripe->cache_vol->vol_rsb.direntries_used);
     goto Lfill;
   }
   for (l = 1; l < DIR_DEPTH; l++) {
@@ -735,8 +686,8 @@ Lagain:
     goto Lagain;
   }
 Llink:
-  Metrics::Gauge::increment(cache_rsb.direntries_used);
-  Metrics::Gauge::increment(stripe->cache_vol->vol_rsb.direntries_used);
+  ts::Metrics::Gauge::increment(cache_rsb.direntries_used);
+  ts::Metrics::Gauge::increment(stripe->cache_vol->vol_rsb.direntries_used);
   // as with dir_insert above, need to insert new entries at the tail of the linked list
   Dir *prev, *last;
 
@@ -745,7 +696,7 @@ Llink:
   do {
     prev = last;
     last = next_dir(last, seg);
-  } while (last && (++l <= stripe->buckets * DIR_DEPTH));
+  } while (last && (++l <= stripe->directory.buckets * DIR_DEPTH));
 
   dir_set_next(e, 0);
   dir_set_next(prev, dir_to_offset(e, seg));
@@ -756,17 +707,17 @@ Lfill:
   DDbg(dbg_ctl_dir_overwrite, "overwrite %p %X into vol %d bucket %d at %p tag %X %X boffset %" PRId64 "", e, key->slice32(0),
        stripe->fd, bi, e, t, dir_tag(e), dir_offset(e));
   CHECK_DIR(d);
-  stripe->header->dirty = 1;
+  stripe->directory.header->dirty = 1;
   return res;
 }
 
 int
-dir_delete(const CacheKey *key, Stripe *stripe, Dir *del)
+dir_delete(const CacheKey *key, StripeSM *stripe, Dir *del)
 {
   ink_assert(stripe->mutex->thread_holding == this_ethread());
-  int  s   = key->slice32(0) % stripe->segments;
-  int  b   = key->slice32(1) % stripe->buckets;
-  Dir *seg = stripe->dir_segment(s);
+  int  s   = key->slice32(0) % stripe->directory.segments;
+  int  b   = key->slice32(1) % stripe->directory.buckets;
+  Dir *seg = stripe->directory.get_segment(s);
   Dir *e = nullptr, *p = nullptr;
 #ifdef LOOP_CHECK_MODE
   int loop_count = 0;
@@ -784,8 +735,8 @@ dir_delete(const CacheKey *key, Stripe *stripe, Dir *del)
       }
 #endif
       if (dir_compare_tag(e, key) && dir_offset(e) == dir_offset(del)) {
-        Metrics::Gauge::decrement(cache_rsb.direntries_used);
-        Metrics::Gauge::decrement(stripe->cache_vol->vol_rsb.direntries_used);
+        ts::Metrics::Gauge::decrement(cache_rsb.direntries_used);
+        ts::Metrics::Gauge::decrement(stripe->cache_vol->vol_rsb.direntries_used);
         dir_delete_entry(e, p, s, stripe);
         CHECK_DIR(d);
         return 1;
@@ -801,14 +752,14 @@ dir_delete(const CacheKey *key, Stripe *stripe, Dir *del)
 // Lookaside Cache
 
 int
-dir_lookaside_probe(const CacheKey *key, Stripe *stripe, Dir *result, EvacuationBlock **eblock)
+dir_lookaside_probe(const CacheKey *key, StripeSM *stripe, Dir *result, EvacuationBlock **eblock)
 {
   ink_assert(stripe->mutex->thread_holding == this_ethread());
   int              i = key->slice32(3) % LOOKASIDE_SIZE;
   EvacuationBlock *b = stripe->lookaside[i].head;
   while (b) {
     if (b->evac_frags.key == *key) {
-      if (dir_valid(stripe, &b->new_dir)) {
+      if (stripe->dir_valid(&b->new_dir)) {
         *result = b->new_dir;
         DDbg(dbg_ctl_dir_lookaside, "probe %X success", key->slice32(0));
         if (eblock) {
@@ -824,14 +775,14 @@ dir_lookaside_probe(const CacheKey *key, Stripe *stripe, Dir *result, Evacuation
 }
 
 int
-dir_lookaside_insert(EvacuationBlock *eblock, Stripe *stripe, Dir *to)
+dir_lookaside_insert(EvacuationBlock *eblock, StripeSM *stripe, Dir *to)
 {
   CacheKey *key = &eblock->evac_frags.earliest_key;
-  DDbg(dbg_ctl_dir_lookaside, "insert %X %X, offset %d phase %d", key->slice32(0), key->slice32(1), (int)dir_offset(to),
-       (int)dir_phase(to));
+  DDbg(dbg_ctl_dir_lookaside, "insert %X %X, offset %" PRId64 " phase %d", key->slice32(0), key->slice32(1), dir_offset(to),
+       dir_phase(to));
   ink_assert(stripe->mutex->thread_holding == this_ethread());
   int              i         = key->slice32(3) % LOOKASIDE_SIZE;
-  EvacuationBlock *b         = new_EvacuationBlock(stripe->mutex->thread_holding);
+  EvacuationBlock *b         = new_EvacuationBlock();
   b->evac_frags.key          = *key;
   b->evac_frags.earliest_key = *key;
   b->earliest_evacuator      = eblock->earliest_evacuator;
@@ -843,7 +794,7 @@ dir_lookaside_insert(EvacuationBlock *eblock, Stripe *stripe, Dir *to)
 }
 
 int
-dir_lookaside_fixup(const CacheKey *key, Stripe *stripe)
+dir_lookaside_fixup(const CacheKey *key, StripeSM *stripe)
 {
   ink_assert(stripe->mutex->thread_holding == this_ethread());
   int              i = key->slice32(3) % LOOKASIDE_SIZE;
@@ -856,7 +807,7 @@ dir_lookaside_fixup(const CacheKey *key, Stripe *stripe)
       int64_t o = dir_offset(&b->dir), n = dir_offset(&b->new_dir);
       stripe->ram_cache->fixup(key, static_cast<uint64_t>(o), static_cast<uint64_t>(n));
       stripe->lookaside[i].remove(b);
-      free_EvacuationBlock(b, stripe->mutex->thread_holding);
+      free_EvacuationBlock(b);
       return res;
     }
     b = b->link.next;
@@ -866,19 +817,19 @@ dir_lookaside_fixup(const CacheKey *key, Stripe *stripe)
 }
 
 void
-dir_lookaside_cleanup(Stripe *stripe)
+dir_lookaside_cleanup(StripeSM *stripe)
 {
   ink_assert(stripe->mutex->thread_holding == this_ethread());
   for (auto &i : stripe->lookaside) {
     EvacuationBlock *b = i.head;
     while (b) {
-      if (!dir_valid(stripe, &b->new_dir)) {
+      if (!stripe->dir_valid(&b->new_dir)) {
         EvacuationBlock *nb = b->link.next;
         DDbg(dbg_ctl_dir_lookaside, "cleanup %X %X cleaned up", b->evac_frags.earliest_key.slice32(0),
              b->evac_frags.earliest_key.slice32(1));
         i.remove(b);
         free_CacheEvacuateDocVC(b->earliest_evacuator);
-        free_EvacuationBlock(b, stripe->mutex->thread_holding);
+        free_EvacuationBlock(b);
         b = nb;
         goto Lagain;
       }
@@ -889,7 +840,7 @@ dir_lookaside_cleanup(Stripe *stripe)
 }
 
 void
-dir_lookaside_remove(const CacheKey *key, Stripe *stripe)
+dir_lookaside_remove(const CacheKey *key, StripeSM *stripe)
 {
   ink_assert(stripe->mutex->thread_holding == this_ethread());
   int              i = key->slice32(3) % LOOKASIDE_SIZE;
@@ -899,7 +850,7 @@ dir_lookaside_remove(const CacheKey *key, Stripe *stripe)
       DDbg(dbg_ctl_dir_lookaside, "remove %X %X offset %" PRId64 " phase %d", key->slice32(0), key->slice32(1),
            dir_offset(&b->new_dir), dir_phase(&b->new_dir));
       stripe->lookaside[i].remove(b);
-      free_EvacuationBlock(b, stripe->mutex->thread_holding);
+      free_EvacuationBlock(b);
       return;
     }
     b = b->link.next;
@@ -935,10 +886,10 @@ dir_entries_used(Stripe *stripe)
 {
   uint64_t full  = 0;
   uint64_t sfull = 0;
-  for (int s = 0; s < stripe->segments; full += sfull, s++) {
-    Dir *seg = stripe->dir_segment(s);
+  for (int s = 0; s < stripe->directory.segments; full += sfull, s++) {
+    Dir *seg = stripe->directory.get_segment(s);
     sfull    = 0;
-    for (int b = 0; b < stripe->buckets; b++) {
+    for (int b = 0; b < stripe->directory.buckets; b++) {
       Dir *e = dir_bucket(b, seg);
       if (dir_bucket_loop_fix(e, s, stripe)) {
         sfull = 0;
@@ -968,7 +919,7 @@ void
 sync_cache_dir_on_shutdown()
 {
   Dbg(dbg_ctl_cache_dir_sync, "sync started");
-  EThread *t = (EThread *)0xdeadbeef;
+  EThread *t = reinterpret_cast<EThread *>(0xdeadbeef);
   for (int i = 0; i < gnstripes; i++) {
     gstripes[i]->shutdown(t);
   }
@@ -1005,7 +956,7 @@ Lrestart:
     return EVENT_CONT;
   }
 
-  Stripe *stripe = gstripes[stripe_index]; // must be named "vol" to make STAT macros work.
+  StripeSM *stripe = gstripes[stripe_index]; // must be named "vol" to make STAT macros work.
 
   if (event == AIO_EVENT_DONE) {
     // AIO Thread
@@ -1014,9 +965,9 @@ Lrestart:
       event = EVENT_NONE;
       goto Ldone;
     }
-    Metrics::Counter::increment(cache_rsb.directory_sync_bytes, io.aio_result);
-    Metrics::Counter::increment(stripe->cache_vol->vol_rsb.directory_sync_bytes, io.aio_result);
-    trigger = eventProcessor.schedule_in(this, SYNC_DELAY);
+    ts::Metrics::Counter::increment(cache_rsb.directory_sync_bytes, io.aio_result);
+    ts::Metrics::Counter::increment(stripe->cache_vol->vol_rsb.directory_sync_bytes, io.aio_result);
+    trigger = eventProcessor.schedule_in(this, HRTIME_MSECONDS(cache_config_dir_sync_delay));
     return EVENT_CONT;
   }
   {
@@ -1030,8 +981,7 @@ Lrestart:
       start_time = ink_get_hrtime();
     }
 
-    // recompute hit_evacuate_window
-    stripe->hit_evacuate_window = (stripe->data_blocks * cache_config_hit_evacuate_percent) / 100;
+    stripe->recompute_hit_evacuate_window();
 
     if (DISK_BAD(stripe->disk)) {
       goto Ldone;
@@ -1047,7 +997,7 @@ Lrestart:
          the serial number causes the cache to recover more data than necessary.
          The dirty bit it set in dir_insert, dir_overwrite and dir_delete_entry
        */
-      if (!stripe->header->dirty) {
+      if (!stripe->directory.header->dirty) {
         Dbg(dbg_ctl_cache_dir_sync, "Dir %s not dirty", stripe->hash_text.get());
         goto Ldone;
       }
@@ -1059,9 +1009,9 @@ Lrestart:
         }
         return EVENT_CONT;
       }
-      Dbg(dbg_ctl_cache_dir_sync, "pos: %" PRIu64 " Dir %s dirty...syncing to disk", stripe->header->write_pos,
+      Dbg(dbg_ctl_cache_dir_sync, "pos: %" PRIu64 " Dir %s dirty...syncing to disk", stripe->directory.header->write_pos,
           stripe->hash_text.get());
-      stripe->header->dirty = 0;
+      stripe->directory.header->dirty = 0;
       if (buflen < dirlen) {
         if (buf) {
           if (buf_huge) {
@@ -1081,13 +1031,13 @@ Lrestart:
           buf_huge = false;
         }
       }
-      stripe->header->sync_serial++;
-      stripe->footer->sync_serial = stripe->header->sync_serial;
+      stripe->directory.header->sync_serial++;
+      stripe->directory.footer->sync_serial = stripe->directory.header->sync_serial;
       CHECK_DIR(d);
-      memcpy(buf, stripe->raw_dir, dirlen);
+      memcpy(buf, stripe->directory.raw_dir, dirlen);
       stripe->dir_sync_in_progress = true;
     }
-    size_t B     = stripe->header->sync_serial & 1;
+    size_t B     = stripe->directory.header->sync_serial & 1;
     off_t  start = stripe->skip + (B ? dirlen : 0);
 
     if (!writepos) {
@@ -1096,7 +1046,7 @@ Lrestart:
       writepos += headerlen;
     } else if (writepos < static_cast<off_t>(dirlen) - headerlen) {
       // write part of body
-      int l = SYNC_MAX_WRITE;
+      int l = cache_config_dir_sync_max_write;
       if (writepos + l > static_cast<off_t>(dirlen) - headerlen) {
         l = dirlen - headerlen - writepos;
       }
@@ -1109,10 +1059,10 @@ Lrestart:
       writepos += headerlen;
     } else {
       stripe->dir_sync_in_progress = false;
-      Metrics::Counter::increment(cache_rsb.directory_sync_count);
-      Metrics::Counter::increment(stripe->cache_vol->vol_rsb.directory_sync_count);
-      Metrics::Counter::increment(cache_rsb.directory_sync_time, ink_get_hrtime() - start_time);
-      Metrics::Counter::increment(stripe->cache_vol->vol_rsb.directory_sync_time, ink_get_hrtime() - start_time);
+      ts::Metrics::Counter::increment(cache_rsb.directory_sync_count);
+      ts::Metrics::Counter::increment(stripe->cache_vol->vol_rsb.directory_sync_count);
+      ts::Metrics::Counter::increment(cache_rsb.directory_sync_time, ink_get_hrtime() - start_time);
+      ts::Metrics::Counter::increment(stripe->cache_vol->vol_rsb.directory_sync_time, ink_get_hrtime() - start_time);
       start_time = 0;
       goto Ldone;
     }

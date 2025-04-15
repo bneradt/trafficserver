@@ -68,11 +68,7 @@ static fs::path tempComponent = fs::path("c71e2bab-90dc-4770-9535-c9304c3de38e")
 class PluginFactoryUnitTest : public PluginFactory
 {
 public:
-  PluginFactoryUnitTest(const fs::path &tempComponent)
-  {
-    _tempComponent      = tempComponent;
-    _preventiveCleaning = false;
-  }
+  PluginFactoryUnitTest(const fs::path &tempComponent) { _tempComponent = tempComponent; }
 
 protected:
   const char *
@@ -127,7 +123,12 @@ class GlobalPluginInfo
 {
 public:
   GlobalPluginInfo() : _dlh(nullptr){};
-  ~GlobalPluginInfo(){};
+  ~GlobalPluginInfo()
+  {
+    if (_dlh) {
+      dlclose(_dlh);
+    }
+  };
 
   bool
   loadDso(const fs::path &configPath)
@@ -305,9 +306,7 @@ SCENARIO("loading plugins", "[plugin][core]")
         validateSuccessfulConfigPathTest(plugin, error, effectivePath, runtimePath);
         CHECK(nullptr != PluginDso::loadedPlugins()->findByEffectivePath(effectivePath, isPluginDynamicReloadEnabled()));
 
-        // check Dso at effective path still exists while copy at runtime path doesn't
         CHECK(fs::exists(plugin->_plugin.effectivePath()));
-        CHECK(!fs::exists(plugin->_plugin.runtimePath()));
       }
 
       teardownConfigPathTest(factory);
@@ -474,7 +473,7 @@ SCENARIO("multiple search dirs + multiple or no plugins installed", "[plugin][co
 
     std::string error;
 
-    for (auto searchDir : searchDirs) {
+    for (auto const &searchDir : searchDirs) {
       CHECK(fs::create_directories(searchDir, ec));
       fs::copy(pluginBuildPath, searchDir, ec);
     }
@@ -483,7 +482,7 @@ SCENARIO("multiple search dirs + multiple or no plugins installed", "[plugin][co
     /* Instantiate and initialize a plugin DSO instance. */
     PluginFactoryUnitTest factory(tempComponent);
     factory.setRuntimeDir(runtimeRootDir);
-    for (auto searchDir : searchDirs) {
+    for (auto const &searchDir : searchDirs) {
       factory.addSearchDir(searchDir);
     }
 
@@ -606,13 +605,10 @@ checkTwoLoadedVersionsDifferent(const RemapPluginInst *plugin_v1, const RemapPlu
   // 2 versions can be different only when dynamic reload enabled
   CHECK(isPluginDynamicReloadEnabled());
 
-  // check Dso at effective path still exists while the copy at runtime path doesn't
   CHECK(plugin_v1->_plugin.effectivePath() != plugin_v1->_plugin.runtimePath());
   CHECK(fs::exists(plugin_v1->_plugin.effectivePath()));
-  CHECK(!fs::exists(plugin_v1->_plugin.runtimePath()));
   CHECK(plugin_v2->_plugin.effectivePath() != plugin_v2->_plugin.runtimePath());
   CHECK(fs::exists(plugin_v2->_plugin.effectivePath()));
-  CHECK(!fs::exists(plugin_v2->_plugin.runtimePath()));
 }
 
 void

@@ -23,9 +23,11 @@
 
 #include <fcntl.h>
 #include <openssl/crypto.h>
+#include <swoc/BufferWriter.h>
+#include <swoc/bwf_base.h>
 #include "tscore/Layout.h"
 #include "tscore/Filenames.h"
-#include "records/RecProcess.h"
+#include "records/RecCore.h"
 #include "records/RecordsConfig.h"
 #include "info.h"
 #include "iocore/eventsystem/RecProcess.h"

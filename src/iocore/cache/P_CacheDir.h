@@ -23,15 +23,17 @@
 
 #pragma once
 
-#include "iocore/cache/CacheDefs.h"
 #include "P_CacheHttp.h"
-#include "iocore/eventsystem/EventSystem.h"
+#include "iocore/cache/CacheDefs.h"
 #include "iocore/eventsystem/Continuation.h"
-
-// aio
 #include "iocore/aio/AIO.h"
+#include "tscore/Version.h"
+
+#include <cstdint>
+#include <ctime>
 
 class Stripe;
+class StripeSM;
 struct InterimCacheVol;
 struct CacheVC;
 class CacheEvacuateDocVC;
@@ -61,8 +63,6 @@ class CacheEvacuateDocVC;
 #define DIR_OFFSET_BITS         40
 #define DIR_OFFSET_MAX          ((((off_t)1) << DIR_OFFSET_BITS) - 1)
 
-#define SYNC_MAX_WRITE     (2 * 1024 * 1024)
-#define SYNC_DELAY         HRTIME_MSECONDS(500)
 #define DO_NOT_REMOVE_THIS 0
 
 // Debugging Options
@@ -78,7 +78,7 @@ class CacheEvacuateDocVC;
 #define CHECK_DIR(_d) ((void)0)
 #endif
 
-#define dir_index(_e, _i) ((Dir *)((char *)(_e)->dir + (SIZEOF_DIR * (_i))))
+#define dir_index(_e, _i) ((Dir *)((char *)(_e)->directory.dir + (SIZEOF_DIR * (_i))))
 #define dir_assign(_e, _x)   \
   do {                       \
     (_e)->w[0] = (_x)->w[0]; \
@@ -93,15 +93,7 @@ class CacheEvacuateDocVC;
     dir_assign(_e, _x);                 \
     dir_set_next(_e, next);             \
   } while (0)
-// entry is valid
-#define dir_valid(_d, _e) (_d->header->phase == dir_phase(_e) ? _d->vol_in_phase_valid(_e) : _d->vol_out_of_phase_valid(_e))
-// entry is valid and outside of write aggregation region
-#define dir_agg_valid(_d, _e) (_d->header->phase == dir_phase(_e) ? _d->vol_in_phase_valid(_e) : _d->vol_out_of_phase_agg_valid(_e))
-// entry may be valid or overwritten in the last aggregated write
-#define dir_write_valid(_d, _e) \
-  (_d->header->phase == dir_phase(_e) ? vol_in_phase_valid(_d, _e) : vol_out_of_phase_write_valid(_d, _e))
-#define dir_agg_buf_valid(_d, _e) (_d->header->phase == dir_phase(_e) && _d->vol_in_phase_agg_buf_valid(_e))
-#define dir_is_empty(_e)          (!dir_offset(_e))
+#define dir_is_empty(_e) (!dir_offset(_e))
 #define dir_clear(_e) \
   do {                \
     (_e)->w[0] = 0;   \
@@ -203,7 +195,7 @@ struct Dir {
 // INKqa11166 - Cache can not store 2 HTTP alternates simultaneously.
 // To allow this, move the vector from the CacheVC to the OpenDirEntry.
 // Each CacheVC now maintains a pointer to this vector. Adding/Deleting
-// alternates from this vector is done under the Stripe::lock. The alternate
+// alternates from this vector is done under the StripeSM::lock. The alternate
 // is deleted/inserted into the vector just before writing the vector disk
 // (CacheVC::updateVector).
 LINK_FORWARD_DECLARATION(CacheVC, opendir_link) // forward declaration
@@ -248,41 +240,85 @@ struct OpenDir : public Continuation {
 };
 
 struct CacheSync : public Continuation {
-  int                 stripe_index = 0;
-  char               *buf          = nullptr;
-  size_t              buflen       = 0;
-  bool                buf_huge     = false;
-  off_t               writepos     = 0;
-  AIOCallbackInternal io;
-  Event              *trigger    = nullptr;
-  ink_hrtime          start_time = 0;
-  int                 mainEvent(int event, Event *e);
-  void                aio_write(int fd, char *b, int n, off_t o);
+  int         stripe_index = 0;
+  char       *buf          = nullptr;
+  size_t      buflen       = 0;
+  bool        buf_huge     = false;
+  off_t       writepos     = 0;
+  AIOCallback io;
+  Event      *trigger    = nullptr;
+  ink_hrtime  start_time = 0;
+  int         mainEvent(int event, Event *e);
+  void        aio_write(int fd, char *b, int n, off_t o);
 
   CacheSync() : Continuation(new_ProxyMutex()) { SET_HANDLER(&CacheSync::mainEvent); }
 };
 
+struct StripteHeaderFooter {
+  unsigned int      magic;
+  ts::VersionNumber version;
+  time_t            create_time;
+  off_t             write_pos;
+  off_t             last_write_pos;
+  off_t             agg_pos;
+  uint32_t          generation; // token generation (vary), this cannot be 0
+  uint32_t          phase;
+  uint32_t          cycle;
+  uint32_t          sync_serial;
+  uint32_t          write_serial;
+  uint32_t          dirty;
+  uint32_t          sector_size;
+  uint32_t          unused; // pad out to 8 byte boundary
+  uint16_t          freelist[1];
+};
+
+struct Directory {
+  char                *raw_dir{nullptr};
+  Dir                 *dir{};
+  StripteHeaderFooter *header{};
+  StripteHeaderFooter *footer{};
+  int                  segments{};
+  off_t                buckets{};
+
+  /* Total number of dir entries.
+   */
+  int entries() const;
+
+  /* Returns the first dir in segment @a s.
+   */
+  Dir *get_segment(int s) const;
+};
+
+inline int
+Directory::entries() const
+{
+  return this->buckets * DIR_DEPTH * this->segments;
+}
+
+inline Dir *
+Directory::get_segment(int s) const
+{
+  return reinterpret_cast<Dir *>((reinterpret_cast<char *>(this->dir)) + (s * this->buckets) * DIR_DEPTH * SIZEOF_DIR);
+}
+
 // Global Functions
 
-int      dir_probe(const CacheKey *, Stripe *, Dir *, Dir **);
-int      dir_insert(const CacheKey *key, Stripe *stripe, Dir *to_part);
-int      dir_overwrite(const CacheKey *key, Stripe *stripe, Dir *to_part, Dir *overwrite, bool must_overwrite = true);
-int      dir_delete(const CacheKey *key, Stripe *stripe, Dir *del);
-int      dir_lookaside_probe(const CacheKey *key, Stripe *stripe, Dir *result, EvacuationBlock **eblock);
-int      dir_lookaside_insert(EvacuationBlock *b, Stripe *stripe, Dir *to);
-int      dir_lookaside_fixup(const CacheKey *key, Stripe *stripe);
-void     dir_lookaside_cleanup(Stripe *stripe);
-void     dir_lookaside_remove(const CacheKey *key, Stripe *stripe);
+int      dir_probe(const CacheKey *, StripeSM *, Dir *, Dir **);
+int      dir_insert(const CacheKey *key, StripeSM *stripe, Dir *to_part);
+int      dir_overwrite(const CacheKey *key, StripeSM *stripe, Dir *to_part, Dir *overwrite, bool must_overwrite = true);
+int      dir_delete(const CacheKey *key, StripeSM *stripe, Dir *del);
+int      dir_lookaside_probe(const CacheKey *key, StripeSM *stripe, Dir *result, EvacuationBlock **eblock);
+int      dir_lookaside_insert(EvacuationBlock *b, StripeSM *stripe, Dir *to);
+int      dir_lookaside_fixup(const CacheKey *key, StripeSM *stripe);
+void     dir_lookaside_cleanup(StripeSM *stripe);
+void     dir_lookaside_remove(const CacheKey *key, StripeSM *stripe);
 void     dir_free_entry(Dir *e, int s, Stripe *stripe);
 void     dir_sync_init();
 int      check_dir(Stripe *stripe);
 void     dir_clean_vol(Stripe *stripe);
 void     dir_clear_range(off_t start, off_t end, Stripe *stripe);
-int      dir_segment_accounted(int s, Stripe *stripe, int offby = 0, int *free = nullptr, int *used = nullptr, int *empty = nullptr,
-                               int *valid = nullptr, int *agg_valid = nullptr, int *avg_size = nullptr);
 uint64_t dir_entries_used(Stripe *stripe);
 void     sync_cache_dir_on_shutdown();
-int      dir_freelist_length(Stripe *stripe, int s);
 
 int  dir_bucket_length(Dir *b, int s, Stripe *stripe);
 int  dir_freelist_length(Stripe *stripe, int s);
@@ -323,9 +359,9 @@ inline int64_t
 dir_to_offset(const Dir *d, const Dir *seg)
 {
 #if DIR_DEPTH < 5
-  return (((char *)d) - ((char *)seg)) / SIZEOF_DIR;
+  return (reinterpret_cast<const char *>(d) - reinterpret_cast<const char *>(seg)) / SIZEOF_DIR;
 #else
-  int64_t i = (int64_t)((((char *)d) - ((char *)seg)) / SIZEOF_DIR);
+  int64_t i = static_cast<int64_t>((reinterpret_cast<const char *>(d) - reinterpret_cast<const char *>(seg)) / SIZEOF_DIR);
   i         = i - (i / DIR_DEPTH);
   return i;
 #endif

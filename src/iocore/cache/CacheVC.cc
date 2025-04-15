@@ -24,12 +24,13 @@
 #include "iocore/cache/Cache.h"
 #include "iocore/cache/CacheDefs.h"
 #include "P_CacheDisk.h"
+#include "P_CacheDoc.h"
 #include "P_CacheHttp.h"
 #include "P_CacheInternal.h"
-#include "P_CacheVol.h"
+#include "Stripe.h"
 
 // must be included after the others
-#include "iocore/cache/CacheVC.h"
+#include "CacheVC.h"
 
 // hdrs
 #include "proxy/hdrs/HTTP.h"
@@ -37,6 +38,7 @@
 
 // aio
 #include "iocore/aio/AIO.h"
+#include "tscore/InkErrno.h"
 
 // tsapi
 #if DEBUG
@@ -51,9 +53,6 @@
 #include "iocore/eventsystem/IOBuffer.h"
 #include "iocore/eventsystem/Lock.h"
 #include "iocore/eventsystem/VIO.h"
-
-// tscppapi
-#include "tscpp/api/HttpStatus.h"
 
 // tscore
 #include "tscore/ink_assert.h"
@@ -86,7 +85,6 @@ DbgCtl dbg_ctl_cache_reenable{"cache_reenable"};
 #define SCAN_WRITER_LOCK_MAX_RETRY 5
 #define STORE_COLLISION            1
 #define USELESS_REENABLES          // allow them for now
-// #define VERIFY_JTEST_DATA
 
 extern int64_t cache_config_ram_cache_cutoff;
 
@@ -134,15 +132,15 @@ make_vol_map(Stripe *stripe)
 
   // Scan directories.
   // Copied from dir_entries_used() and modified to fill in the map instead.
-  for (int s = 0; s < stripe->segments; s++) {
-    Dir *seg = stripe->dir_segment(s);
-    for (int b = 0; b < stripe->buckets; b++) {
+  for (int s = 0; s < stripe->directory.segments; s++) {
+    Dir *seg = stripe->directory.get_segment(s);
+    for (int b = 0; b < stripe->directory.buckets; b++) {
       Dir *e = dir_bucket(b, seg);
       if (dir_bucket_loop_fix(e, s, stripe)) {
         break;
       }
       while (e) {
-        if (dir_offset(e) && dir_valid(stripe, e) && dir_agg_valid(stripe, e) && dir_head(e)) {
+        if (dir_offset(e) && stripe->dir_valid(e) && stripe->dir_agg_valid(e) && dir_head(e)) {
           off_t offset = stripe->vol_offset(e) - start_offset;
           if (offset <= vol_len) {
             vol_map[offset / SCAN_BUF_SIZE] = 1;
@@ -162,15 +160,16 @@ int CacheVC::size_to_init = -1;
 
 CacheVC::CacheVC()
 {
-  size_to_init = sizeof(CacheVC) - (size_t) & ((CacheVC *)nullptr)->vio;
-  memset((void *)&vio, 0, size_to_init);
+  // Initialize Region C
+  size_to_init = sizeof(CacheVC) - reinterpret_cast<size_t>(&(static_cast<CacheVC *>(nullptr))->vio);
+  memset(reinterpret_cast<void *>(&vio), 0, size_to_init);
 }
 
 VIO *
 CacheVC::do_io_read(Continuation *c, int64_t nbytes, MIOBuffer *abuf)
 {
   ink_assert(vio.op == VIO::READ);
-  vio.buffer.writer_for(abuf);
+  vio.set_writer(abuf);
   vio.set_continuation(c);
   vio.ndone     = 0;
   vio.nbytes    = nbytes;
@@ -188,7 +187,7 @@ VIO *
 CacheVC::do_io_pread(Continuation *c, int64_t nbytes, MIOBuffer *abuf, int64_t offset)
 {
   ink_assert(vio.op == VIO::READ);
-  vio.buffer.writer_for(abuf);
+  vio.set_writer(abuf);
   vio.set_continuation(c);
   vio.ndone     = 0;
   vio.nbytes    = nbytes;
@@ -208,7 +207,7 @@ CacheVC::do_io_write(Continuation *c, int64_t nbytes, IOBufferReader *abuf, bool
 {
   ink_assert(vio.op == VIO::WRITE);
   ink_assert(!owner);
-  vio.buffer.reader_for(abuf);
+  vio.set_reader(abuf);
   vio.set_continuation(c);
   vio.ndone     = 0;
   vio.nbytes    = nbytes;
@@ -238,16 +237,15 @@ void
 CacheVC::reenable(VIO *avio)
 {
   DDbg(dbg_ctl_cache_reenable, "reenable %p", this);
-  (void)avio;
 #ifdef DEBUG
   ink_assert(avio->mutex->thread_holding);
 #endif
   if (!trigger) {
 #ifndef USELESS_REENABLES
     if (vio.op == VIO::READ) {
-      if (vio.buffer.mbuf->max_read_avail() > vio.buffer.writer()->water_mark)
+      if (vio.buffer.mbuf->max_read_avail() > vio.get_writer->water_mark)
         ink_assert(!"useless reenable of cache read");
-    } else if (!vio.buffer.reader()->read_avail())
+    } else if (!vio.get_reader()->read_avail())
       ink_assert(!"useless reenable of cache write");
 #endif
     trigger = avio->mutex->thread_holding->schedule_imm_local(this);
@@ -258,13 +256,12 @@ void
 CacheVC::reenable_re(VIO *avio)
 {
   DDbg(dbg_ctl_cache_reenable, "reenable_re %p", this);
-  (void)avio;
 #ifdef DEBUG
   ink_assert(avio->mutex->thread_holding);
 #endif
   if (!trigger) {
     if (!is_io_in_progress() && !recursive) {
-      handleEvent(EVENT_NONE, (void *)nullptr);
+      handleEvent(EVENT_NONE);
     } else {
       trigger = avio->mutex->thread_holding->schedule_imm_local(this);
     }
@@ -336,7 +333,7 @@ unmarshal_helper(Doc *doc, Ptr<IOBufferData> &buf, int &okay)
 
 // [amc] I think this is where all disk reads from cache funnel through here.
 int
-CacheVC::handleReadDone(int event, Event *e)
+CacheVC::handleReadDone(int event, Event * /* e ATS_UNUSED */)
 {
   cancel_trigger();
   ink_assert(this_ethread() == mutex->thread_holding);
@@ -357,7 +354,7 @@ CacheVC::handleReadDone(int event, Event *e)
     if (!lock.is_locked()) {
       VC_SCHED_LOCK_RETRY();
     }
-    if ((!dir_valid(stripe, &dir)) || (!io.ok())) {
+    if ((!stripe->dir_valid(&dir)) || (!io.ok())) {
       if (!io.ok()) {
         Dbg(dbg_ctl_cache_disk_error, "Read error on disk %s\n \
 	    read range : [%" PRIu64 " - %" PRIu64 " bytes]  [%" PRIu64 " - %" PRIu64 " blocks] \n",
@@ -378,18 +375,6 @@ CacheVC::handleReadDone(int event, Event *e)
           doc->v_minor, stripe->hash_text.get(), read_key->slice64(0), read_key->slice64(1));
       goto Ldone;
     }
-
-#ifdef VERIFY_JTEST_DATA
-    char xx[500];
-    if (read_key && *read_key == doc->key && request.valid() && !dir_head(&dir) && !vio.ndone) {
-      int ib = 0, xd = 0;
-      request.url_get()->print(xx, 500, &ib, &xd);
-      char *x = xx;
-      for (int q = 0; q < 3; q++)
-        x = strchr(x + 1, '/');
-      ink_assert(!memcmp(doc->data(), x, ib - (x - xx)));
-    }
-#endif
 
     if (dbg_ctl_cache_read.on()) {
       char xt[CRYPTO_HEX_SIZE];
@@ -413,13 +398,12 @@ CacheVC::handleReadDone(int event, Event *e)
         ink_assert(checksum == doc->checksum);
         if (checksum != doc->checksum) {
           Note("cache: checksum error for [%" PRIu64 " %" PRIu64 "] len %d, hlen %d, disk %s, offset %" PRIu64 " size %zu",
-               doc->first_key.b[0], doc->first_key.b[1], doc->len, doc->hlen, stripe->path, (uint64_t)io.aiocb.aio_offset,
+               doc->first_key.b[0], doc->first_key.b[1], doc->len, doc->hlen, stripe->disk->path, (uint64_t)io.aiocb.aio_offset,
                (size_t)io.aiocb.aio_nbytes);
           doc->magic = DOC_CORRUPT;
           okay       = 0;
         }
       }
-      (void)e; // Avoid compiler warnings
       bool http_copy_hdr = false;
       http_copy_hdr =
         cache_config_ram_cache_compress && !f.doc_from_ram_cache && doc->doc_type == CACHE_FRAG_TYPE_HTTP && doc->hlen;
@@ -497,8 +481,8 @@ CacheVC::handleRead(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
 
 // ToDo: Why are these for debug only ??
 #if DEBUG
-  Metrics::Counter::increment(cache_rsb.pread_count);
-  Metrics::Counter::increment(stripe->cache_vol->vol_rsb.pread_count);
+  ts::Metrics::Counter::increment(cache_rsb.pread_count);
+  ts::Metrics::Counter::increment(stripe->cache_vol->vol_rsb.pread_count);
 #endif
 
   return EVENT_CONT;
@@ -541,7 +525,7 @@ CacheVC::load_from_last_open_read_call()
 bool
 CacheVC::load_from_aggregation_buffer()
 {
-  if (!dir_agg_buf_valid(this->stripe, &this->dir)) {
+  if (!this->stripe->dir_agg_buf_valid(&this->dir)) {
     return false;
   }
 
@@ -587,7 +571,7 @@ CacheVC::removeEvent(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
     if (!buf) {
       goto Lcollision;
     }
-    if (!dir_valid(stripe, &dir)) {
+    if (!stripe->dir_valid(&dir)) {
       last_collision = nullptr;
       goto Lcollision;
     }
@@ -621,14 +605,14 @@ CacheVC::removeEvent(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
       return ret;
     }
   Ldone:
-    Metrics::Counter::increment(cache_rsb.status[static_cast<int>(CacheOpType::Remove)].failure);
-    Metrics::Counter::increment(stripe->cache_vol->vol_rsb.status[static_cast<int>(CacheOpType::Remove)].failure);
+    ts::Metrics::Counter::increment(cache_rsb.status[static_cast<int>(CacheOpType::Remove)].failure);
+    ts::Metrics::Counter::increment(stripe->cache_vol->vol_rsb.status[static_cast<int>(CacheOpType::Remove)].failure);
     if (od) {
       stripe->close_write(this);
     }
   }
   ink_assert(!stripe || this_ethread() != stripe->mutex->thread_holding);
-  _action.continuation->handleEvent(CACHE_EVENT_REMOVE_FAILED, (void *)-ECACHE_NO_DOC);
+  _action.continuation->handleEvent(CACHE_EVENT_REMOVE_FAILED, reinterpret_cast<void *>(-ECACHE_NO_DOC));
   goto Lfree;
 Lremoved:
   _action.continuation->handleEvent(CACHE_EVENT_REMOVE, nullptr);
@@ -721,7 +705,7 @@ CacheVC::scanObject(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
   }
 
   if (!io.ok()) {
-    result = (void *)-ECACHE_READ_FAIL;
+    result = reinterpret_cast<void *>(-ECACHE_READ_FAIL);
     goto Ldone;
   }
 
@@ -758,7 +742,7 @@ CacheVC::scanObject(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
       if (!dir_probe(&doc->first_key, stripe, &dir, &last_collision)) {
         goto Lskip;
       }
-      if (!dir_agg_valid(stripe, &dir) || !dir_head(&dir) ||
+      if (!stripe->dir_agg_valid(&dir) || !dir_head(&dir) ||
           (stripe->vol_offset(&dir) != io.aiocb.aio_offset + (reinterpret_cast<char *>(doc) - buf->data()))) {
         continue;
       }

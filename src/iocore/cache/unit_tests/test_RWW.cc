@@ -27,6 +27,7 @@
 #define DEFAULT_URL "http://www.scw00.com/"
 
 #include "main.h"
+#include "../P_CacheInternal.h"
 
 int  cache_vols           = 1;
 bool reuse_existing_cache = false;
@@ -56,6 +57,11 @@ public:
     this->_wt->mutex = this->mutex;
 
     SET_HANDLER(&CacheRWWTest::start_test);
+  }
+  ~CacheRWWTest() override
+  {
+    delete this->_rt;
+    delete this->_wt;
   }
 
   void handle_cache_event(int event, CacheTestBase *e) override;

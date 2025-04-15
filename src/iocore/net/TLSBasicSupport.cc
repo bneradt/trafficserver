@@ -22,8 +22,11 @@
   limitations under the License.
  */
 
-#include "iocore/net/TLSBasicSupport.h"
 #include "SSLStats.h"
+#include "iocore/net/TLSBasicSupport.h"
+#include "tsutil/DbgCtl.h"
+
+#include <cinttypes>
 
 int TLSBasicSupport::_ex_data_index = -1;
 
@@ -164,6 +167,23 @@ TLSBasicSupport::set_valid_tls_version_max(int max)
     ver = TLS1_VERSION + max;
   }
   SSL_set_max_proto_version(ssl, ver);
+}
+
+int
+TLSBasicSupport::verify_certificate(X509_STORE_CTX *ctx)
+{
+  // See comments in SSLNetVConnection::_verify_certificate
+  this->_cert_to_verify = ctx;
+  int ret               = this->_verify_certificate(ctx);
+  this->_cert_to_verify = nullptr;
+
+  return ret;
+}
+
+X509_STORE_CTX *
+TLSBasicSupport::get_tls_cert_to_verify() const
+{
+  return this->_cert_to_verify;
 }
 
 void

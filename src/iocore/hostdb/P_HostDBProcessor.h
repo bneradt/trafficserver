@@ -27,15 +27,14 @@
 
 #pragma once
 
-#include <unordered_map>
-
-#include "swoc/swoc_file.h"
 #include <tsutil/TsSharedMutex.h>
 
 #include "iocore/hostdb/HostDBProcessor.h"
 #include "P_RefCountCache.h"
 #include "tscore/PendingAction.h"
 #include "tsutil/Metrics.h"
+
+#include <utility>
 
 using ts::Metrics;
 
@@ -259,7 +258,7 @@ struct HostDBContinuation : public Continuation {
   Ptr<HostDBRecord>
   lookup_done(const char *query_name, ts_seconds answer_ttl, SRVHosts *s = nullptr, Ptr<HostDBRecord> record = Ptr<HostDBRecord>{})
   {
-    return this->lookup_done(swoc::TextView{query_name, strlen(query_name)}, answer_ttl, s, record);
+    return this->lookup_done(swoc::TextView{query_name, strlen(query_name)}, answer_ttl, s, std::move(record));
   }
 
   Ptr<HostDBRecord> lookup_done(swoc::TextView query_name, ts_seconds answer_ttl, SRVHosts *s = nullptr,

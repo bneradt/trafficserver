@@ -66,6 +66,7 @@ static int             global_raw_enabled             = 0;
 static int             global_log_enabled             = 0;
 static int             global_jaws_enabled            = 0;
 static int             global_modify_incoming_enabled = 0;
+static int             global_preserve_enabled        = 0;
 
 struct ja3_data {
   std::string ja3_string;
@@ -88,10 +89,11 @@ struct ja3_data {
 };
 
 struct ja3_remap_info {
-  int    raw_enabled  = false;
-  int    log_enabled  = false;
-  int    jaws_enabled = false;
-  TSCont handler      = nullptr;
+  int    raw_enabled      = false;
+  int    log_enabled      = false;
+  int    jaws_enabled     = false;
+  int    preserve_enabled = false;
+  TSCont handler          = nullptr;
 
   ~ja3_remap_info()
   {
@@ -170,7 +172,7 @@ custom_get_ja3(SSL *ssl)
 // This function will append value to the last occurrence of field. If none exists, it will
 // create a field and append to the headers
 static void
-append_to_field(TSMBuffer bufp, TSMLoc hdr_loc, const char *field, int field_len, const char *value, int value_len)
+append_to_field(TSMBuffer bufp, TSMLoc hdr_loc, const char *field, int field_len, const char *value, int value_len, bool preserve)
 {
   if (!bufp || !hdr_loc || !field || field_len <= 0) {
     return;
@@ -180,14 +182,15 @@ append_to_field(TSMBuffer bufp, TSMLoc hdr_loc, const char *field, int field_len
   if (target == TS_NULL_MLOC) {
     TSMimeHdrFieldCreateNamed(bufp, hdr_loc, field, field_len, &target);
     TSMimeHdrFieldAppend(bufp, hdr_loc, target);
-  } else {
+    TSMimeHdrFieldValueStringInsert(bufp, hdr_loc, target, -1, value, value_len);
+  } else if (!preserve) {
     TSMLoc next = target;
     while (next) {
       target = next;
       next   = TSMimeHdrFieldNextDup(bufp, hdr_loc, target);
     }
+    TSMimeHdrFieldValueStringInsert(bufp, hdr_loc, target, -1, value, value_len);
   }
-  TSMimeHdrFieldValueStringInsert(bufp, hdr_loc, target, -1, value, value_len);
   TSHandleMLocRelease(bufp, hdr_loc, target);
 }
 
@@ -240,10 +243,11 @@ static void
 modify_ja3_headers(TSCont contp, TSHttpTxn txnp, ja3_data const *ja3_vconn_data)
 {
   // Decide global or remap
-  ja3_remap_info *remap_info = static_cast<ja3_remap_info *>(TSContDataGet(contp));
-  bool            raw_flag   = remap_info ? remap_info->raw_enabled : global_raw_enabled;
-  bool            log_flag   = remap_info ? remap_info->log_enabled : global_log_enabled;
-  bool            jaws_flag  = remap_info ? remap_info->jaws_enabled : global_jaws_enabled;
+  ja3_remap_info *remap_info    = static_cast<ja3_remap_info *>(TSContDataGet(contp));
+  bool            raw_flag      = remap_info ? remap_info->raw_enabled : global_raw_enabled;
+  bool            log_flag      = remap_info ? remap_info->log_enabled : global_log_enabled;
+  bool            jaws_flag     = remap_info ? remap_info->jaws_enabled : global_jaws_enabled;
+  bool            preserve_flag = remap_info ? remap_info->preserve_enabled : global_preserve_enabled;
   Dbg(dbg_ctl, "Found ja3 string.");
 
   // Get handle to headers
@@ -256,18 +260,19 @@ modify_ja3_headers(TSCont contp, TSHttpTxn txnp, ja3_data const *ja3_vconn_data)
   }
 
   // Add JA3 md5 fingerprints
-  append_to_field(bufp, hdr_loc, "X-JA3-Sig", 9, ja3_vconn_data->md5_string, 32);
+  append_to_field(bufp, hdr_loc, "X-JA3-Sig", 9, ja3_vconn_data->md5_string, 32, preserve_flag);
 
   // If raw string is configured, added JA3 raw string to header as well
   if (raw_flag) {
-    append_to_field(bufp, hdr_loc, "x-JA3-RAW", 9, ja3_vconn_data->ja3_string.data(), ja3_vconn_data->ja3_string.size());
+    append_to_field(bufp, hdr_loc, "x-JA3-RAW", 9, ja3_vconn_data->ja3_string.data(), ja3_vconn_data->ja3_string.size(),
+                    preserve_flag);
   }
 
   // Compute and add JAWS header.
   std::string const JAWS_score = JAWS::score(ja3_vconn_data->ja3_string.data());
   Dbg(dbg_ctl, "JAWS score: %s", JAWS_score.data());
   if (jaws_flag) {
-    append_to_field(bufp, hdr_loc, "x-jaws", 6, JAWS_score.data(), JAWS_score.size());
+    append_to_field(bufp, hdr_loc, "x-jaws", 6, JAWS_score.data(), JAWS_score.size(), preserve_flag);
   }
   TSHandleMLocRelease(bufp, TS_NULL_MLOC, hdr_loc);
 
@@ -310,13 +315,14 @@ req_hdr_ja3_handler(TSCont contp, TSEvent event, void *edata)
 }
 
 static bool
-read_config_option(int argc, const char *argv[], int &raw, int &log, int &jaws, int &modify_incoming)
+read_config_option(int argc, const char *argv[], int &raw, int &log, int &jaws, int &modify_incoming, int &preserve)
 {
   const struct option longopts[] = {
     {"ja3raw",          no_argument, &raw,             1},
     {"ja3log",          no_argument, &log,             1},
     {"jaws",            no_argument, &jaws,            1},
     {"modify-incoming", no_argument, &modify_incoming, 1},
+    {"preserve",        no_argument, &preserve,        1},
     {nullptr,           0,           nullptr,          0}
   };
 
@@ -338,6 +344,7 @@ read_config_option(int argc, const char *argv[], int &raw, int &log, int &jaws, 
   Dbg(dbg_ctl, "ja3 logging is %s", (log == 1) ? "enabled" : "disabled");
   Dbg(dbg_ctl, "ja3 JAWS is %s", (jaws == 1) ? "enabled" : "disabled");
   Dbg(dbg_ctl, "ja3 modify-incoming is %s", (modify_incoming == 1) ? "enabled" : "disabled");
+  Dbg(dbg_ctl, "ja3 preserve is %s", (preserve == 1) ? "enabled" : "disabled");
   return true;
 }
 
@@ -353,8 +360,8 @@ TSPluginInit(int argc, const char *argv[])
   info.support_email = "dev@trafficserver.apache.org";
 
   // Options
-  if (!read_config_option(argc, argv, global_raw_enabled, global_log_enabled, global_jaws_enabled,
-                          global_modify_incoming_enabled)) {
+  if (!read_config_option(argc, argv, global_raw_enabled, global_log_enabled, global_jaws_enabled, global_modify_incoming_enabled,
+                          global_preserve_enabled)) {
     return;
   }
 
@@ -406,7 +413,7 @@ TSRemapNewInstance(int argc, char *argv[], void **ih, char * /* errbuf ATS_UNUSE
   // Parse parameters
   int discard_modify_incoming = -1; // Not used for remap.
   if (!read_config_option(argc - 1, const_cast<const char **>(argv + 1), remap_info->raw_enabled, remap_info->log_enabled,
-                          remap_info->jaws_enabled, discard_modify_incoming)) {
+                          remap_info->jaws_enabled, discard_modify_incoming, remap_info->preserve_enabled)) {
     Dbg(dbg_ctl, "Bad arguments");
     return TS_ERROR;
   }

@@ -28,7 +28,7 @@
  */
 
 #include "proxy/http/remap/PluginDso.h"
-#include "../../../iocore/eventsystem/P_Freer.h"
+#include "iocore/eventsystem/Freer.h"
 #include "../../../iocore/eventsystem/P_EventSystem.h"
 #ifdef PLUGIN_DSO_TESTS
 #include "unit-tests/plugin_testing_common.h"
@@ -39,6 +39,7 @@
 #endif
 
 #include <cstdlib>
+#include <utility>
 
 namespace
 {
@@ -67,6 +68,7 @@ PluginDso::PluginDso(const fs::path &configPath, const fs::path &effectivePath, 
 PluginDso::~PluginDso()
 {
   std::string error;
+
   (void)unload(error);
 }
 
@@ -134,11 +136,6 @@ PluginDso::load(std::string &error, const fs::path &compilerPath)
 
         PluginError("plugin '%s' failed to load: %s", _configPath.c_str(), error.c_str());
       }
-    }
-
-    /* Remove the runtime DSO copy even if we succeed loading to avoid leftovers after crashes */
-    if (_preventiveCleaning) {
-      clean(error);
     }
   }
   PluginDbg(_dbg_ctl(), "plugin '%s' finished loading DSO", _configPath.c_str());
@@ -299,21 +296,21 @@ PluginDso::release()
 void
 PluginDso::incInstanceCount()
 {
-  _instanceCount.refcount_inc();
-  PluginDbg(_dbg_ctl(), "instance count (inst-count:%d, dso-addr:%p)", _instanceCount.refcount(), this);
+  ++_instanceCount;
+  PluginDbg(_dbg_ctl(), "instance count (inst-count:%d, dso-addr:%p)", _instanceCount.load(), this);
 }
 
 void
 PluginDso::decInstanceCount()
 {
-  _instanceCount.refcount_dec();
-  PluginDbg(_dbg_ctl(), "instance count (inst-count:%d, dso-addr:%p)", _instanceCount.refcount(), this);
+  --_instanceCount;
+  PluginDbg(_dbg_ctl(), "instance count (inst-count:%d, dso-addr:%p)", _instanceCount.load(), this);
 }
 
 int
-PluginDso::instanceCount()
+PluginDso::instanceCount() const
 {
-  return _instanceCount.refcount();
+  return _instanceCount;
 }
 
 bool
@@ -407,7 +404,7 @@ PluginDso::LoadedPlugins::addPluginPathToDsoOptOutTable(std::string_view pluginP
 
   {
     SCOPED_MUTEX_LOCK(lock, _mutex, this_ethread());
-    _optoutDsoReloadPlugins.push_front(DisableDSOReloadPluginInfo{effectivePath});
+    _optoutDsoReloadPlugins.push_front(DisableDSOReloadPluginInfo{std::move(effectivePath)});
   }
 
   return true;

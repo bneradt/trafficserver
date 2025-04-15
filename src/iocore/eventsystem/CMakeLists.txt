@@ -26,12 +26,12 @@ add_library(
   Processor.cc
   ProtectedQueue.cc
   ProxyAllocator.cc
-  SocketManager.cc
   Tasks.cc
   Thread.cc
   UnixEThread.cc
   UnixEvent.cc
   UnixEventProcessor.cc
+  UnixSocket.cc
   ConfigProcessor.cc
   RecRawStatsImpl.cc
   RecProcess.cc
@@ -64,3 +64,5 @@ if(BUILD_TESTING)
   add_test(NAME test_MIOBufferWriter COMMAND test_MIOBufferWriter)
 
 endif()
+
+clang_tidy_check(inkevent)

@@ -17,7 +17,6 @@
 #  limitations under the License.
 
 from enum import Enum
-import os
 
 Test.Summary = 'Exercise Background Fill'
 Test.SkipUnless(Condition.HasCurlFeature('http2'), Condition.HasProxyVerifierVersion('2.8.0'))
@@ -107,14 +106,16 @@ class BackgroundFillTest:
         """
         tr = Test.AddTestRun()
         self.__checkProcessBefore(tr)
-        tr.Processes.Default.Command = f"""
-curl -X PURGE --http1.1 -vs http://127.0.0.1:{self.ts['for_httpbin'].Variables.port}/drip?duration=4;
-timeout 2 curl --http1.1 -vs http://127.0.0.1:{self.ts['for_httpbin'].Variables.port}/drip?duration=4;
+        tr.MakeCurlCommandMulti(
+            f"""
+{{curl}} -X PURGE --http1.1 -vs http://127.0.0.1:{self.ts['for_httpbin'].Variables.port}/drip?duration=4;
+timeout 2 {{curl}} --http1.1 -vs http://127.0.0.1:{self.ts['for_httpbin'].Variables.port}/drip?duration=4;
 sleep 4;
-curl --http1.1 -vs http://127.0.0.1:{self.ts['for_httpbin'].Variables.port}/drip?duration=4
-"""
+{{curl}} --http1.1 -vs http://127.0.0.1:{self.ts['for_httpbin'].Variables.port}/drip?duration=4
+""")
         tr.Processes.Default.ReturnCode = 0
-        tr.Processes.Default.Streams.stderr = "gold/background_fill_0_stderr.gold"
+        tr.Processes.Default.Streams.stderr = Testers.Any(
+            "gold/background_fill_0_stderr_H.gold", "gold/background_fill_0_stderr_W.gold")
         self.__checkProcessAfter(tr)
 
     def __testCase1(self):
@@ -123,14 +124,16 @@ curl --http1.1 -vs http://127.0.0.1:{self.ts['for_httpbin'].Variables.port}/drip
         """
         tr = Test.AddTestRun()
         self.__checkProcessBefore(tr)
-        tr.Processes.Default.Command = f"""
-curl -X PURGE --http1.1 -vsk https://127.0.0.1:{self.ts['for_httpbin'].Variables.ssl_port}/drip?duration=4;
-timeout 2 curl --http1.1 -vsk https://127.0.0.1:{self.ts['for_httpbin'].Variables.ssl_port}/drip?duration=4;
-sleep 4;
-curl --http1.1 -vsk https://127.0.0.1:{self.ts['for_httpbin'].Variables.ssl_port}/drip?duration=4
-"""
+        tr.MakeCurlCommandMulti(
+            f"""
+{{curl}} -X PURGE --http1.1 -vsk https://127.0.0.1:{self.ts['for_httpbin'].Variables.ssl_port}/drip?duration=4;
+timeout 3 {{curl}} --http1.1 -vsk https://127.0.0.1:{self.ts['for_httpbin'].Variables.ssl_port}/drip?duration=4;
+sleep 5;
+{{curl}} --http1.1 -vsk https://127.0.0.1:{self.ts['for_httpbin'].Variables.ssl_port}/drip?duration=4
+""")
         tr.Processes.Default.ReturnCode = 0
-        tr.Processes.Default.Streams.stderr = "gold/background_fill_1_stderr.gold"
+        tr.Processes.Default.Streams.stderr = Testers.Any(
+            "gold/background_fill_1_stderr_H.gold", "gold/background_fill_1_stderr_W.gold")
         self.__checkProcessAfter(tr)
 
     def __testCase2(self):
@@ -139,14 +142,16 @@ curl --http1.1 -vsk https://127.0.0.1:{self.ts['for_httpbin'].Variables.ssl_port
         """
         tr = Test.AddTestRun()
         self.__checkProcessBefore(tr)
-        tr.Processes.Default.Command = f"""
-curl -X PURGE --http2 -vsk https://127.0.0.1:{self.ts['for_httpbin'].Variables.ssl_port}/drip?duration=4;
-timeout 2 curl --http2 -vsk https://127.0.0.1:{self.ts['for_httpbin'].Variables.ssl_port}/drip?duration=4;
-sleep 4;
-curl --http2 -vsk https://127.0.0.1:{self.ts['for_httpbin'].Variables.ssl_port}/drip?duration=4
-"""
+        tr.MakeCurlCommandMulti(
+            f"""
+{{curl}} -X PURGE --http2 -vsk https://127.0.0.1:{self.ts['for_httpbin'].Variables.ssl_port}/drip?duration=4;
+timeout 3 {{curl}} --http2 -vsk https://127.0.0.1:{self.ts['for_httpbin'].Variables.ssl_port}/drip?duration=4;
+sleep 5;
+{{curl}} --http2 -vsk https://127.0.0.1:{self.ts['for_httpbin'].Variables.ssl_port}/drip?duration=4
+""")
         tr.Processes.Default.ReturnCode = 0
-        tr.Processes.Default.Streams.stderr = "gold/background_fill_2_stderr.gold"
+        tr.Processes.Default.Streams.stderr = Testers.Any(
+            "gold/background_fill_2_stderr_H.gold", "gold/background_fill_2_stderr_W.gold")
         self.__checkProcessAfter(tr)
 
     def __testCase3(self):

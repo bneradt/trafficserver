@@ -21,38 +21,36 @@
   limitations under the License.
  */
 
-#include "iocore/net/NetVConnection.h"
-#include "tscore/ink_config.h"
-#include "tscore/EventNotify.h"
-#include "tscore/Layout.h"
-#include "tscore/InkErrno.h"
-#include "tscore/TSSystemState.h"
-
-#include "api/InkAPIInternal.h" // Added to include the ssl_hook definitions
-#include "iocore/net/ProxyProtocol.h"
-#include "iocore/net/SSLSNIConfig.h"
-
+#include "BIO_fastopen.h"
+#include "P_UnixNet.h"
+#include "SSLStats.h"
 #include "P_Net.h"
 #include "P_SSLUtils.h"
 #include "P_SSLNextProtocolSet.h"
 #include "P_SSLConfig.h"
 #include "P_SSLClientUtils.h"
 #include "P_SSLNetVConnection.h"
-#include "BIO_fastopen.h"
-#include "iocore/net/SSLAPIHooks.h"
-#include "SSLStats.h"
+#include "P_UnixNetProcessor.h"
+#include "iocore/net/NetHandler.h"
+#include "iocore/net/NetVConnection.h"
+#include "iocore/net/ProxyProtocol.h"
+#include "iocore/net/SSLDiags.h"
+#include "iocore/net/SSLSNIConfig.h"
 #include "iocore/net/TLSALPNSupport.h"
+#include "tscore/ink_config.h"
+#include "tscore/Layout.h"
+#include "tscore/InkErrno.h"
+#include "tscore/TSSystemState.h"
 
 #include <netinet/in.h>
-
 #include <string>
 #include <cstring>
-
-using namespace std::literals;
 
 #if TS_USE_TLS_ASYNC
 #include <openssl/async.h>
 #endif
+
+using namespace std::literals;
 
 // This is missing from BoringSSL
 #ifndef BIO_eof
@@ -92,116 +90,11 @@ DbgCtl dbg_ctl_ssl_alpn{"ssl_alpn"};
 DbgCtl dbg_ctl_ssl_origin_session_cache{"ssl.origin_session_cache"};
 DbgCtl dbg_ctl_proxyprotocol{"proxyprotocol"};
 
-/// Callback to get two locks.
-/// The lock for this continuation, and for the target continuation.
-class ContWrapper : public Continuation
-{
-public:
-  /** Constructor.
-      This takes the secondary @a mutex and the @a target continuation
-      to invoke, along with the arguments for that invocation.
-  */
-  ContWrapper(ProxyMutex   *mutex,                     ///< Mutex for this continuation (primary lock).
-              Continuation *target,                    ///< "Real" continuation we want to call.
-              int           eventId = EVENT_IMMEDIATE, ///< Event ID for invocation of @a target.
-              void         *edata   = nullptr          ///< Data for invocation of @a target.
-              )
-    : Continuation(mutex), _target(target), _eventId(eventId), _edata(edata)
-  {
-    SET_HANDLER(&ContWrapper::event_handler);
-  }
-
-  /// Required event handler method.
-  int
-  event_handler(int, void *)
-  {
-    EThread *eth = this_ethread();
-
-    MUTEX_TRY_LOCK(lock, _target->mutex, eth);
-    if (lock.is_locked()) { // got the target lock, we can proceed.
-      _target->handleEvent(_eventId, _edata);
-      delete this;
-    } else { // can't get both locks, try again.
-      eventProcessor.schedule_imm(this, ET_NET);
-    }
-    return 0;
-  }
-
-  /** Convenience static method.
-
-      This lets a client make one call and not have to (accurately)
-      copy the invocation logic embedded here. We duplicate it near
-      by textually so it is easier to keep in sync.
-
-      This takes the same arguments as the constructor but, if the
-      lock can be obtained immediately, does not construct an
-      instance but simply calls the @a target.
-  */
-  static void
-  wrap(ProxyMutex   *mutex,                     ///< Mutex for this continuation (primary lock).
-       Continuation *target,                    ///< "Real" continuation we want to call.
-       int           eventId = EVENT_IMMEDIATE, ///< Event ID for invocation of @a target.
-       void         *edata   = nullptr          ///< Data for invocation of @a target.
-  )
-  {
-    EThread *eth = this_ethread();
-    if (!target->mutex) {
-      // If there's no mutex, plugin doesn't care about locking so why should we?
-      target->handleEvent(eventId, edata);
-    } else {
-      MUTEX_TRY_LOCK(lock, target->mutex, eth);
-      if (lock.is_locked()) {
-        target->handleEvent(eventId, edata);
-      } else {
-        eventProcessor.schedule_imm(new ContWrapper(mutex, target, eventId, edata), ET_NET);
-      }
-    }
-  }
-
-private:
-  Continuation *_target;  ///< Continuation to invoke.
-  int           _eventId; ///< with this event
-  void         *_edata;   ///< and this data
-};
 } // namespace
 
 //
 // Private
 //
-
-char const *
-SSLNetVConnection::get_ssl_handshake_hook_state_name(SSLHandshakeHookState state)
-{
-  switch (state) {
-  case HANDSHAKE_HOOKS_PRE:
-    return "TS_SSL_HOOK_PRE_ACCEPT";
-  case HANDSHAKE_HOOKS_PRE_INVOKE:
-    return "TS_SSL_HOOK_PRE_ACCEPT_INVOKE";
-  case HANDSHAKE_HOOKS_CLIENT_HELLO:
-    return "TS_SSL_HOOK_CLIENT_HELLO";
-  case HANDSHAKE_HOOKS_CLIENT_HELLO_INVOKE:
-    return "TS_SSL_HOOK_CLIENT_HELLO_INVOKE";
-  case HANDSHAKE_HOOKS_SNI:
-    return "TS_SSL_HOOK_SERVERNAME";
-  case HANDSHAKE_HOOKS_CERT:
-    return "TS_SSL_HOOK_CERT";
-  case HANDSHAKE_HOOKS_CERT_INVOKE:
-    return "TS_SSL_HOOK_CERT_INVOKE";
-  case HANDSHAKE_HOOKS_CLIENT_CERT:
-    return "TS_SSL_HOOK_CLIENT_CERT";
-  case HANDSHAKE_HOOKS_CLIENT_CERT_INVOKE:
-    return "TS_SSL_HOOK_CLIENT_CERT_INVOKE";
-  case HANDSHAKE_HOOKS_OUTBOUND_PRE:
-    return "TS_SSL_HOOK_PRE_CONNECT";
-  case HANDSHAKE_HOOKS_OUTBOUND_PRE_INVOKE:
-    return "TS_SSL_HOOK_PRE_CONNECT_INVOKE";
-  case HANDSHAKE_HOOKS_VERIFY_SERVER:
-    return "TS_SSL_HOOK_VERIFY_SERVER";
-  case HANDSHAKE_HOOKS_DONE:
-    return "TS_SSL_HOOKS_DONE";
-  }
-  return "unknown handshake hook name";
-}
 
 void
 SSLNetVConnection::_make_ssl_connection(SSL_CTX *ctx)
@@ -236,6 +129,7 @@ SSLNetVConnection::_bindSSLObject()
 {
   SSLNetVCAttach(this->ssl, this);
   TLSBasicSupport::bind(this->ssl, this);
+  TLSEventSupport::bind(this->ssl, this);
   ALPNSupport::bind(this->ssl, this);
   TLSSessionResumptionSupport::bind(this->ssl, this);
   TLSSNISupport::bind(this->ssl, this);
@@ -249,6 +143,7 @@ SSLNetVConnection::_unbindSSLObject()
 {
   SSLNetVCDetach(this->ssl);
   TLSBasicSupport::unbind(this->ssl);
+  TLSEventSupport::unbind(this->ssl);
   ALPNSupport::unbind(this->ssl);
   TLSSessionResumptionSupport::unbind(this->ssl);
   TLSSNISupport::unbind(this->ssl);
@@ -282,7 +177,7 @@ debug_certificate_name(const char *msg, X509_NAME *name)
 }
 
 int
-SSLNetVConnection::_ssl_read_from_net(EThread *lthread, int64_t &ret)
+SSLNetVConnection::_ssl_read_from_net(int64_t &ret)
 {
   NetState          *s          = &this->read;
   MIOBufferAccessor &buf        = s->vio.buffer;
@@ -325,7 +220,7 @@ SSLNetVConnection::_ssl_read_from_net(EThread *lthread, int64_t &ret)
       bytes_read += nread;
       if (nread > 0) {
         buf.writer()->fill(nread); // Tell the buffer, we've used the bytes
-        this->netActivity(lthread);
+        this->netActivity();
       }
       break;
     case SSL_ERROR_WANT_WRITE:
@@ -379,7 +274,7 @@ SSLNetVConnection::_ssl_read_from_net(EThread *lthread, int64_t &ret)
     Dbg(dbg_ctl_ssl, "bytes_read=%" PRId64, bytes_read);
 
     s->vio.ndone += bytes_read;
-    this->netActivity(lthread);
+    this->netActivity();
 
     ret = bytes_read;
 
@@ -420,12 +315,12 @@ SSLNetVConnection::read_raw_data()
     buf_len = rattempted;
     b       = b->next.get();
 
-    r = SocketManager::read(this->con.fd, buffer, buf_len);
+    r = this->con.sock.read(buffer, buf_len);
     Metrics::Counter::increment(net_rsb.calls_to_read);
     total_read += rattempted;
 
     Dbg(dbg_ctl_ssl, "read_raw_data r=%" PRId64 " rattempted=%" PRId64 " total_read=%" PRId64 " fd=%d", r, rattempted, total_read,
-        con.fd);
+        con.sock.get_fd());
     // last read failed or was incomplete
     if (r != rattempted || !b) {
       break;
@@ -558,7 +453,7 @@ SSLNetVConnection::update_rbio(bool move_to_socket)
 
 // changed by YTS Team, yamsat
 void
-SSLNetVConnection::net_read_io(NetHandler *nh, EThread *lthread)
+SSLNetVConnection::net_read_io(NetHandler *nh)
 {
   int       ret;
   int64_t   r     = 0;
@@ -566,11 +461,11 @@ SSLNetVConnection::net_read_io(NetHandler *nh, EThread *lthread)
   NetState *s     = &this->read;
 
   if (HttpProxyPort::TRANSPORT_BLIND_TUNNEL == this->attributes) {
-    this->super::net_read_io(nh, lthread);
+    this->super::net_read_io(nh);
     return;
   }
 
-  MUTEX_TRY_LOCK(lock, s->vio.mutex, lthread);
+  MUTEX_TRY_LOCK(lock, s->vio.mutex, nh->thread);
   if (!lock.is_locked()) {
     readReschedule(nh);
     return;
@@ -579,7 +474,7 @@ SSLNetVConnection::net_read_io(NetHandler *nh, EThread *lthread)
   // The closed flag should be stable once we get the s->vio.mutex in that case
   // (the global session pool mutex).
   if (this->closed) {
-    this->super::net_read_io(nh, lthread);
+    this->super::net_read_io(nh);
     return;
   }
   // If the key renegotiation failed it's over, just signal the error and finish.
@@ -718,7 +613,7 @@ SSLNetVConnection::net_read_io(NetHandler *nh, EThread *lthread)
   // this comment if you know
   int ssl_read_errno = 0;
   do {
-    ret = this->_ssl_read_from_net(lthread, r);
+    ret = this->_ssl_read_from_net(r);
     if (ret == SSL_READ_READY || ret == SSL_READ_ERROR_NONE) {
       bytes += r;
     }
@@ -812,6 +707,7 @@ SSLNetVConnection::load_buffer_and_write(int64_t towrite, MIOBufferAccessor &buf
 
   Dbg(dbg_ctl_ssl, "towrite=%" PRId64, towrite);
 
+  ERR_clear_error();
   do {
     // What is remaining left in the next block?
     l                   = buf.reader()->block_read_avail();
@@ -928,6 +824,7 @@ SSLNetVConnection::SSLNetVConnection()
 {
   this->_set_service(static_cast<ALPNSupport *>(this));
   this->_set_service(static_cast<TLSBasicSupport *>(this));
+  this->_set_service(static_cast<TLSEventSupport *>(this));
   this->_set_service(static_cast<TLSCertSwitchSupport *>(this));
   this->_set_service(static_cast<TLSEarlyDataSupport *>(this));
   this->_set_service(static_cast<TLSSNISupport *>(this));
@@ -963,7 +860,7 @@ SSLNetVConnection::do_io_close(int lerrno)
       // at the same time we send the close-notify.  If so, the client will likely
       // send RST anyway
       char    c;
-      ssize_t x = recv(this->con.fd, &c, 1, MSG_PEEK);
+      ssize_t x = this->con.sock.recv(&c, 1, MSG_PEEK);
       // x < 0 means error.  x == 0 means fin sent
       bool do_shutdown = (x > 0);
       if (x < 0) {
@@ -1009,6 +906,7 @@ SSLNetVConnection::clear()
 
   ALPNSupport::clear();
   TLSBasicSupport::clear();
+  TLSEventSupport::clear();
   TLSSessionResumptionSupport::clear();
   TLSSNISupport::_clear();
   TLSTunnelSupport::_clear();
@@ -1019,8 +917,7 @@ SSLNetVConnection::clear()
   sslTotalBytesSent           = 0;
   sslClientRenegotiationAbort = false;
 
-  curHook         = nullptr;
-  hookOpRequested = SSL_HOOK_OP_DEFAULT;
+  hookOpRequested = SslVConnOp::SSL_HOOK_OP_DEFAULT;
   free_handshake_buffers();
 
   super::clear();
@@ -1031,7 +928,7 @@ SSLNetVConnection::free_thread(EThread *t)
   ink_release_assert(t == this_ethread());
 
   // close socket fd
-  if (con.fd != NO_FD) {
+  if (con.sock.is_ok()) {
     release_inbound_connection_tracking();
     Metrics::Gauge::decrement(net_rsb.connections_currently_open);
   }
@@ -1075,13 +972,13 @@ SSLNetVConnection::free_thread(EThread *t)
 
   clear();
   SET_CONTINUATION_HANDLER(this, &SSLNetVConnection::startEvent);
-  ink_assert(con.fd == NO_FD);
+  ink_assert(!con.sock.is_ok());
   ink_assert(t == this_ethread());
 
   if (from_accept_thread) {
     sslNetVCAllocator.free(this);
   } else {
-    ink_assert(con.fd == NO_FD);
+    ink_assert(!con.sock.is_ok());
     THREAD_FREE(this, sslNetVCAllocator, t);
   }
 }
@@ -1136,7 +1033,7 @@ SSLNetVConnection::sslStartHandShake(int event, int &err)
           this->ssl = nullptr;
           return EVENT_DONE;
         } else {
-          hookOpRequested = SSL_HOOK_OP_TUNNEL;
+          hookOpRequested = SslVConnOp::SSL_HOOK_OP_TUNNEL;
         }
       }
 
@@ -1280,27 +1177,13 @@ int
 SSLNetVConnection::sslServerHandShakeEvent(int &err)
 {
   // Continue on if we are in the invoked state.  The hook has not yet reenabled
-  if (sslHandshakeHookState == HANDSHAKE_HOOKS_CERT_INVOKE || sslHandshakeHookState == HANDSHAKE_HOOKS_CLIENT_CERT_INVOKE ||
-      sslHandshakeHookState == HANDSHAKE_HOOKS_PRE_INVOKE || sslHandshakeHookState == HANDSHAKE_HOOKS_CLIENT_HELLO_INVOKE) {
+  if (this->is_invoked_state()) {
     return SSL_WAIT_FOR_HOOK;
   }
 
   // Go do the preaccept hooks
-  if (sslHandshakeHookState == HANDSHAKE_HOOKS_PRE) {
-    Metrics::Counter::increment(ssl_rsb.total_attempts_handshake_count_in);
-    if (!curHook) {
-      Dbg(dbg_ctl_ssl, "Initialize preaccept curHook from NULL");
-      curHook = SSLAPIHooks::instance()->get(TSSslHookInternalID(TS_VCONN_START_HOOK));
-    } else {
-      curHook = curHook->next();
-    }
-    // If no more hooks, move onto CLIENT HELLO
-
-    if (nullptr == curHook) {
-      sslHandshakeHookState = HANDSHAKE_HOOKS_CLIENT_HELLO;
-    } else {
-      sslHandshakeHookState = HANDSHAKE_HOOKS_PRE_INVOKE;
-      ContWrapper::wrap(nh->mutex.get(), curHook->m_cont, TS_EVENT_VCONN_START, this);
+  if (this->get_handshake_hook_state() == TLSEventSupport::SSLHandshakeHookState::HANDSHAKE_HOOKS_PRE) {
+    if (this->invoke_tls_event() == 1) {
       return SSL_WAIT_FOR_HOOK;
     }
   }
@@ -1310,7 +1193,7 @@ SSLNetVConnection::sslServerHandShakeEvent(int &err)
   // without data replay.
   // Note we can't arrive here if a hook is active.
 
-  if (SSL_HOOK_OP_TUNNEL == hookOpRequested) {
+  if (SslVConnOp::SSL_HOOK_OP_TUNNEL == hookOpRequested) {
     this->attributes = HttpProxyPort::TRANSPORT_BLIND_TUNNEL;
     SSL_free(this->ssl);
     this->ssl = nullptr;
@@ -1319,12 +1202,13 @@ SSLNetVConnection::sslServerHandShakeEvent(int &err)
     // we get out of this callback, and then will shuffle
     // over the buffered handshake packets to the O.S.
     return EVENT_DONE;
-  } else if (SSL_HOOK_OP_TERMINATE == hookOpRequested) {
+  } else if (SslVConnOp::SSL_HOOK_OP_TERMINATE == hookOpRequested) {
     sslHandshakeStatus = SSLHandshakeStatus::SSL_HANDSHAKE_DONE;
     return EVENT_DONE;
   }
 
-  Dbg(dbg_ctl_ssl, "Go on with the handshake state=%s", get_ssl_handshake_hook_state_name(sslHandshakeHookState));
+  Dbg(dbg_ctl_ssl, "Go on with the handshake state=%s",
+      TLSEventSupport::get_ssl_handshake_hook_state_name(this->get_handshake_hook_state()));
 
   // All the pre-accept hooks have completed, proceed with the actual accept.
   if (this->handShakeReader) {
@@ -1510,7 +1394,7 @@ SSLNetVConnection::sslServerHandShakeEvent(int &err)
   case SSL_ERROR_PENDING_CERTIFICATE:
 #endif
 #if defined(SSL_ERROR_WANT_SNI_RESOLVE) || defined(SSL_ERROR_WANT_X509_LOOKUP) || defined(SSL_ERROR_PENDING_CERTIFICATE)
-    if (this->attributes == HttpProxyPort::TRANSPORT_BLIND_TUNNEL || SSL_HOOK_OP_TUNNEL == hookOpRequested) {
+    if (this->attributes == HttpProxyPort::TRANSPORT_BLIND_TUNNEL || SslVConnOp::SSL_HOOK_OP_TUNNEL == hookOpRequested) {
       this->attributes   = HttpProxyPort::TRANSPORT_BLIND_TUNNEL;
       sslHandshakeStatus = SSLHandshakeStatus::SSL_HANDSHAKE_ONGOING;
       return EVENT_CONT;
@@ -1551,12 +1435,12 @@ SSLNetVConnection::sslClientHandShakeEvent(int &err)
   ink_assert(TLSBasicSupport::getInstance(ssl) == this);
 
   // Initialize properly for a client connection
-  if (sslHandshakeHookState == HANDSHAKE_HOOKS_PRE) {
+  if (this->get_handshake_hook_state() == TLSEventSupport::SSLHandshakeHookState::HANDSHAKE_HOOKS_PRE) {
     if (this->pp_info.version != ProxyProtocolVersion::UNDEFINED) {
       // Outbound PROXY Protocol
       VIO    &vio     = this->write.vio;
       int64_t ntodo   = vio.ntodo();
-      int64_t towrite = vio.buffer.reader()->read_avail();
+      int64_t towrite = vio.get_reader()->read_avail();
 
       if (ntodo > 0 && towrite > 0) {
         MIOBufferAccessor &buf           = vio.buffer;
@@ -1581,28 +1465,18 @@ SSLNetVConnection::sslClientHandShakeEvent(int &err)
       }
     }
 
-    sslHandshakeHookState = HANDSHAKE_HOOKS_OUTBOUND_PRE;
+    this->set_handshake_hook_state(TLSEventSupport::SSLHandshakeHookState::HANDSHAKE_HOOKS_OUTBOUND_PRE);
   }
 
   // Do outbound hook processing here
   // Continue on if we are in the invoked state.  The hook has not yet reenabled
-  if (sslHandshakeHookState == HANDSHAKE_HOOKS_OUTBOUND_PRE_INVOKE) {
+  if (this->is_invoked_state()) {
     return SSL_WAIT_FOR_HOOK;
   }
 
   // Go do the preaccept hooks
-  if (sslHandshakeHookState == HANDSHAKE_HOOKS_OUTBOUND_PRE) {
-    Metrics::Counter::increment(ssl_rsb.total_attempts_handshake_count_out);
-    if (!curHook) {
-      Dbg(dbg_ctl_ssl, "Initialize outbound connect curHook from NULL");
-      curHook = SSLAPIHooks::instance()->get(TSSslHookInternalID(TS_VCONN_OUTBOUND_START_HOOK));
-    } else {
-      curHook = curHook->next();
-    }
-    // If no more hooks, carry on
-    if (nullptr != curHook) {
-      sslHandshakeHookState = HANDSHAKE_HOOKS_OUTBOUND_PRE_INVOKE;
-      ContWrapper::wrap(nh->mutex.get(), curHook->m_cont, TS_EVENT_VCONN_OUTBOUND_START, this);
+  if (this->get_handshake_hook_state() == TLSEventSupport::SSLHandshakeHookState::HANDSHAKE_HOOKS_OUTBOUND_PRE) {
+    if (this->invoke_tls_event() == 1) {
       return SSL_WAIT_FOR_HOOK;
     }
   }
@@ -1706,34 +1580,17 @@ SSLNetVConnection::sslClientHandShakeEvent(int &err)
 }
 
 void
-SSLNetVConnection::reenable(NetHandler *nh, int event)
+SSLNetVConnection::reenable(int event)
 {
-  Dbg(dbg_ctl_ssl, "Handshake reenable from state=%s", get_ssl_handshake_hook_state_name(sslHandshakeHookState));
+  Dbg(dbg_ctl_ssl, "Handshake reenable from state=%s",
+      TLSEventSupport::get_ssl_handshake_hook_state_name(this->get_handshake_hook_state()));
 
   // Mark as error to stop the Handshake
   if (event == TS_EVENT_ERROR) {
     sslHandshakeStatus = SSLHandshakeStatus::SSL_HANDSHAKE_ERROR;
   }
 
-  switch (sslHandshakeHookState) {
-  case HANDSHAKE_HOOKS_PRE_INVOKE:
-    sslHandshakeHookState = HANDSHAKE_HOOKS_PRE;
-    break;
-  case HANDSHAKE_HOOKS_OUTBOUND_PRE_INVOKE:
-    sslHandshakeHookState = HANDSHAKE_HOOKS_OUTBOUND_PRE;
-    break;
-  case HANDSHAKE_HOOKS_CLIENT_HELLO_INVOKE:
-    sslHandshakeHookState = HANDSHAKE_HOOKS_CLIENT_HELLO;
-    break;
-  case HANDSHAKE_HOOKS_CERT_INVOKE:
-    sslHandshakeHookState = HANDSHAKE_HOOKS_CERT;
-    break;
-  case HANDSHAKE_HOOKS_VERIFY_SERVER:
-  case HANDSHAKE_HOOKS_CLIENT_CERT:
-    break;
-  default:
-    break;
-  }
+  this->resume_tls_event();
 
   // Reenabling from the handshake callback
   //
@@ -1742,232 +1599,31 @@ SSLNetVConnection::reenable(NetHandler *nh, int event)
   // can be replaced by the plugin, it didn't seem reasonable to assume that the
   // callback would be executed again.  So we walk through the rest of the hooks
   // here in the reenable.
-  if (curHook != nullptr) {
-    curHook = curHook->next();
-    Dbg(dbg_ctl_ssl, "iterate from reenable curHook=%p", curHook);
-  }
-  if (curHook != nullptr) {
-    // Invoke the hook and return, wait for next reenable
-    if (sslHandshakeHookState == HANDSHAKE_HOOKS_CLIENT_HELLO) {
-      sslHandshakeHookState = HANDSHAKE_HOOKS_CLIENT_HELLO_INVOKE;
-      curHook->invoke(TS_EVENT_SSL_CLIENT_HELLO, this);
-    } else if (sslHandshakeHookState == HANDSHAKE_HOOKS_CLIENT_CERT) {
-      sslHandshakeHookState = HANDSHAKE_HOOKS_CLIENT_CERT_INVOKE;
-      curHook->invoke(TS_EVENT_SSL_VERIFY_CLIENT, this);
-    } else if (sslHandshakeHookState == HANDSHAKE_HOOKS_CERT) {
-      sslHandshakeHookState = HANDSHAKE_HOOKS_CERT_INVOKE;
-      curHook->invoke(TS_EVENT_SSL_CERT, this);
-    } else if (sslHandshakeHookState == HANDSHAKE_HOOKS_SNI) {
-      curHook->invoke(TS_EVENT_SSL_SERVERNAME, this);
-    } else if (sslHandshakeHookState == HANDSHAKE_HOOKS_PRE) {
-      Dbg(dbg_ctl_ssl, "Reenable preaccept");
-      sslHandshakeHookState = HANDSHAKE_HOOKS_PRE_INVOKE;
-      ContWrapper::wrap(nh->mutex.get(), curHook->m_cont, TS_EVENT_VCONN_START, this);
-    } else if (sslHandshakeHookState == HANDSHAKE_HOOKS_OUTBOUND_PRE) {
-      Dbg(dbg_ctl_ssl, "Reenable outbound connect");
-      sslHandshakeHookState = HANDSHAKE_HOOKS_OUTBOUND_PRE_INVOKE;
-      ContWrapper::wrap(nh->mutex.get(), curHook->m_cont, TS_EVENT_VCONN_OUTBOUND_START, this);
-    } else if (sslHandshakeHookState == HANDSHAKE_HOOKS_DONE) {
-      if (this->get_context() == NET_VCONNECTION_OUT) {
-        ContWrapper::wrap(nh->mutex.get(), curHook->m_cont, TS_EVENT_VCONN_OUTBOUND_CLOSE, this);
-      } else {
-        ContWrapper::wrap(nh->mutex.get(), curHook->m_cont, TS_EVENT_VCONN_CLOSE, this);
-      }
-    } else if (sslHandshakeHookState == HANDSHAKE_HOOKS_VERIFY_SERVER) {
-      Dbg(dbg_ctl_ssl, "ServerVerify");
-      ContWrapper::wrap(nh->mutex.get(), curHook->m_cont, TS_EVENT_SSL_VERIFY_SERVER, this);
-    }
-    return;
-  } else {
-    // Move onto the "next" state
-    switch (this->sslHandshakeHookState) {
-    case HANDSHAKE_HOOKS_PRE:
-    case HANDSHAKE_HOOKS_PRE_INVOKE:
-      sslHandshakeHookState = HANDSHAKE_HOOKS_CLIENT_HELLO;
-      break;
-    case HANDSHAKE_HOOKS_CLIENT_HELLO:
-    case HANDSHAKE_HOOKS_CLIENT_HELLO_INVOKE:
-      sslHandshakeHookState = HANDSHAKE_HOOKS_SNI;
-      break;
-    case HANDSHAKE_HOOKS_SNI:
-      sslHandshakeHookState = HANDSHAKE_HOOKS_CERT;
-      break;
-    case HANDSHAKE_HOOKS_CERT:
-    case HANDSHAKE_HOOKS_CERT_INVOKE:
-      sslHandshakeHookState = HANDSHAKE_HOOKS_CLIENT_CERT;
-      break;
-    case HANDSHAKE_HOOKS_OUTBOUND_PRE:
-    case HANDSHAKE_HOOKS_OUTBOUND_PRE_INVOKE:
-      this->write.triggered = true;
-      this->write.enabled   = true;
-      this->writeReschedule(nh);
-      sslHandshakeHookState = HANDSHAKE_HOOKS_DONE;
-      break;
-    case HANDSHAKE_HOOKS_CLIENT_CERT:
-    case HANDSHAKE_HOOKS_CLIENT_CERT_INVOKE:
-      sslHandshakeHookState = HANDSHAKE_HOOKS_DONE;
-      break;
-    case HANDSHAKE_HOOKS_VERIFY_SERVER:
-      sslHandshakeHookState = HANDSHAKE_HOOKS_DONE;
-      break;
-    default:
-      break;
-    }
-    Dbg(dbg_ctl_ssl, "iterate from reenable curHook=%p %s", curHook, get_ssl_handshake_hook_state_name(sslHandshakeHookState));
+  if (this->invoke_tls_event() == 2) {
+    this->write.triggered = true;
+    this->write.enabled   = true;
+    this->writeReschedule(nh);
   }
 
   this->readReschedule(nh);
 }
 
-bool
-SSLNetVConnection::callHooks(TSEvent eventId)
+Continuation *
+SSLNetVConnection::getContinuationForTLSEvents()
 {
-  // Only dealing with the SNI/CERT hook so far.
-  ink_assert(eventId == TS_EVENT_SSL_CLIENT_HELLO || eventId == TS_EVENT_SSL_CERT || eventId == TS_EVENT_SSL_SERVERNAME ||
-             eventId == TS_EVENT_SSL_VERIFY_SERVER || eventId == TS_EVENT_SSL_VERIFY_CLIENT || eventId == TS_EVENT_VCONN_CLOSE ||
-             eventId == TS_EVENT_VCONN_OUTBOUND_CLOSE);
-  Dbg(dbg_ctl_ssl, "sslHandshakeHookState=%s eventID=%d", get_ssl_handshake_hook_state_name(this->sslHandshakeHookState), eventId);
+  return this;
+}
 
-  // Move state if it is appropriate
-  if (eventId == TS_EVENT_VCONN_CLOSE) {
-    // Regardless of state, if the connection is closing, then transition to
-    // the DONE state. This will trigger us to call the appropriate cleanup
-    // routines.
-    this->sslHandshakeHookState = HANDSHAKE_HOOKS_DONE;
-  } else {
-    switch (this->sslHandshakeHookState) {
-    case HANDSHAKE_HOOKS_PRE:
-    case HANDSHAKE_HOOKS_OUTBOUND_PRE:
-      if (eventId == TS_EVENT_SSL_CLIENT_HELLO) {
-        this->sslHandshakeHookState = HANDSHAKE_HOOKS_CLIENT_HELLO;
-      } else if (eventId == TS_EVENT_SSL_SERVERNAME) {
-        this->sslHandshakeHookState = HANDSHAKE_HOOKS_SNI;
-      } else if (eventId == TS_EVENT_SSL_VERIFY_SERVER) {
-        this->sslHandshakeHookState = HANDSHAKE_HOOKS_VERIFY_SERVER;
-      } else if (eventId == TS_EVENT_SSL_CERT) {
-        this->sslHandshakeHookState = HANDSHAKE_HOOKS_CERT;
-      }
-      break;
-    case HANDSHAKE_HOOKS_CLIENT_HELLO:
-      if (eventId == TS_EVENT_SSL_SERVERNAME) {
-        this->sslHandshakeHookState = HANDSHAKE_HOOKS_SNI;
-      } else if (eventId == TS_EVENT_SSL_CERT) {
-        this->sslHandshakeHookState = HANDSHAKE_HOOKS_CERT;
-      }
-      break;
-    case HANDSHAKE_HOOKS_SNI:
-      if (eventId == TS_EVENT_SSL_CERT) {
-        this->sslHandshakeHookState = HANDSHAKE_HOOKS_CERT;
-      }
-      break;
-    default:
-      break;
-    }
-  }
+EThread *
+SSLNetVConnection::getThreadForTLSEvents()
+{
+  return this->thread;
+}
 
-  // Look for hooks associated with the event
-  switch (this->sslHandshakeHookState) {
-  case HANDSHAKE_HOOKS_CLIENT_HELLO:
-  case HANDSHAKE_HOOKS_CLIENT_HELLO_INVOKE:
-    if (!curHook) {
-      curHook = SSLAPIHooks::instance()->get(TSSslHookInternalID(TS_SSL_CLIENT_HELLO_HOOK));
-    } else {
-      curHook = curHook->next();
-    }
-    if (curHook == nullptr) {
-      this->sslHandshakeHookState = HANDSHAKE_HOOKS_SNI;
-    } else {
-      this->sslHandshakeHookState = HANDSHAKE_HOOKS_CLIENT_HELLO_INVOKE;
-    }
-    break;
-  case HANDSHAKE_HOOKS_VERIFY_SERVER:
-    // The server verify event addresses ATS to origin handshake
-    // All the other events are for client to ATS
-    if (!curHook) {
-      curHook = SSLAPIHooks::instance()->get(TSSslHookInternalID(TS_SSL_VERIFY_SERVER_HOOK));
-    } else {
-      curHook = curHook->next();
-    }
-    break;
-  case HANDSHAKE_HOOKS_SNI:
-    if (!curHook) {
-      curHook = SSLAPIHooks::instance()->get(TSSslHookInternalID(TS_SSL_SERVERNAME_HOOK));
-    } else {
-      curHook = curHook->next();
-    }
-    if (!curHook) {
-      this->sslHandshakeHookState = HANDSHAKE_HOOKS_CERT;
-    }
-    break;
-  case HANDSHAKE_HOOKS_CERT:
-  case HANDSHAKE_HOOKS_CERT_INVOKE:
-    if (!curHook) {
-      curHook = SSLAPIHooks::instance()->get(TSSslHookInternalID(TS_SSL_CERT_HOOK));
-    } else {
-      curHook = curHook->next();
-    }
-    if (curHook == nullptr) {
-      this->sslHandshakeHookState = HANDSHAKE_HOOKS_CLIENT_CERT;
-    } else {
-      this->sslHandshakeHookState = HANDSHAKE_HOOKS_CERT_INVOKE;
-    }
-    break;
-  case HANDSHAKE_HOOKS_CLIENT_CERT:
-  case HANDSHAKE_HOOKS_CLIENT_CERT_INVOKE:
-    if (!curHook) {
-      curHook = SSLAPIHooks::instance()->get(TSSslHookInternalID(TS_SSL_VERIFY_CLIENT_HOOK));
-    } else {
-      curHook = curHook->next();
-    }
-  // fallthrough
-  case HANDSHAKE_HOOKS_DONE:
-  case HANDSHAKE_HOOKS_OUTBOUND_PRE:
-    if (eventId == TS_EVENT_VCONN_CLOSE) {
-      sslHandshakeHookState = HANDSHAKE_HOOKS_DONE;
-      if (curHook == nullptr) {
-        curHook = SSLAPIHooks::instance()->get(TSSslHookInternalID(TS_VCONN_CLOSE_HOOK));
-      } else {
-        curHook = curHook->next();
-      }
-    } else if (eventId == TS_EVENT_VCONN_OUTBOUND_CLOSE) {
-      sslHandshakeHookState = HANDSHAKE_HOOKS_DONE;
-      if (curHook == nullptr) {
-        curHook = SSLAPIHooks::instance()->get(TSSslHookInternalID(TS_VCONN_OUTBOUND_CLOSE_HOOK));
-      } else {
-        curHook = curHook->next();
-      }
-    }
-    break;
-  default:
-    curHook                     = nullptr;
-    this->sslHandshakeHookState = HANDSHAKE_HOOKS_DONE;
-    return true;
-  }
-
-  Dbg(dbg_ctl_ssl, "iterated to curHook=%p", curHook);
-
-  bool reenabled = true;
-
-  if (SSL_HOOK_OP_TUNNEL == hookOpRequested) {
-    this->attributes = HttpProxyPort::TRANSPORT_BLIND_TUNNEL;
-    // Don't mark the handshake as complete yet,
-    // Will be checking for that flag not being set after
-    // we get out of this callback, and then will shuffle
-    // over the buffered handshake packets to the O.S.
-    // sslHandShakeComplete = 1;
-    return reenabled;
-  }
-
-  if (curHook != nullptr) {
-    WEAK_SCOPED_MUTEX_LOCK(lock, curHook->m_cont->mutex, this_ethread());
-    curHook->invoke(eventId, this);
-    reenabled =
-      (this->sslHandshakeHookState != HANDSHAKE_HOOKS_CERT_INVOKE && this->sslHandshakeHookState != HANDSHAKE_HOOKS_PRE_INVOKE &&
-       this->sslHandshakeHookState != HANDSHAKE_HOOKS_CLIENT_HELLO_INVOKE);
-    Dbg(dbg_ctl_ssl, "Called hook on state=%s reenabled=%d", get_ssl_handshake_hook_state_name(sslHandshakeHookState), reenabled);
-  }
-
-  return reenabled;
+Ptr<ProxyMutex>
+SSLNetVConnection::getMutexForTLSEvents()
+{
+  return this->nh->mutex;
 }
 
 int
@@ -2115,12 +1771,6 @@ SSLNetVConnection::protocol_contains(std::string_view prefix) const
   return retval;
 }
 
-void
-SSLNetVConnection::_fire_ssl_servername_event()
-{
-  this->callHooks(TS_EVENT_SSL_SERVERNAME);
-}
-
 in_port_t
 SSLNetVConnection::_get_local_port()
 {
@@ -2240,7 +1890,7 @@ SSLNetVConnection::_propagateHandShakeBuffer(UnixNetVConnection *target, EThread
   // Take ownership of the handShake buffer
   this->sslHandshakeStatus = SSLHandshakeStatus::SSL_HANDSHAKE_DONE;
   NetState *s              = &target->read;
-  s->vio.buffer.writer_for(this->handShakeBuffer);
+  s->vio.set_writer(this->handShakeBuffer);
   s->vio.set_reader(this->handShakeHolder);
   this->handShakeHolder = nullptr;
   this->handShakeBuffer = nullptr;
@@ -2311,6 +1961,27 @@ SSLNetVConnection::_get_tls_curve() const
   } else {
     return SSLGetCurveNID(ssl);
   }
+}
+
+int
+SSLNetVConnection::_verify_certificate(X509_STORE_CTX * /* ctx ATS_UNUSED */)
+{
+  // Currently, TS_EVENT_SSL_VERIFY_CLIENT/SERVER are invoked only with a NetVC instance.
+  // This requires plugins to call TSSslVerifyCTX in their event handler.
+  // We could pass a structure that has both a cert to verify and a NetVC.
+  // It would allow us to remove confusing TSSslVerifyCTX and its internal implementation that are only available during a very
+  // limited time.
+  if (get_context() == NET_VCONNECTION_IN) {
+    this->callHooks(TS_EVENT_SSL_VERIFY_CLIENT /* , ctx */);
+  } else {
+    this->callHooks(TS_EVENT_SSL_VERIFY_SERVER /* , ctx */);
+  }
+
+  if (this->sslHandshakeStatus == SSLHandshakeStatus::SSL_HANDSHAKE_ERROR) {
+    return 1;
+  }
+
+  return 0;
 }
 
 ssl_error_t
@@ -2492,7 +2163,6 @@ SSLNetVConnection::_ssl_write_buffer(const void *buf, int64_t nbytes, int64_t &n
   if (unlikely(nbytes == 0)) {
     return SSL_ERROR_NONE;
   }
-  ERR_clear_error();
 
   int ret;
   // If SSL_write_early_data is available, it's probably OpenSSL,

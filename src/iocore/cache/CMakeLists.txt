@@ -21,18 +21,21 @@ add_library(
   Cache.cc
   CacheDir.cc
   CacheDisk.cc
+  CacheDoc.cc
   CacheEvacuateDocVC.cc
   CacheHosting.cc
   CacheHttp.cc
+  CacheProcessor.cc
   CacheRead.cc
   CacheVC.cc
-  CacheVol.cc
   CacheWrite.cc
   HttpTransactCache.cc
+  PreservationTable.cc
   RamCacheCLFUS.cc
   RamCacheLRU.cc
   Store.cc
   Stripe.cc
+  StripeSM.cc
 )
 add_library(ts::inkcache ALIAS inkcache)
 
@@ -45,7 +48,7 @@ target_include_directories(inkcache PRIVATE ${CMAKE_SOURCE_DIR}/lib)
 target_link_libraries(
   inkcache
   PUBLIC ts::aio ts::hdrs ts::inkevent ts::tscore
-  PRIVATE ts::proxy fastlz ZLIB::ZLIB
+  PRIVATE ts::tsapibackend fastlz ZLIB::ZLIB
 )
 
 if(HAVE_LZMA_H)
@@ -85,5 +88,8 @@ if(BUILD_TESTING)
   add_cache_test(Update_S_to_L unit_tests/test_Update_S_to_L.cc)
   add_cache_test(Update_Header unit_tests/test_Update_header.cc)
   add_cache_test(CacheStripe unit_tests/test_Stripe.cc)
+  add_cache_test(CacheAggregateWriteBuffer unit_tests/test_AggregateWriteBuffer.cc)
 
 endif()
+
+clang_tidy_check(inkcache)

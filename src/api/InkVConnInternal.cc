@@ -77,7 +77,7 @@ INKVConnInternal::do_io_read(Continuation *c, int64_t nbytes, MIOBuffer *buf)
   m_read_vio.vc_server = this;
 
   if (buf) {
-    m_read_vio.buffer.writer_for(buf);
+    m_read_vio.set_writer(buf);
     if (ink_atomic_increment((int *)&m_event_count, 1) < 0) {
       ink_assert(!"not reached");
     }
@@ -100,7 +100,7 @@ INKVConnInternal::do_io_write(Continuation *c, int64_t nbytes, IOBufferReader *b
   m_write_vio.vc_server = this;
 
   if (buf) {
-    m_write_vio.buffer.reader_for(buf);
+    m_write_vio.set_reader(buf);
     if (m_write_vio.get_reader()->read_avail() > 0) {
       if (ink_atomic_increment((int *)&m_event_count, 1) < 0) {
         ink_assert(!"not reached");

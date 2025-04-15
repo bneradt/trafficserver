@@ -60,7 +60,7 @@ bool
 ConditionStatus::eval(const Resources &res)
 {
   Dbg(pi_dbg_ctl, "Evaluating STATUS()");
-  return static_cast<MatcherType *>(_matcher)->test(res.resp_status);
+  return static_cast<MatcherType *>(_matcher)->test(res.resp_status, res);
 }
 
 void
@@ -91,7 +91,7 @@ ConditionMethod::eval(const Resources &res)
   append_value(s, res);
   Dbg(pi_dbg_ctl, "Evaluating METHOD()");
 
-  return static_cast<const MatcherType *>(_matcher)->test(s);
+  return static_cast<const MatcherType *>(_matcher)->test(s, res);
 }
 
 void
@@ -128,19 +128,16 @@ ConditionRandom::initialize(Parser &p)
 }
 
 bool
-ConditionRandom::eval(const Resources & /* res ATS_UNUSED */)
+ConditionRandom::eval(const Resources &res)
 {
   Dbg(pi_dbg_ctl, "Evaluating RANDOM()");
-  return static_cast<const MatcherType *>(_matcher)->test(rand_r(&_seed) % _max);
+  return static_cast<const MatcherType *>(_matcher)->test(rand_r(&_seed) % _max, res);
 }
 
 void
 ConditionRandom::append_value(std::string &s, const Resources & /* res ATS_UNUSED */)
 {
-  std::ostringstream oss;
-
-  oss << rand_r(&_seed) % _max;
-  s += oss.str();
+  s += std::to_string(rand_r(&_seed) % _max);
   Dbg(pi_dbg_ctl, "Appending RANDOM(%d) to evaluation value -> %s", _max, s.c_str());
 }
 
@@ -249,7 +246,7 @@ ConditionHeader::eval(const Resources &res)
   append_value(s, res);
   Dbg(pi_dbg_ctl, "Evaluating HEADER()");
 
-  return static_cast<const MatcherType *>(_matcher)->test(s);
+  return static_cast<const MatcherType *>(_matcher)->test(s, res);
 }
 
 // ConditionUrl: request or response header. TODO: This is not finished, at all!!!
@@ -363,7 +360,7 @@ ConditionUrl::eval(const Resources &res)
 
   append_value(s, res);
 
-  return static_cast<const Matchers<std::string> *>(_matcher)->test(s);
+  return static_cast<const Matchers<std::string> *>(_matcher)->test(s, res);
 }
 
 // ConditionDBM: do a lookup against a DBM
@@ -427,7 +424,7 @@ ConditionDBM::eval(const Resources &res)
   append_value(s, res);
   Dbg(pi_dbg_ctl, "Evaluating DBM()");
 
-  return static_cast<const MatcherType *>(_matcher)->test(s);
+  return static_cast<const MatcherType *>(_matcher)->test(s, res);
 }
 
 // ConditionCookie: request or response header
@@ -497,7 +494,7 @@ ConditionCookie::eval(const Resources &res)
   append_value(s, res);
   Dbg(pi_dbg_ctl, "Evaluating COOKIE()");
 
-  return static_cast<const MatcherType *>(_matcher)->test(s);
+  return static_cast<const MatcherType *>(_matcher)->test(s, res);
 }
 
 // ConditionInternalTxn: Is the txn internal?
@@ -570,7 +567,7 @@ ConditionIp::eval(const Resources &res)
     }
 
     if (addr) {
-      return static_cast<const Matchers<const sockaddr *> *>(_matcher)->test(addr);
+      return static_cast<const Matchers<const sockaddr *> *>(_matcher)->test(addr, res);
     } else {
       return false;
     }
@@ -578,7 +575,7 @@ ConditionIp::eval(const Resources &res)
     std::string s;
 
     append_value(s, res);
-    bool rval = static_cast<const Matchers<std::string> *>(_matcher)->test(s);
+    bool rval = static_cast<const Matchers<std::string> *>(_matcher)->test(s, res);
 
     Dbg(pi_dbg_ctl, "Evaluating IP(): %s - rval: %d", s.c_str(), rval);
 
@@ -634,7 +631,7 @@ ConditionTransactCount::eval(const Resources &res)
     int n = TSHttpSsnTransactionCount(ssn);
 
     Dbg(pi_dbg_ctl, "Evaluating TXN-COUNT()");
-    return static_cast<MatcherType *>(_matcher)->test(n);
+    return static_cast<MatcherType *>(_matcher)->test(n, res);
   }
 
   Dbg(pi_dbg_ctl, "\tNo session found, returning false");
@@ -746,20 +743,17 @@ ConditionNow::set_qualifier(const std::string &q)
 void
 ConditionNow::append_value(std::string &s, const Resources & /* res ATS_UNUSED */)
 {
-  std::ostringstream oss;
-
-  oss << get_now_qualified(_now_qual);
-  s += oss.str();
+  s += std::to_string(get_now_qualified(_now_qual));
   Dbg(pi_dbg_ctl, "Appending NOW() to evaluation value -> %s", s.c_str());
 }
 
 bool
-ConditionNow::eval(const Resources & /* res ATS_UNUSED */)
+ConditionNow::eval(const Resources &res)
 {
   int64_t now = get_now_qualified(_now_qual);
 
   Dbg(pi_dbg_ctl, "Evaluating NOW()");
-  return static_cast<const MatcherType *>(_matcher)->test(now);
+  return static_cast<const MatcherType *>(_matcher)->test(now, res);
 }
 
 std::string
@@ -822,14 +816,11 @@ ConditionGeo::set_qualifier(const std::string &q)
 void
 ConditionGeo::append_value(std::string &s, const Resources &res)
 {
-  std::ostringstream oss;
-
   if (is_int_type()) {
-    oss << get_geo_int(TSHttpTxnClientAddrGet(res.txnp));
+    s += std::to_string(get_geo_int(TSHttpTxnClientAddrGet(res.txnp)));
   } else {
-    oss << get_geo_string(TSHttpTxnClientAddrGet(res.txnp));
+    s += get_geo_string(TSHttpTxnClientAddrGet(res.txnp));
   }
-  s += oss.str();
   Dbg(pi_dbg_ctl, "Appending GEO() to evaluation value -> %s", s.c_str());
 }
 
@@ -842,12 +833,12 @@ ConditionGeo::eval(const Resources &res)
   if (is_int_type()) {
     int64_t geo = get_geo_int(TSHttpTxnClientAddrGet(res.txnp));
 
-    ret = static_cast<const Matchers<int64_t> *>(_matcher)->test(geo);
+    ret = static_cast<const Matchers<int64_t> *>(_matcher)->test(geo, res);
   } else {
     std::string s;
 
     append_value(s, res);
-    ret = static_cast<const Matchers<std::string> *>(_matcher)->test(s);
+    ret = static_cast<const Matchers<std::string> *>(_matcher)->test(s, res);
   }
 
   return ret;
@@ -899,10 +890,7 @@ ConditionId::append_value(std::string &s, const Resources &res ATS_UNUSED)
 {
   switch (_id_qual) {
   case ID_QUAL_REQUEST: {
-    std::ostringstream oss;
-
-    oss << TSHttpTxnIdGet(res.txnp);
-    s += oss.str();
+    s += std::to_string(TSHttpTxnIdGet(res.txnp));
   } break;
   case ID_QUAL_PROCESS: {
     TSUuid process = TSProcessUuidGet();
@@ -929,12 +917,12 @@ ConditionId::eval(const Resources &res)
     uint64_t id = TSHttpTxnIdGet(res.txnp);
 
     Dbg(pi_dbg_ctl, "Evaluating GEO() -> %" PRIu64, id);
-    return static_cast<const Matchers<uint64_t> *>(_matcher)->test(id);
+    return static_cast<const Matchers<uint64_t> *>(_matcher)->test(id, res);
   } else {
     std::string s;
 
     append_value(s, res);
-    bool rval = static_cast<const Matchers<std::string> *>(_matcher)->test(s);
+    bool rval = static_cast<const Matchers<std::string> *>(_matcher)->test(s, res);
 
     Dbg(pi_dbg_ctl, "Evaluating ID(): %s - rval: %d", s.c_str(), rval);
     return rval;
@@ -994,7 +982,7 @@ ConditionCidr::eval(const Resources &res)
   append_value(s, res);
   Dbg(pi_dbg_ctl, "Evaluating CIDR()");
 
-  return static_cast<MatcherType *>(_matcher)->test(s);
+  return static_cast<MatcherType *>(_matcher)->test(s, res);
 }
 
 void
@@ -1115,7 +1103,7 @@ ConditionInbound::eval(const Resources &res)
     }
 
     if (addr) {
-      return static_cast<const Matchers<const sockaddr *> *>(_matcher)->test(addr);
+      return static_cast<const Matchers<const sockaddr *> *>(_matcher)->test(addr, res);
     } else {
       return false;
     }
@@ -1123,7 +1111,7 @@ ConditionInbound::eval(const Resources &res)
     std::string s;
 
     append_value(s, res);
-    bool rval = static_cast<const Matchers<std::string> *>(_matcher)->test(s);
+    bool rval = static_cast<const Matchers<std::string> *>(_matcher)->test(s, res);
 
     Dbg(pi_dbg_ctl, "Evaluating %s(): %s - rval: %d", TAG, s.c_str(), rval);
 
@@ -1212,11 +1200,11 @@ ConditionStringLiteral::append_value(std::string &s, const Resources & /* res AT
 }
 
 bool
-ConditionStringLiteral::eval(const Resources & /* res ATS_UNUSED */)
+ConditionStringLiteral::eval(const Resources &res)
 {
   Dbg(pi_dbg_ctl, "Evaluating StringLiteral");
 
-  return static_cast<const MatcherType *>(_matcher)->test(_literal);
+  return static_cast<const MatcherType *>(_matcher)->test(_literal, res);
 }
 
 // ConditionSessionTransactCount
@@ -1237,7 +1225,7 @@ ConditionSessionTransactCount::eval(const Resources &res)
   int const val = TSHttpTxnServerSsnTransactionCount(res.txnp);
 
   Dbg(pi_dbg_ctl, "Evaluating SSN-TXN-COUNT()");
-  return static_cast<MatcherType *>(_matcher)->test(val);
+  return static_cast<MatcherType *>(_matcher)->test(val, res);
 }
 
 void
@@ -1279,7 +1267,7 @@ ConditionTcpInfo::eval(const Resources &res)
   std::string s;
 
   append_value(s, res);
-  bool rval = static_cast<const Matchers<std::string> *>(_matcher)->test(s);
+  bool rval = static_cast<const Matchers<std::string> *>(_matcher)->test(s, res);
 
   Dbg(pi_dbg_ctl, "Evaluating TCP-Info: %s - rval: %d", s.c_str(), rval);
 
@@ -1287,7 +1275,7 @@ ConditionTcpInfo::eval(const Resources &res)
 }
 
 void
-ConditionTcpInfo::append_value(std::string &s, Resources const & /* res ATS_UNUSED */)
+ConditionTcpInfo::append_value(std::string &s, [[maybe_unused]] Resources const &res)
 {
 #if defined(TCP_INFO) && defined(HAVE_STRUCT_TCP_INFO)
   if (TSHttpTxnIsInternal(res.txnp)) {
@@ -1344,7 +1332,7 @@ ConditionCache::eval(const Resources &res)
   append_value(s, res);
   Dbg(pi_dbg_ctl, "Evaluating CACHE()");
 
-  return static_cast<const MatcherType *>(_matcher)->test(s);
+  return static_cast<const MatcherType *>(_matcher)->test(s, res);
 }
 
 void
@@ -1423,5 +1411,193 @@ ConditionNextHop::eval(const Resources &res)
 
   append_value(s, res);
 
-  return static_cast<const Matchers<std::string> *>(_matcher)->test(s);
+  return static_cast<const Matchers<std::string> *>(_matcher)->test(s, res);
+}
+
+// ConditionHttpCntl: request header.
+void
+ConditionHttpCntl::set_qualifier(const std::string &q)
+{
+  Condition::set_qualifier(q);
+
+  Dbg(pi_dbg_ctl, "\tParsing %%{HTTP-CNTL:%s}", q.c_str());
+  _http_cntl_qual = parse_http_cntl_qualifier(q);
+}
+
+void
+ConditionHttpCntl::append_value(std::string &s, const Resources &res)
+{
+  s += TSHttpTxnCntlGet(res.txnp, _http_cntl_qual) ? "TRUE" : "FALSE";
+  Dbg(pi_dbg_ctl, "Evaluating HTTP-CNTL(%s)", _qualifier.c_str());
+}
+
+bool
+ConditionHttpCntl::eval(const Resources &res)
+{
+  Dbg(pi_dbg_ctl, "Evaluating HTTP-CNTL()");
+  return TSHttpTxnCntlGet(res.txnp, _http_cntl_qual);
+}
+
+// ConditionStateFlag
+void
+ConditionStateFlag::set_qualifier(const std::string &q)
+{
+  Condition::set_qualifier(q);
+
+  _flag_ix = strtol(q.c_str(), nullptr, 10);
+  if (_flag_ix < 0 || _flag_ix >= NUM_STATE_FLAGS) {
+    TSError("[%s] STATE-FLAG index out of range: %s", PLUGIN_NAME, q.c_str());
+  } else {
+    Dbg(pi_dbg_ctl, "\tParsing %%{STATE-FLAG:%s}", q.c_str());
+    _mask = 1ULL << _flag_ix;
+  }
+}
+
+void
+ConditionStateFlag::append_value(std::string &s, const Resources &res)
+{
+  s += eval(res) ? "TRUE" : "FALSE";
+  Dbg(pi_dbg_ctl, "Evaluating STATE-FLAG(%d)", _flag_ix);
+}
+
+bool
+ConditionStateFlag::eval(const Resources &res)
+{
+  auto data = reinterpret_cast<uint64_t>(TSUserArgGet(res.txnp, _txn_slot));
+
+  Dbg(pi_dbg_ctl, "Evaluating STATE-FLAG()");
+
+  return (data & _mask) == _mask;
+}
+
+// ConditionStateInt8
+void
+ConditionStateInt8::initialize(Parser &p)
+{
+  Condition::initialize(p);
+  MatcherType *match = new MatcherType(_cond_op);
+
+  match->set(static_cast<uint8_t>(strtol(p.get_arg().c_str(), nullptr, 10)), mods());
+  _matcher = match;
+}
+
+void
+ConditionStateInt8::set_qualifier(const std::string &q)
+{
+  Condition::set_qualifier(q);
+
+  _byte_ix = strtol(q.c_str(), nullptr, 10);
+  if (_byte_ix < 0 || _byte_ix >= NUM_STATE_INT8S) {
+    TSError("[%s] STATE-INT8 index out of range: %s", PLUGIN_NAME, q.c_str());
+  } else {
+    Dbg(pi_dbg_ctl, "\tParsing %%{STATE-INT8:%s}", q.c_str());
+  }
+}
+
+void
+ConditionStateInt8::append_value(std::string &s, const Resources &res)
+{
+  uint8_t data = _get_data(res);
+
+  s += std::to_string(data);
+
+  Dbg(pi_dbg_ctl, "Appending STATE-INT8(%d) to evaluation value -> %s", data, s.c_str());
+}
+
+bool
+ConditionStateInt8::eval(const Resources &res)
+{
+  uint8_t data = _get_data(res);
+
+  Dbg(pi_dbg_ctl, "Evaluating STATE-INT8()");
+
+  return static_cast<const MatcherType *>(_matcher)->test(data, res);
+}
+
+// ConditionStateInt16
+void
+ConditionStateInt16::initialize(Parser &p)
+{
+  Condition::initialize(p);
+  MatcherType *match = new MatcherType(_cond_op);
+
+  match->set(static_cast<uint16_t>(strtol(p.get_arg().c_str(), nullptr, 10)), mods());
+  _matcher = match;
+}
+
+void
+ConditionStateInt16::set_qualifier(const std::string &q)
+{
+  Condition::set_qualifier(q);
+
+  if (!q.empty()) { // This qualifier is optional, but must be 0 if there
+    long ix = strtol(q.c_str(), nullptr, 10);
+
+    if (ix != 0) {
+      TSError("[%s] STATE-INT16 index out of range: %s", PLUGIN_NAME, q.c_str());
+    } else {
+      Dbg(pi_dbg_ctl, "\tParsing %%{STATE-INT16:%s}", q.c_str());
+    }
+  }
+}
+
+void
+ConditionStateInt16::append_value(std::string &s, const Resources &res)
+{
+  uint16_t data = _get_data(res);
+
+  s += std::to_string(data);
+  Dbg(pi_dbg_ctl, "Appending STATE-INT16(%d) to evaluation value -> %s", data, s.c_str());
+}
+
+bool
+ConditionStateInt16::eval(const Resources &res)
+{
+  uint16_t data = _get_data(res);
+
+  Dbg(pi_dbg_ctl, "Evaluating STATE-INT8()");
+
+  return static_cast<const MatcherType *>(_matcher)->test(data, res);
+}
+
+// ConditionLastCapture
+void
+ConditionLastCapture::set_qualifier(const std::string &q)
+{
+  Condition::set_qualifier(q);
+
+  if (q.empty()) {
+    _ix = 0;
+  } else {
+    _ix = strtol(q.c_str(), nullptr, 10);
+  }
+
+  if (_ix < 0 || _ix > 9) { // Only $0 - $9
+    TSError("[%s] LAST-CAPTURE index out of range: %s", PLUGIN_NAME, q.c_str());
+  } else {
+    Dbg(pi_dbg_ctl, "\tParsing %%{LAST-CAPTURE:%s}", q.c_str());
+  }
+}
+
+void
+ConditionLastCapture::append_value(std::string &s, const Resources &res)
+{
+  if (res.ovector_ptr && res.ovector_count > _ix) {
+    int start = res.ovector[_ix * 2];
+    int end   = res.ovector[_ix * 2 + 1];
+
+    s.append(std::string_view(res.ovector_ptr).substr(start, (end - start)));
+    Dbg(pi_dbg_ctl, "Evaluating LAST-CAPTURE(%d)", _ix);
+  }
+}
+
+bool
+ConditionLastCapture::eval(const Resources &res)
+{
+  std::string s;
+
+  append_value(s, res);
+  Dbg(pi_dbg_ctl, "Evaluating LAST-CAPTURE()");
+
+  return static_cast<const MatcherType *>(_matcher)->test(s, res);
 }

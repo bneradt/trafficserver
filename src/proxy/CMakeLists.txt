@@ -22,7 +22,6 @@ add_library(
   ControlBase.cc
   ControlMatcher.cc
   HostStatus.cc
-  HttpAPIHooks.cc
   IPAllow.cc
   ParentConsistentHash.cc
   ParentRoundRobin.cc
@@ -42,7 +41,7 @@ add_library(ts::proxy ALIAS proxy)
 
 target_link_libraries(
   proxy
-  PUBLIC ts::inkcache ts::inkevent ts::tsutil ts::tscore
+  PUBLIC ts::inkcache ts::inkevent ts::tsutil ts::tscore ts::inknet
   PRIVATE ts::rpcpublichandlers ts::jsonrpc_protocol ts::inkutils ts::tsapibackend
 )
 
@@ -55,3 +54,5 @@ add_subdirectory(logging)
 if(TS_USE_QUIC)
   add_subdirectory(http3)
 endif()
+
+clang_tidy_check(proxy)

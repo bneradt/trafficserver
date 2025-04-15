@@ -23,8 +23,6 @@
 
 #pragma once
 
-#include "tscore/ink_config.h"
-
 /****************************************************************************
 
   QUICNetVConnection.h
@@ -35,30 +33,26 @@
  ****************************************************************************/
 #pragma once
 
-#include "tscore/ink_platform.h"
-#include "P_Net.h"
-#include "../eventsystem/P_EventSystem.h"
 #include "P_UnixNetVConnection.h"
-#include "P_UnixNet.h"
-#include "P_UDPNet.h"
+#include "iocore/net/QUICSupport.h"
 #include "iocore/net/TLSALPNSupport.h"
 #include "iocore/net/TLSBasicSupport.h"
+#include "iocore/net/TLSEventSupport.h"
 #include "iocore/net/TLSSessionResumptionSupport.h"
 #include "iocore/net/TLSSNISupport.h"
 #include "iocore/net/TLSCertSwitchSupport.h"
-#include "iocore/net/QUICSupport.h"
-#include "tscore/ink_apidefs.h"
-#include "tscore/List.h"
-
+#include "iocore/net/UDPConnection.h"
 #include "iocore/net/quic/QUICConfig.h"
 #include "iocore/net/quic/QUICConnection.h"
 #include "iocore/net/quic/QUICConnectionTable.h"
 #include "iocore/net/quic/QUICContext.h"
 #include "iocore/net/quic/QUICStreamManager.h"
+#include "tscore/List.h"
 
 #include <netinet/in.h>
 #include <quiche.h>
 
+class EThread;
 class QUICPacketHandler;
 class QUICResetTokenTable;
 class QUICConnectionTable;
@@ -70,6 +64,7 @@ class QUICNetVConnection : public UnixNetVConnection,
                            public TLSSNISupport,
                            public TLSSessionResumptionSupport,
                            public TLSCertSwitchSupport,
+                           public TLSEventSupport,
                            public TLSBasicSupport,
                            public QUICSupport
 {
@@ -105,13 +100,11 @@ public:
   bool    getSSLHandShakeComplete() const override;
 
   // NetEvent
-  virtual void net_read_io(NetHandler *nh, EThread *lthread) override;
+  virtual void net_read_io(NetHandler *nh) override;
 
   // NetVConnection
   int         populate_protocol(std::string_view *results, int n) const override;
   const char *protocol_contains(std::string_view tag) const override;
-  const char *get_server_name() const override;
-  bool        support_sni() const override;
 
   // QUICConnection
   QUICStreamManager *stream_manager() override;
@@ -144,6 +137,12 @@ public:
   // QUICNetVConnection
   int in_closed_queue = 0;
 
+  // TLSEventSupport
+  void            reenable(int event) override;
+  Continuation   *getContinuationForTLSEvents() override;
+  EThread        *getThreadForTLSEvents() override;
+  Ptr<ProxyMutex> getMutexForTLSEvents() override;
+
   bool shouldDestroy();
   void destroy(EThread *t);
   void remove_connection_ids();
@@ -158,9 +157,9 @@ protected:
   // TLSBasicSupport
   SSL         *_get_ssl_object() const override;
   ssl_curve_id _get_tls_curve() const override;
+  int          _verify_certificate(X509_STORE_CTX *ctx) override;
 
   // TLSSNISupport
-  void      _fire_ssl_servername_event() override;
   in_port_t _get_local_port() override;
 
   // TLSSessionResumptionSupport
@@ -170,6 +169,19 @@ protected:
   bool           _isTryingRenegotiation() const override;
   shared_SSL_CTX _lookupContextByName(const std::string &servername, SSLCertContextType ctxType) override;
   shared_SSL_CTX _lookupContextByIP() override;
+
+  // TLSEventSupport
+  bool
+  _is_tunneling_requested() const override
+  {
+    // FIXME Not Supported
+    return false;
+  }
+  void
+  _switch_to_tunneling_mode() override
+  {
+    // FIXME Not supported
+  }
 
 private:
   SSL                      *_ssl;
@@ -216,6 +228,9 @@ private:
 
   QUICStreamManager  *_stream_manager  = nullptr;
   QUICApplicationMap *_application_map = nullptr;
+
+  bool _is_verifying_cert = false;
+  bool _is_cert_verified  = false;
 };
 
 extern ClassAllocator<QUICNetVConnection> quicNetVCAllocator;

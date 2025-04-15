@@ -21,16 +21,20 @@
   limitations under the License.
  */
 
-#include "P_EventSystem.h"
+#include "iocore/eventsystem/Continuation.h"
+#include "iocore/eventsystem/EThread.h"
+#include "iocore/eventsystem/EventProcessor.h"
+#include "records/RecCore.h"
+#include "records/RecProcess.h"
+#include "tscore/ink_align.h"
 #include <sched.h>
 #if TS_USE_HWLOC
 #if __has_include(<alloca.h>)
 #include <alloca.h>
 #endif
 #include <hwloc.h>
-#endif
-#include "tscore/ink_defs.h"
 #include "tscore/ink_hw.h"
+#endif
 #include "tscore/hugepages.h"
 
 namespace
@@ -99,7 +103,7 @@ EventMetricStatSync(const char *, RecDataT, RecData *, RecRawStatBlock *rsb, int
 
   // Update a specific enumerated stat.
   auto slice_stat_update = [=](EThread::Metrics::Slice::STAT_ID stat_id, int stat_idx, size_t value) {
-    auto idx    = stat_idx + unsigned(stat_id);
+    auto idx    = stat_idx + static_cast<unsigned>(stat_id);
     auto stat   = rsb->global[idx];
     stat->sum   = value;
     stat->count = 1;
@@ -118,6 +122,9 @@ EventMetricStatSync(const char *, RecDataT, RecData *, RecRawStatBlock *rsb, int
     slice_stat_update(ID::LOOP_EVENTS, id, slice->_events._total);
     slice_stat_update(ID::LOOP_EVENTS_MIN, id, slice->_events._min);
     slice_stat_update(ID::LOOP_EVENTS_MAX, id, slice->_events._max);
+    slice_stat_update(ID::LOOP_DRAIN_QUEUE_MAX, id, slice->_duration._max_drain_queue);
+    slice_stat_update(ID::LOOP_IO_WAIT_MAX, id, slice->_duration._max_io_wait);
+    slice_stat_update(ID::LOOP_IO_WORK_MAX, id, slice->_duration._max_io_work);
   }
 
   // Next are the event loop histogram buckets.

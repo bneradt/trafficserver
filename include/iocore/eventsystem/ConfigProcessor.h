@@ -25,13 +25,15 @@
 
 #include <atomic>
 
+#include "iocore/eventsystem/EventProcessor.h"
 #include "iocore/eventsystem/Tasks.h"
+#include "records/RecCore.h"
 
 class ProxyMutex;
 
 #define MAX_CONFIGS 100
 
-using ConfigInfo = RefCountObj;
+using ConfigInfo = RefCountObjInHeap;
 
 class ConfigProcessor
 {

@@ -44,7 +44,7 @@ m4/ltversion.m4
 m4/lt~obsolete.m4
 
 # common directory name for out-of-tree CMake builds
-build*
+/build*
 
 configs/records.yaml.default
 configs/storage.config.default
@@ -134,7 +134,7 @@ plugins/esi/*_test
 plugins/experimental/cookie_remap/test_cookiejar
 plugins/header_rewrite/header_rewrite_test
 plugins/prefetch/test_*
-plugins/s3_auth/test_s3auth
+plugins/origin_server_auth/test_originserverauth
 plugins/slice/test_*
 plugins/traffic_dump/test_*
 plugins/experimental/esi/*_test
@@ -183,7 +183,6 @@ ETAGS
 CTAGS
 
 tools/http_load/http_load
-tools/jtest/jtest
 tools/trafficserver.pc
 tools/escape_mapper/escape_mapper
 
