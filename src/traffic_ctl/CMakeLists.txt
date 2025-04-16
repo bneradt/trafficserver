@@ -16,10 +16,12 @@
 #######################
 
 add_executable(
-  traffic_ctl traffic_ctl.cc CtrlCommands.cc CtrlPrinters.cc FileConfigCommand.cc
+  traffic_ctl traffic_ctl.cc CtrlCommands.cc CtrlPrinters.cc FileConfigCommand.cc PrintUtils.cc
               ${CMAKE_SOURCE_DIR}/src/shared/rpc/IPCSocketClient.cc
 )
 
 target_link_libraries(traffic_ctl ts::tscore libswoc::libswoc yaml-cpp::yaml-cpp ts::tsutil)
 
 install(TARGETS traffic_ctl)
+
+clang_tidy_check(traffic_ctl)

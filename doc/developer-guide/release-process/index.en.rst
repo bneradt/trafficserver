@@ -46,10 +46,6 @@ to the community for validation before the actual release.
 Document
 ========
 
-Gather up information about the changes for the release. The ``CHANGES`` file
-is a good starting point. You may also want to check the commits since the last
-release. The primary purpose of this is to generate a list of the important
-changes since the last release.
 
 Create or update a page on the Wiki for the release. If it is a major or minor
 release it should have its own page. Use the previous release page as a
@@ -69,11 +65,22 @@ Build
 #. Check the version in ``CMakeLists.txt``. There is a ``project`` line near the
    top with the version number.  Make sure that is correct for the release.
 
+#. Generate or update the CHANGELOG for the next release.  ::
+
+      ./tools/git/changelog.pl -o apache -r trafficserver -m X.Y.Z >
+      CHANGELOG-X.Y.Z
+
+#. Commit this file to the repository and push it to the release branch.
+
 #. Execute the following commands to make the distribution files where A is the
    next release candidate number (start with 0). ::
 
-      cmake --preset release
-      RC=A cmake --build build-release -t rel-candidate
+      RC=A cmake --preset release
+      cmake --build build-release -t rel-candidate
+
+#. Push the release tag to the repository. ::
+
+      git push <upstream repo> tag X.Y.Z-rcA
 
 These steps will create the distribution files and sign them using your key.
 Expect to be prompted twice for your passphrase unless you use an ssh key agent.
@@ -81,20 +88,28 @@ If you have multiple keys you will need to set the default appropriately
 beforehand, as no option will be provided to select the signing key. The files
 should have names that start with ``trafficserver-X.Y.Z-rcA.tar.bz2`` where
 ``X.Y.Z`` is the version and ``A`` is the release candidate counter. There
-should be four such files, one with no extension and three others with the
-extensions ``asc``, ``md5``, and ``sha1``. This will also create a signed git
+should be three such files, one with no extension and two others with the
+extensions ``asc``,  and ``sha512``. This will also create a signed git
 tag of the form ``X.Y.Z-rcA``.
 
 Distribute
 ==========
 
-The release candidate files should be uploaded to some public storage. Your
-personal storage on *people.apache.org* is a reasonable location to use.
+The release candidate files should be uploaded to apache dists. ::
+
+   svn co https://dist.apache.org/repos/dist/dev/trafficserver <local-directory>
+
+Create a directory for the next release version if necessary and then add and
+commit the release files produced above.
 
 Send the release candidate announcement to the *users* and *dev* mailing
 lists, noting that it is a release *candidate* and providing a link to the
 distribution files you uploaded. This announcement should also call for a vote
 on the candidate, generally with a 72 hours time limit.
+
+The distribution files for the release candidate will be available at::
+
+   https://dist.apache.org/repos/dist/dev/trafficserver/
 
 If the voting was successful (at least three "+1" votes and no "-1" votes),
 proceed to :ref:`release-management-official-release`. Otherwise, repeat the
@@ -118,32 +133,33 @@ with the command::
 
    svn co https://dist.apache.org/repos/dist/release/trafficserver <local-directory>
 
-All four of the distribution files go here. If you are making a point release
+All three (.tar.bz2, .asc and .sha512) of the distribution files go here. If you are making a point release
 then you should also remove the distribution files for the previous release.
 Allow 24 hours for the files to be distributed through the ASF infrastructure.
 
-The Traffic Server website must be updated. This is an SVN repository which you
-can access with ::
+The distribution files for the release will be available at::
 
-   svn co https://svn.apache.org/repos/asf/trafficserver/site/trunk <local-directory>
+   https://dist.apache.org/repos/dist/release/trafficserver/
 
-The files of interest are in the ``content`` directory.
+The Traffic Server website must be updated. There is a git repository which you
+can access at ::
+
+   https://github.com/apache/trafficserver-site
+
+The files of interest are in the ``source/markdown`` directory.
 
 ``index.html``
    This is the front page. The places to edit here are any security
    announcements at the top and the "News" section.
 
-``downloads.en.mdtext``
-   Update the downloads page to point to the new download objects.
+``downloads.mdtext``
+   Update the downloads page to adjust the links, version numbers and dates.
 
-After making changes, commit them and then run ::
+Commiting to the `asf-site` branch will deploy to the trafficserver website
+here::
 
-   publish.pl trafficserver <apache-id>
+   https://trafficserver.apache.org/
 
-On the ``people.apache.org`` host.
-
-If needed, update the Wiki page for the release to point at the release
-distribution files.
 
 Update the announcement, if needed, to refer to the release distribution files
 and remove the comments concerning the release candidate. This announcement
@@ -151,9 +167,9 @@ should be sent to the *users* and *dev* mailing lists. It should also be sent
 to the ASF announcement list, which must be done using an ``apache.org`` email
 address.
 
-Finally, update various files after the release:
+Prepare for the next minor release
+==================================
 
-* The ``STATUS`` file for master and for the release branch to include this version.
-
-* The ``CHANGES`` file to have a header for the next version.
-
+Update the version in ``CMakeLists.txt`` by incrementing the minor version
+number.  This should be the first commit of the point release after the release
+tag.

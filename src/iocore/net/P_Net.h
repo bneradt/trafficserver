@@ -88,23 +88,8 @@ extern NetStatsBlock net_rsb;
 #define SSL_HANDSHAKE_WANT_ACCEPT  8
 #define SSL_HANDSHAKE_WANT_CONNECT 9
 
-#include "tscore/ink_platform.h"
-#include "../eventsystem/P_EventSystem.h"
 #include "iocore/net/Net.h"
-#include "P_NetVConnection.h"
-#include "P_UnixNet.h"
-#include "P_UnixNetProcessor.h"
-#include "P_NetAccept.h"
-#include "P_UnixNetVConnection.h"
-#include "P_UnixPollDescriptor.h"
-#include "P_Socks.h"
-#include "P_CompletionUtil.h"
-#include "P_NetVCTest.h"
 
 static constexpr ts::ModuleVersion NET_SYSTEM_MODULE_INTERNAL_VERSION(NET_SYSTEM_MODULE_PUBLIC_VERSION, ts::ModuleVersion::PRIVATE);
 
 #define NetDbg(dbg_ctl, fmt, ...) Dbg(dbg_ctl, fmt, ##__VA_ARGS__)
-
-/// Default amount of buffer space to use for the initial read on an incoming connection.
-/// This is an IOBufferBlock index, not the size in bytes.
-static size_t const CLIENT_CONNECTION_FIRST_READ_BUFFER_SIZE_INDEX = BUFFER_SIZE_INDEX_4K;

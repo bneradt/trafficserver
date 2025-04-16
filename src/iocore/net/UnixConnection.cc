@@ -25,14 +25,11 @@
   Connections
 
 **************************************************************************/
-#include "P_Net.h"
+#include "P_Connection.h"
 #include "tscore/ink_defs.h"
 #include "tscore/ink_sock.h"
 
 #define SET_NO_LINGER
-// set in the OS
-// #define RECV_BUF_SIZE            (1024*64)
-// #define SEND_BUF_SIZE            (1024*64)
 #define FIRST_RANDOM_PORT 16000
 #define LAST_RANDOM_PORT  32000
 
@@ -99,9 +96,8 @@ template <typename T> struct cleaner {
     @c nullptr which meant that the defaults had to be encoded in any
     methods that used it as well as the @c NetVCOptions
     constructor. Now they are controlled only in the latter and not in
-    any of the methods. This makes handling global default values
-    (such as @c RECV_BUF_SIZE) more robust. It doesn't have to be
-    checked in the method, only in the @c NetVCOptions constructor.
+    any of the methods. It doesn't have to be checked in the method,
+    only in the @c NetVCOptions constructor.
 
     The methods are simpler because they never have to check for the
     presence of the options, yet the clients aren't inconvenienced
@@ -114,9 +110,8 @@ NetVCOptions const Connection::DEFAULT_OPTIONS;
 int
 Connection::open(NetVCOptions const &opt)
 {
-  ink_assert(fd == NO_FD);
+  ink_assert(!sock.is_ok());
 
-  int        res = 0; // temp result
   IpEndpoint local_addr;
   sock_type = NetVCOptions::USE_UDP == opt.ip_proto ? SOCK_DGRAM : SOCK_STREAM;
   int family;
@@ -141,25 +136,24 @@ Connection::open(NetVCOptions const &opt)
     local_addr.network_order_port() = htons(opt.local_port);
   }
 
-  res = SocketManager::socket(family, sock_type, 0);
-  if (-1 == res) {
+  sock = UnixSocket{family, sock_type, 0};
+  if (!sock.is_ok()) {
     return -errno;
   }
 
-  fd = res;
   // mark fd for close until we succeed.
   cleaner<Connection> cleanup(this, &Connection::_cleanup);
 
   // Try setting the various socket options, if requested.
 
-  if (-1 == setsockopt_on(fd, SOL_SOCKET, SO_REUSEADDR)) {
+  if (-1 == sock.enable_option(SOL_SOCKET, SO_REUSEADDR)) {
     return -errno;
   }
 
   if (NetVCOptions::FOREIGN_ADDR == opt.addr_binding) {
     static char const *const DEBUG_TEXT = "::open setsockopt() IP_TRANSPARENT";
 #if TS_USE_TPROXY
-    if (-1 == setsockopt_on(fd, SOL_IP, TS_IP_TRANSPARENT)) {
+    if (-1 == sock.enable_option(SOL_IP, TS_IP_TRANSPARENT)) {
       Dbg(dbg_ctl_socket, "%s - fail %d:%s", DEBUG_TEXT, errno, strerror(errno));
       return -errno;
     } else {
@@ -170,25 +164,25 @@ Connection::open(NetVCOptions const &opt)
 #endif
   }
 
-  if (!opt.f_blocking_connect && -1 == safe_nonblocking(fd)) {
+  if (!opt.f_blocking_connect && -1 == sock.set_nonblocking()) {
     return -errno;
   }
 
   if (opt.socket_recv_bufsize > 0) {
-    if (SocketManager::set_rcvbuf_size(fd, opt.socket_recv_bufsize)) {
+    if (sock.set_rcvbuf_size(opt.socket_recv_bufsize)) {
       // Round down until success
       int rbufsz = ROUNDUP(opt.socket_recv_bufsize, 1024);
-      while (rbufsz && !SocketManager::set_rcvbuf_size(fd, rbufsz)) {
+      while (rbufsz && !sock.set_rcvbuf_size(rbufsz)) {
         rbufsz -= 1024;
       }
       Dbg(dbg_ctl_socket, "::open: recv_bufsize = %d of %d", rbufsz, opt.socket_recv_bufsize);
     }
   }
   if (opt.socket_send_bufsize > 0) {
-    if (SocketManager::set_sndbuf_size(fd, opt.socket_send_bufsize)) {
+    if (sock.set_sndbuf_size(opt.socket_send_bufsize)) {
       // Round down until success
       int sbufsz = ROUNDUP(opt.socket_send_bufsize, 1024);
-      while (sbufsz && !SocketManager::set_sndbuf_size(fd, sbufsz)) {
+      while (sbufsz && !sock.set_sndbuf_size(sbufsz)) {
         sbufsz -= 1024;
       }
       Dbg(dbg_ctl_socket, "::open: send_bufsize = %d of %d", sbufsz, opt.socket_send_bufsize);
@@ -199,7 +193,7 @@ Connection::open(NetVCOptions const &opt)
   apply_options(opt);
 
   if (local_addr.network_order_port() || !is_any_address) {
-    if (-1 == SocketManager::ink_bind(fd, &local_addr.sa, ats_ip_size(&local_addr.sa))) {
+    if (-1 == sock.bind(&local_addr.sa, ats_ip_size(&local_addr.sa))) {
       return -errno;
     }
   }
@@ -212,7 +206,7 @@ Connection::open(NetVCOptions const &opt)
 int
 Connection::connect(sockaddr const *target, NetVCOptions const &opt)
 {
-  ink_assert(fd != NO_FD);
+  ink_assert(sock.is_ok());
   ink_assert(is_bound);
   ink_assert(!is_connected);
 
@@ -233,7 +227,7 @@ Connection::connect(sockaddr const *target, NetVCOptions const &opt)
     errno = EINPROGRESS;
     res   = -1;
   } else {
-    res = ::connect(fd, &this->addr.sa, ats_ip_size(&this->addr.sa));
+    res = sock.connect(&this->addr.sa, ats_ip_size(&this->addr.sa));
   }
 
   // It's only really an error if either the connect was blocking
@@ -244,11 +238,11 @@ Connection::connect(sockaddr const *target, NetVCOptions const &opt)
   if (-1 == res && (opt.f_blocking_connect || !(EINPROGRESS == errno || EWOULDBLOCK == errno))) {
     return -errno;
   } else if (opt.f_blocking_connect && !opt.f_blocking) {
-    if (-1 == safe_nonblocking(fd)) {
+    if (-1 == sock.set_nonblocking()) {
       return -errno;
     }
   } else if (!opt.f_blocking_connect && opt.f_blocking) {
-    if (-1 == safe_blocking(fd)) {
+    if (-1 == safe_blocking(sock.get_fd())) {
       return -errno;
     }
   }
@@ -274,24 +268,24 @@ Connection::apply_options(NetVCOptions const &opt)
   // ignore other changes
   if (SOCK_STREAM == sock_type) {
     if (opt.sockopt_flags & NetVCOptions::SOCK_OPT_NO_DELAY) {
-      setsockopt_on(fd, IPPROTO_TCP, TCP_NODELAY);
+      sock.enable_option(IPPROTO_TCP, TCP_NODELAY);
       Dbg(dbg_ctl_socket, "::open: setsockopt() TCP_NODELAY on socket");
     }
     if (opt.sockopt_flags & NetVCOptions::SOCK_OPT_KEEP_ALIVE) {
-      setsockopt_on(fd, SOL_SOCKET, SO_KEEPALIVE);
+      sock.enable_option(SOL_SOCKET, SO_KEEPALIVE);
       Dbg(dbg_ctl_socket, "::open: setsockopt() SO_KEEPALIVE on socket");
     }
     if (opt.sockopt_flags & NetVCOptions::SOCK_OPT_LINGER_ON) {
       struct linger l;
       l.l_onoff  = 1;
       l.l_linger = 0;
-      safe_setsockopt(fd, SOL_SOCKET, SO_LINGER, reinterpret_cast<char *>(&l), sizeof(l));
+      safe_setsockopt(sock.get_fd(), SOL_SOCKET, SO_LINGER, reinterpret_cast<char *>(&l), sizeof(l));
       Dbg(dbg_ctl_socket, "::open:: setsockopt() turn on SO_LINGER on socket");
     }
 #ifdef TCP_NOTSENT_LOWAT
     if (opt.sockopt_flags & NetVCOptions::SOCK_OPT_TCP_NOTSENT_LOWAT) {
       uint32_t lowat = opt.packet_notsent_lowat;
-      safe_setsockopt(fd, IPPROTO_TCP, TCP_NOTSENT_LOWAT, reinterpret_cast<char *>(&lowat), sizeof(lowat));
+      safe_setsockopt(sock.get_fd(), IPPROTO_TCP, TCP_NOTSENT_LOWAT, reinterpret_cast<char *>(&lowat), sizeof(lowat));
       Dbg(dbg_ctl_socket, "::open:: setsockopt() set TCP_NOTSENT_LOWAT to %d", lowat);
     }
 #endif
@@ -300,7 +294,7 @@ Connection::apply_options(NetVCOptions const &opt)
 #if TS_HAS_SO_MARK
   if (opt.sockopt_flags & NetVCOptions::SOCK_OPT_PACKET_MARK) {
     uint32_t mark = opt.packet_mark;
-    safe_setsockopt(fd, SOL_SOCKET, SO_MARK, reinterpret_cast<char *>(&mark), sizeof(uint32_t));
+    safe_setsockopt(sock.get_fd(), SOL_SOCKET, SO_MARK, reinterpret_cast<char *>(&mark), sizeof(uint32_t));
   }
 #endif
 
@@ -308,9 +302,9 @@ Connection::apply_options(NetVCOptions const &opt)
   if (opt.sockopt_flags & NetVCOptions::SOCK_OPT_PACKET_TOS) {
     uint32_t tos = opt.packet_tos;
     if (addr.isIp4()) {
-      safe_setsockopt(fd, IPPROTO_IP, IP_TOS, reinterpret_cast<char *>(&tos), sizeof(uint32_t));
+      safe_setsockopt(sock.get_fd(), IPPROTO_IP, IP_TOS, reinterpret_cast<char *>(&tos), sizeof(uint32_t));
     } else if (addr.isIp6()) {
-      safe_setsockopt(fd, IPPROTO_IPV6, IPV6_TCLASS, reinterpret_cast<char *>(&tos), sizeof(uint32_t));
+      safe_setsockopt(sock.get_fd(), IPPROTO_IPV6, IPV6_TCLASS, reinterpret_cast<char *>(&tos), sizeof(uint32_t));
     }
   }
 #endif

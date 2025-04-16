@@ -23,9 +23,8 @@
 
 #pragma once
 
+#include "iocore/aio/AIO.h"
 #include "iocore/cache/Cache.h"
-
-#include "../aio/P_AIO.h"
 
 extern int cache_config_max_disk_errors;
 
@@ -36,7 +35,7 @@ extern int cache_config_max_disk_errors;
 
 #define DISK_HEADER_MAGIC 0xABCD1237
 
-/* each disk vol block has a corresponding Stripe object */
+/* each disk vol block has a corresponding StripeSM object */
 struct CacheDisk;
 
 struct DiskStripeBlock {
@@ -74,24 +73,24 @@ struct DiskHeader {
 };
 
 struct CacheDisk : public Continuation {
-  DiskHeader         *header     = nullptr;
-  char               *path       = nullptr;
-  int                 header_len = 0;
-  AIOCallbackInternal io;
-  off_t               len               = 0; // in blocks (STORE_BLOCK)
-  off_t               start             = 0;
-  off_t               skip              = 0;
-  off_t               num_usable_blocks = 0;
-  int                 hw_sector_size    = 0;
-  int                 fd                = -1;
-  off_t               free_space        = 0;
-  off_t               wasted_space      = 0;
-  DiskStripe        **disk_stripes      = nullptr;
-  DiskStripe         *free_blocks       = nullptr;
-  int                 num_errors        = 0;
-  int                 cleared           = 0;
-  bool                read_only_p       = false;
-  bool online = true; /* flag marking cache disk online or offline (because of too many failures or by the operator). */
+  DiskHeader  *header     = nullptr;
+  char        *path       = nullptr;
+  int          header_len = 0;
+  AIOCallback  io;
+  off_t        len               = 0; // in blocks (STORE_BLOCK)
+  off_t        start             = 0;
+  off_t        skip              = 0;
+  off_t        num_usable_blocks = 0;
+  int          hw_sector_size    = 0;
+  int          fd                = -1;
+  off_t        free_space        = 0;
+  off_t        wasted_space      = 0;
+  DiskStripe **disk_stripes      = nullptr;
+  DiskStripe  *free_blocks       = nullptr;
+  int          num_errors        = 0;
+  int          cleared           = 0;
+  bool         read_only_p       = false;
+  bool         online = true; /* flag marking cache disk online or offline (because of too many failures or by the operator). */
 
   // Extra configuration values
   int            forced_volume_num = -1; ///< Volume number for this disk.

@@ -23,9 +23,12 @@
 
 #pragma once
 
-#include "iocore/cache/Cache.h"
-
 // Generic Ram Cache interface
+
+#include "iocore/eventsystem/IOBuffer.h"
+#include "tscore/CryptoHash.h"
+
+class StripeSM;
 
 class RamCache
 {
@@ -36,7 +39,7 @@ public:
   virtual int     fixup(const CryptoHash *key, uint64_t old_auxkey, uint64_t new_auxkey)                         = 0;
   virtual int64_t size() const                                                                                   = 0;
 
-  virtual void init(int64_t max_bytes, Stripe *stripe) = 0;
+  virtual void init(int64_t max_bytes, StripeSM *stripe) = 0;
   virtual ~RamCache(){};
 };
 

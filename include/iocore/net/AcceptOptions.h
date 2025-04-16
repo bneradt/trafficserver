@@ -26,8 +26,6 @@
 
 #include "tscore/ink_inet.h"
 
-#include "iocore/eventsystem/Event.h"
-
 struct AcceptOptions {
   using self = AcceptOptions; ///< Self reference type.
 
@@ -37,6 +35,7 @@ struct AcceptOptions {
   /// Local address to bind for accept.
   /// If not set -> any address.
   IpAddr local_ip;
+  UnAddr local_path;
   /// IP address family.
   /// @note Ignored if an explicit incoming address is set in the
   /// the configuration (@c local_ip). If neither is set IPv4 is used.

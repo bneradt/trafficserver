@@ -21,11 +21,19 @@
   limitations under the License.
  */
 
+#include "P_SSLUtils.h"
 #include "P_QUICNetVConnection.h"
 #include "P_QUICPacketHandler.h"
+#include "P_UnixNet.h"
+#include "api/APIHook.h"
+#include "iocore/eventsystem/EThread.h"
 #include "iocore/net/QUICMultiCertConfigLoader.h"
+#include "iocore/net/UDPPacket.h"
+#include "iocore/net/quic/QUICEvents.h"
 #include "iocore/net/quic/QUICStream.h"
 #include "iocore/net/quic/QUICGlobals.h"
+#include "iocore/net/SSLAPIHooks.h"
+#include "tscore/ink_config.h"
 
 #include <netinet/in.h>
 #include <quiche.h>
@@ -48,6 +56,7 @@ QUICNetVConnection::QUICNetVConnection()
 {
   this->_set_service(static_cast<ALPNSupport *>(this));
   this->_set_service(static_cast<TLSBasicSupport *>(this));
+  this->_set_service(static_cast<TLSEventSupport *>(this));
   this->_set_service(static_cast<TLSCertSwitchSupport *>(this));
   this->_set_service(static_cast<TLSSNISupport *>(this));
   this->_set_service(static_cast<TLSSessionResumptionSupport *>(this));
@@ -141,6 +150,7 @@ QUICNetVConnection::free_thread(EThread * /* t ATS_UNUSED */)
   super::clear();
   ALPNSupport::clear();
   TLSBasicSupport::clear();
+  TLSEventSupport::clear();
   TLSCertSwitchSupport::_clear();
 
   this->_packet_handler->close_connection(this);
@@ -395,7 +405,7 @@ QUICNetVConnection::handle_received_packet(UDPPacket *packet)
 {
   size_t   buf_len{0};
   uint8_t *buf = packet->get_entire_chain_buffer(&buf_len);
-  net_activity(this, this_ethread());
+  this->netActivity();
   quiche_recv_info recv_info = {
     &packet->from.sa,
     static_cast<socklen_t>(packet->from.isIp4() ? sizeof(packet->from.sin) : sizeof(packet->from.sin6)),
@@ -516,7 +526,7 @@ QUICNetVConnection::is_handshake_completed() const
 }
 
 void
-QUICNetVConnection::net_read_io(NetHandler * /* nh ATS_UNUSED */, EThread * /* lthread ATS_UNUSED */)
+QUICNetVConnection::net_read_io(NetHandler * /* nh ATS_UNUSED */)
 {
   SCOPED_MUTEX_LOCK(lock, this->mutex, this_ethread());
   this->handleEvent(QUIC_EVENT_PACKET_READ_READY, nullptr);
@@ -539,6 +549,7 @@ void
 QUICNetVConnection::_bindSSLObject()
 {
   TLSBasicSupport::bind(this->_ssl, this);
+  TLSEventSupport::bind(this->_ssl, this);
   ALPNSupport::bind(this->_ssl, this);
   TLSSessionResumptionSupport::bind(this->_ssl, this);
   TLSSNISupport::bind(this->_ssl, this);
@@ -550,6 +561,7 @@ void
 QUICNetVConnection::_unbindSSLObject()
 {
   TLSBasicSupport::unbind(this->_ssl);
+  TLSEventSupport::unbind(this->_ssl);
   ALPNSupport::unbind(this->_ssl);
   TLSSessionResumptionSupport::unbind(this->_ssl);
   TLSSNISupport::unbind(this->_ssl);
@@ -706,7 +718,7 @@ QUICNetVConnection::_handle_write_ready()
       segment_size = max_udp_payload_size;
     }
     this->_packet_handler->send_packet(this->_udp_con, this->con.addr, udp_payload, segment_size, &send_at_hint);
-    net_activity(this, this_ethread());
+    this->netActivity();
   }
 }
 
@@ -754,22 +766,38 @@ QUICNetVConnection::protocol_contains(std::string_view prefix) const
   return retval;
 }
 
-const char *
-QUICNetVConnection::get_server_name() const
-{
-  return get_sni_server_name();
-}
-
-bool
-QUICNetVConnection::support_sni() const
-{
-  return true;
-}
-
 QUICConnection *
 QUICNetVConnection::get_quic_connection()
 {
   return static_cast<QUICConnection *>(this);
+}
+
+void
+QUICNetVConnection::reenable(int event)
+{
+  this->_is_verifying_cert = false;
+
+  if (event == TS_EVENT_ERROR) {
+    this->_is_cert_verified = false;
+  }
+}
+
+Continuation *
+QUICNetVConnection::getContinuationForTLSEvents()
+{
+  return this;
+}
+
+EThread *
+QUICNetVConnection::getThreadForTLSEvents()
+{
+  return this->thread;
+}
+
+Ptr<ProxyMutex>
+QUICNetVConnection::getMutexForTLSEvents()
+{
+  return this->nh->mutex;
 }
 
 SSL *
@@ -788,9 +816,36 @@ QUICNetVConnection::_get_tls_curve() const
   }
 }
 
-void
-QUICNetVConnection::_fire_ssl_servername_event()
+int
+QUICNetVConnection::_verify_certificate(X509_STORE_CTX * /* ctx ATS_UNUSED */)
 {
+  TSEvent      eventId;
+  TSHttpHookID hookId;
+  APIHook     *hook = nullptr;
+
+  // TODO Simply call callHooks once QUICNetVC implements TLSEventSupport
+  if (get_context() == NET_VCONNECTION_IN) {
+    eventId = TS_EVENT_SSL_VERIFY_CLIENT;
+    hookId  = TS_SSL_VERIFY_CLIENT_HOOK;
+  } else {
+    eventId = TS_EVENT_SSL_VERIFY_SERVER;
+    hookId  = TS_SSL_VERIFY_SERVER_HOOK;
+  }
+  hook = SSLAPIHooks::instance()->get(TSSslHookInternalID(hookId));
+  if (hook != nullptr) {
+    this->_is_verifying_cert = true;
+    WEAK_SCOPED_MUTEX_LOCK(lock, hook->m_cont->mutex, this_ethread());
+    hook->invoke(eventId, this);
+  }
+
+  // According to the implementation in SSLNetVC,
+  // we can assume that reenable() is called during the event handling.
+  ink_assert(this->_is_verifying_cert == false);
+  if (this->_is_cert_verified) {
+    return 1;
+  }
+
+  return 0;
 }
 
 in_port_t

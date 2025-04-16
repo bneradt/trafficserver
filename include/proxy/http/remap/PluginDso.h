@@ -36,6 +36,7 @@
 #include <vector>
 #include <forward_list>
 #include <ctime>
+#include <atomic>
 
 #include "swoc/IntrusiveDList.h"
 
@@ -49,7 +50,7 @@ namespace fs = swoc::file;
 
 #include "proxy/Plugin.h"
 
-class PluginThreadContext : public RefCountObj
+class PluginThreadContext : public RefCountObjInHeap
 {
 public:
   virtual void                       acquire() = 0;
@@ -100,10 +101,10 @@ public:
 
   void incInstanceCount();
   void decInstanceCount();
-  int  instanceCount();
+  int  instanceCount() const;
   bool isDynamicReloadEnabled() const;
 
-  class LoadedPlugins : public RefCountObj
+  class LoadedPlugins : public RefCountObjInHeap
   {
   public:
     LoadedPlugins() : _mutex(new_ProxyMutex()) {}
@@ -169,11 +170,8 @@ protected:
   static constexpr const char *const _tag = "plugin_dso"; /** @brief log tag used by this class */
   static const DbgCtl               &_dbg_ctl();
   swoc::file::file_time_type _mtime{fs::file_time_type::min()}; /* @brief modification time of the DSO's file, used for checking */
-  bool                       _preventiveCleaning = true;
-
-  static Ptr<LoadedPlugins>
-              _plugins; /** @brief a global list of plugins, usually maintained by a plugin factory or plugin instance itself */
-  RefCountObj _instanceCount; /** @brief used for properly calling "done" and "indicate config reload" methods by the factory */
+  static Ptr<LoadedPlugins>  _plugins;                          /** @brief a global list of plugins */
+  std::atomic<int>           _instanceCount{0}; /** @brief used for properly calling "done" and "indicate config reload" */
 };
 
 inline const DbgCtl &

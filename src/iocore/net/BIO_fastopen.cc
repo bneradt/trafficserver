@@ -21,22 +21,15 @@
  *  limitations under the License.
  */
 
-#include <openssl/opensslv.h>
-
+#include "BIO_fastopen.h"
 #include "P_Net.h"
-#include "iocore/eventsystem/SocketManager.h"
+#include "iocore/eventsystem/UnixSocket.h"
 #include "tscore/ink_assert.h"
 #include "tscore/ink_config.h"
-
-#include "BIO_fastopen.h"
-
-#if defined(BORINGLIKE)
-#error
-#elif defined(OPENSSL_IS_BORINGSSL) || defined(OPENSSL_IS_AWSLC)
-#define BORINGLIKE 1
-#else
-#define BORINGLIKE 0
-#endif
+#include "tscore/ink_inet.h"
+#include "tscore/ink_ssl.h" // IWYU pragma: keep - This header is needed to provide back-ups for BIO_meth_get_*
+#include <openssl/bio.h>
+#include <openssl/opensslv.h>
 
 namespace
 {
@@ -61,7 +54,7 @@ public:
   }
 
 private:
-#if BORINGLIKE
+#if HAVE_CRYPTO_EX_UNUSED
   static constexpr CRYPTO_EX_unused *_new{nullptr};
 #else
   static void
@@ -71,7 +64,7 @@ private:
   }
 #endif
 
-#if BORINGLIKE
+#if !HAVE_CRYPTO_SET_EX_DATA
   static void
   _free(void * /* parent */, void * /* ptr */, CRYPTO_EX_DATA * /* ad */, int /* idx_ */, long /* argl */, void * /* argp */)
   {
@@ -84,7 +77,7 @@ private:
   }
 #endif
 
-#if BORINGLIKE || (OPENSSL_VERSION_MAJOR >= 3)
+#if HAVE_CRYPTO_EX_DUP_TYPE1
   using _Type_from_d = void **;
 #else
   using _Type_from_d = void *;
@@ -214,8 +207,9 @@ fastopen_bwrite(BIO *bio, const char *in, int insz)
 
   errno = 0;
   BIO_clear_retry_flags(bio);
-  int fd = BIO_get_fd(bio, nullptr);
-  ink_assert(fd != NO_FD);
+  int        fd = BIO_get_fd(bio, nullptr);
+  UnixSocket sock{fd};
+  ink_assert(sock.is_ok());
 
   void *dst_void = get_dest_addr_for_bio(bio);
   if (dst_void) {
@@ -225,14 +219,14 @@ fastopen_bwrite(BIO *bio, const char *in, int insz)
     // RFC 7413. If we get EINPROGRESS it means that the SYN has been
     // sent without data and we should retry.
     Metrics::Counter::increment(net_rsb.fastopen_attempts);
-    err = SocketManager::sendto(fd, (void *)in, insz, MSG_FASTOPEN, dst, ats_ip_size(dst));
+    err = sock.sendto(in, insz, MSG_FASTOPEN, dst, ats_ip_size(dst));
     if (err >= 0) {
       Metrics::Counter::increment(net_rsb.fastopen_successes);
     }
 
     set_dest_addr_for_bio(bio, nullptr);
   } else {
-    err = SocketManager::write(fd, (void *)in, insz);
+    err = sock.write(in, insz);
   }
 
   if (err < 0) {
@@ -252,12 +246,13 @@ fastopen_bread(BIO *bio, char *out, int outsz)
 
   errno = 0;
   BIO_clear_retry_flags(bio);
-  int fd = BIO_get_fd(bio, nullptr);
-  ink_assert(fd != NO_FD);
+  int        fd = BIO_get_fd(bio, nullptr);
+  UnixSocket sock{fd};
+  ink_assert(sock.is_ok());
 
   // TODO: If we haven't done the fastopen, ink_abort().
 
-  err = SocketManager::read(fd, out, outsz);
+  err = sock.read(out, outsz);
   if (err < 0) {
     errno = -err;
     if (BIO_sock_non_fatal_error(errno)) {

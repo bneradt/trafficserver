@@ -30,10 +30,10 @@
 
  ****************************************************************************/
 
+#include "iocore/aio/AIO.h"
+#include "iocore/cache/Store.h"
 #include "tscore/TSSystemState.h"
 #include "tscore/Version.h"
-#include "swoc/swoc_file.h"
-
 #include "tscore/ink_platform.h"
 #include "tscore/ink_sys_control.h"
 #include "tscore/ink_args.h"
@@ -44,8 +44,10 @@
 #include "tscore/hugepages.h"
 #include "tscore/runroot.h"
 #include "tscore/Filenames.h"
+#include "../iocore/net/P_Socks.h"
 
 #include "ts/ts.h" // This is sadly needed because of us using TSThreadInit() for some reason.
+#include "swoc/swoc_file.h"
 
 #include <syslog.h>
 #include <algorithm>
@@ -75,10 +77,11 @@ extern "C" int plock(int);
 #include "../iocore/net/P_QUICNetProcessor.h"
 #endif
 #include "../iocore/net/P_UDPNet.h"
-#include "../iocore/dns/P_DNS.h"
-#include "../iocore/dns/P_SplitDNS.h"
+#include "../iocore/net/P_UnixNet.h"
+#include "../iocore/net/P_SSLUtils.h"
+#include "../iocore/dns/P_SplitDNSProcessor.h"
 #include "../iocore/hostdb/P_HostDB.h"
-#include "../iocore/cache/P_Cache.h"
+#include "../records/P_RecCore.h"
 #include "tscore/Layout.h"
 #include "iocore/utils/Machine.h"
 #include "records/RecordsConfig.h"
@@ -155,7 +158,7 @@ void        load_ssl_file_callback(const char *ssl_file);
 void        task_threads_started_callback();
 static void check_max_records_argument(const ArgumentDescription *arg, unsigned int nargs, const char *val);
 
-int num_of_net_threads = ink_number_of_processors();
+int num_of_net_threads = 0;
 int num_accept_threads = 0;
 
 int num_of_udp_threads = 0;
@@ -1593,8 +1596,8 @@ struct RegressionCont : public Continuation {
 
     TSSystemState::shut_down_event_system();
     fprintf(stderr, "REGRESSION_TEST DONE: %s\n", regression_status_string(res));
-    ::exit(res == REGRESSION_TEST_PASSED ? 0 : 1);
-    return EVENT_CONT;
+
+    return EVENT_DONE;
   }
 
   RegressionCont() : Continuation(new_ProxyMutex()) { SET_HANDLER(&RegressionCont::mainEvent); }
@@ -1637,8 +1640,8 @@ adjust_num_of_net_threads(int nthreads)
 
   REC_ReadConfigInteger(nth_auto_config, "proxy.config.exec_thread.autoconfig.enabled");
 
-  Dbg(dbg_ctl_threads, "initial number of net threads is %d", nthreads);
-  Dbg(dbg_ctl_threads, "net threads auto-configuration %s", nth_auto_config ? "enabled" : "disabled");
+  Dbg(dbg_ctl_threads, "initial number of net threads: %d", nthreads);
+  Dbg(dbg_ctl_threads, "net threads auto-configuration: %s", nth_auto_config ? "enabled" : "disabled");
 
   if (!nth_auto_config) {
     REC_ReadConfigInteger(num_of_threads_tmp, "proxy.config.exec_thread.limit");
@@ -1669,7 +1672,7 @@ adjust_num_of_net_threads(int nthreads)
     nthreads = 1;
   }
 
-  Dbg(dbg_ctl_threads, "adjusted number of net threads is %d", nthreads);
+  Dbg(dbg_ctl_threads, "adjusted number of net threads: %d", nthreads);
   return nthreads;
 }
 
@@ -1791,7 +1794,6 @@ configure_io_uring()
 //
 // Main
 //
-
 int
 main(int /* argc ATS_UNUSED */, const char **argv)
 {
@@ -1940,6 +1942,9 @@ main(int /* argc ATS_UNUSED */, const char **argv)
     signal_register_crash_handler(crash_logger_invoke);
   }
 
+  // Clean out any remnant temporary plugin (UUID named) directories.
+  PluginFactory::cleanup();
+
 #if TS_USE_POSIX_CAP
   // Change the user of the process.
   // Do this before we start threads so we control the user id of the
@@ -2008,9 +2013,11 @@ main(int /* argc ATS_UNUSED */, const char **argv)
   extern int gSystemClock; // 0 == CLOCK_REALTIME, the default
   REC_ReadConfigInteger(gSystemClock, "proxy.config.system_clock");
 
-  // JSONRPC server and handlers
-  if (auto &&[ok, msg] = initialize_jsonrpc_server(); !ok) {
-    Warning("JSONRPC server could not be started.\n  Why?: '%s' ... Continuing without it.", msg.c_str());
+  if (!command_flag) { // No need if we are going into command mode.
+    // JSONRPC server and handlers
+    if (auto &&[ok, msg] = initialize_jsonrpc_server(); !ok) {
+      Warning("JSONRPC server could not be started.\n  Why?: '%s' ... Continuing without it.", msg.c_str());
+    }
   }
 
   // setup callback for tracking remap included files
@@ -2073,6 +2080,8 @@ main(int /* argc ATS_UNUSED */, const char **argv)
   SET_INTERVAL(RecProcess, "proxy.config.raw_stat_sync_interval_ms", raw_stat_sync_interval_ms);
   SET_INTERVAL(RecProcess, "proxy.config.remote_sync_interval_ms", remote_sync_interval_ms);
 
+  num_of_net_threads = ink_number_of_processors();
+  Dbg(dbg_ctl_threads, "number of processors: %d", num_of_net_threads);
   num_of_net_threads = adjust_num_of_net_threads(num_of_net_threads);
 
   size_t stacksize;
@@ -2152,6 +2161,7 @@ main(int /* argc ATS_UNUSED */, const char **argv)
   if (p) {
     // Translate string to IpAddr
     set_debug_ip(p);
+    ats_free(p);
   }
   REC_RegisterConfigUpdateFunc("proxy.config.diags.debug.client_ip", update_debug_client_ip, nullptr);
 
@@ -2357,6 +2367,14 @@ main(int /* argc ATS_UNUSED */, const char **argv)
   }
 
   delete main_thread;
+
+#if TS_HAS_TESTS
+  if (RegressionTest::check_status(regression_level) == REGRESSION_TEST_PASSED) {
+    std::exit(0);
+  } else {
+    std::exit(1);
+  }
+#endif
 }
 
 namespace

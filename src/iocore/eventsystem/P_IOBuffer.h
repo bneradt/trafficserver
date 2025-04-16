@@ -23,7 +23,9 @@
 
 #pragma once
 
-#include "tscore/ink_platform.h"
+#include "iocore/eventsystem/IOBuffer.h"
+#include "iocore/eventsystem/Thread.h"
+#include "tscore/ink_memory.h"
 #include "tscore/ink_resource.h"
 
 // TODO: I think we're overly aggressive here on making MIOBuffer 64-bit
@@ -204,7 +206,7 @@ new_IOBufferData_internal(const char *location, void *b, int64_t size, int64_t a
   d->_size_index  = asize_index;
   ink_assert(BUFFER_SIZE_INDEX_IS_CONSTANT(asize_index) || size <= d->block_size());
   d->_location = location;
-  d->_data     = (char *)b;
+  d->_data     = static_cast<char *>(b);
   return d;
 }
 
@@ -239,18 +241,18 @@ IOBufferData::alloc(int64_t size_index, AllocType type)
   switch (type) {
   case MEMALIGNED:
     if (BUFFER_SIZE_INDEX_IS_FAST_ALLOCATED(size_index)) {
-      _data = (char *)ioBufAllocator[size_index].alloc_void();
+      _data = static_cast<char *>(ioBufAllocator[size_index].alloc_void());
       // coverity[dead_error_condition]
     } else if (BUFFER_SIZE_INDEX_IS_XMALLOCED(size_index)) {
-      _data = (char *)ats_memalign(ats_pagesize(), index_to_buffer_size(size_index));
+      _data = static_cast<char *>(ats_memalign(ats_pagesize(), index_to_buffer_size(size_index)));
     }
     break;
   default:
   case DEFAULT_ALLOC:
     if (BUFFER_SIZE_INDEX_IS_FAST_ALLOCATED(size_index)) {
-      _data = (char *)ioBufAllocator[size_index].alloc_void();
+      _data = static_cast<char *>(ioBufAllocator[size_index].alloc_void());
     } else if (BUFFER_SIZE_INDEX_IS_XMALLOCED(size_index)) {
-      _data = (char *)ats_malloc(BUFFER_SIZE_FOR_XMALLOC(size_index));
+      _data = static_cast<char *>(ats_malloc(BUFFER_SIZE_FOR_XMALLOC(size_index)));
     }
     break;
   }
@@ -267,7 +269,7 @@ IOBufferData::dealloc()
     if (BUFFER_SIZE_INDEX_IS_FAST_ALLOCATED(_size_index)) {
       ioBufAllocator[_size_index].free_void(_data);
     } else if (BUFFER_SIZE_INDEX_IS_XMALLOCED(_size_index)) {
-      ::free((void *)_data);
+      ::free(_data);
     }
     break;
   default:
@@ -404,7 +406,7 @@ TS_INLINE void
 IOBufferBlock::set_internal(void *b, int64_t len, int64_t asize_index)
 {
   data        = new_IOBufferData_internal(_location, BUFFER_SIZE_NOT_ALLOCATED);
-  data->_data = (char *)b;
+  data->_data = static_cast<char *>(b);
   iobuffer_mem_inc(_location, asize_index);
   data->_size_index = asize_index;
   reset();
@@ -489,7 +491,7 @@ IOBufferReader::block_read_avail()
   }
 
   skip_empty_blocks();
-  return (int64_t)(block->end() - (block->start() + start_offset));
+  return static_cast<int64_t>(block->end() - (block->start() + start_offset));
 }
 
 inline std::string_view
@@ -618,28 +620,6 @@ IOBufferReader::reset()
 //
 ////////////////////////////////////////////////////////////////
 extern ClassAllocator<MIOBuffer> ioAllocator;
-////////////////////////////////////////////////////////////////
-//
-//  MIOBuffer::MIOBuffer()
-//
-//  This constructor accepts a pre-allocated memory buffer,
-//  wraps if in a IOBufferData and IOBufferBlock structures
-//  and sets it as the current block.
-//  NOTE that in this case the memory buffer will not be freed
-//  by the MIOBuffer class. It is the user responsibility to
-//  free the memory buffer. The wrappers (MIOBufferBlock and
-//  MIOBufferData) will be freed by this class.
-//
-////////////////////////////////////////////////////////////////
-TS_INLINE
-MIOBuffer::MIOBuffer(void *b, int64_t bufsize, int64_t aWater_mark)
-{
-  _location = nullptr;
-  set(b, bufsize);
-  water_mark = aWater_mark;
-  size_index = BUFFER_SIZE_NOT_ALLOCATED;
-  return;
-}
 
 TS_INLINE
 MIOBuffer::MIOBuffer(int64_t default_size_index)

@@ -21,12 +21,15 @@
   limitations under the License.
  */
 
-#include <tscore/TSSystemState.h>
-#include <tscore/ink_defs.h>
-
-#include "iocore/net/ConnectionTracker.h"
+#include "P_NetAccept.h"
 #include "P_Net.h"
+#include "P_UnixNet.h"
+#include "P_UnixNetVConnection.h"
+#include "iocore/net/ConnectionTracker.h"
+#include "iocore/net/NetHandler.h"
+#include "tscore/TSSystemState.h"
 #include "tscore/ink_inet.h"
+#include "tscore/ink_defs.h"
 
 using NetAcceptHandler = int (NetAccept::*)(int, void *);
 
@@ -72,7 +75,7 @@ handle_max_client_connections(IpEndpoint const &addr, std::shared_ptr<Connection
 static void
 safe_delay(int msec)
 {
-  SocketManager::poll(nullptr, 0, msec);
+  UnixSocket::poll(nullptr, 0, msec);
 }
 
 //
@@ -102,12 +105,12 @@ net_accept(NetAccept *na, void *ep, bool blockable)
       if (res == -EAGAIN || res == -ECONNABORTED || res == -EPIPE) {
         goto Ldone;
       }
-      if (na->server.fd != NO_FD && !na->action_->cancelled) {
+      if (na->server.sock.is_ok() && !na->action_->cancelled) {
         if (!blockable) {
-          na->action_->continuation->handleEvent(EVENT_ERROR, (void *)static_cast<intptr_t>(res));
+          na->action_->continuation->handleEvent(EVENT_ERROR, reinterpret_cast<void *>(res));
         } else {
           SCOPED_MUTEX_LOCK(lock, na->action_->mutex, e->ethread);
-          na->action_->continuation->handleEvent(EVENT_ERROR, (void *)static_cast<intptr_t>(res));
+          na->action_->continuation->handleEvent(EVENT_ERROR, reinterpret_cast<void *>(res));
         }
       }
       count = res;
@@ -202,7 +205,7 @@ NetAccept::init_accept_loop()
   int    i, n;
   char   thr_name[MAX_THREAD_NAME_LENGTH];
   size_t stacksize;
-  if (do_listen(BLOCKING)) {
+  if (do_blocking_listen()) {
     return;
   }
   REC_ReadConfigInteger(stacksize, "proxy.config.thread.default.stacksize");
@@ -242,7 +245,7 @@ NetAccept::init_accept(EThread *t)
     action_->mutex               = t->mutex;
   }
 
-  if (do_listen(NON_BLOCKING)) {
+  if (do_listen()) {
     return;
   }
 
@@ -258,7 +261,12 @@ NetAccept::accept_per_thread(int /* event ATS_UNUSED */, void * /* ep ATS_UNUSED
   REC_ReadConfigInteger(listen_per_thread, "proxy.config.exec_thread.listen");
 
   if (listen_per_thread == 1) {
-    if (do_listen(NON_BLOCKING)) {
+    if (ats_is_unix(server.accept_addr)) {
+      auto id = this_ethread()->id;
+      ats_unix_append_id(&server.accept_addr.sun, id);
+    }
+
+    if (do_listen()) {
       Fatal("[NetAccept::accept_per_thread]:error listenting on ports");
       return -1;
     }
@@ -286,7 +294,7 @@ NetAccept::init_accept_per_thread()
   REC_ReadConfigInteger(listen_per_thread, "proxy.config.exec_thread.listen");
 
   if (listen_per_thread == 0) {
-    if (do_listen(NON_BLOCKING)) {
+    if (do_listen()) {
       Fatal("[NetAccept::accept_per_thread]:error listenting on ports");
       return;
     }
@@ -313,11 +321,24 @@ NetAccept::stop_accept()
 }
 
 int
-NetAccept::do_listen(bool non_blocking)
+NetAccept::do_listen()
+{
+  // non-blocking
+  return this->do_listen_impl(true);
+}
+
+int
+NetAccept::do_blocking_listen()
+{
+  return this->do_listen_impl(false);
+}
+
+int
+NetAccept::do_listen_impl(bool non_blocking)
 {
   int res = 0;
 
-  if (server.fd != NO_FD) {
+  if (server.sock.is_ok()) {
     if ((res = server.setup_fd_for_listen(non_blocking, opt))) {
       Warning("unable to listen on main accept port %d: errno = %d, %s", server.accept_addr.host_order_port(), errno,
               strerror(errno));
@@ -367,7 +388,7 @@ NetAccept::do_blocking_accept(EThread *t)
       default:
         if (!action_->cancelled) {
           SCOPED_MUTEX_LOCK(lock, action_->mutex ? action_->mutex : t->mutex, t);
-          action_->continuation->handleEvent(EVENT_ERROR, (void *)static_cast<intptr_t>(res));
+          action_->continuation->handleEvent(EVENT_ERROR, reinterpret_cast<void *>(res));
           Warning("accept thread received fatal error: errno = %d", errno);
         }
         return -1;
@@ -394,7 +415,7 @@ NetAccept::do_blocking_accept(EThread *t)
     Metrics::Counter::increment(net_rsb.tcp_accept);
 
     // Use 'nullptr' to Bypass thread allocator
-    vc = (UnixNetVConnection *)this->getNetProcessor()->allocate_vc(nullptr);
+    vc = static_cast<UnixNetVConnection *>(this->getNetProcessor()->allocate_vc(nullptr));
     if (unlikely(!vc)) {
       return -1;
     }
@@ -495,12 +516,15 @@ NetAccept::acceptFastEvent(int event, void *ep)
   int                 additional_accepts = NetHandler::get_additional_accepts();
 
   do {
-    socklen_t sz = sizeof(con.addr);
-    int       fd = SocketManager::accept4(server.fd, &con.addr.sa, &sz, SOCK_NONBLOCK | SOCK_CLOEXEC);
-    con.fd       = fd;
+    socklen_t  sz = sizeof(con.addr);
+    UnixSocket sock{-1};
+    if (int res{server.sock.accept4(&con.addr.sa, &sz, SOCK_NONBLOCK | SOCK_CLOEXEC)}; res >= 0) {
+      sock = UnixSocket{res};
+    }
+    con.sock = sock;
     std::shared_ptr<ConnectionTracker::Group> conn_track_group;
 
-    if (likely(fd >= 0)) {
+    if (likely(sock.is_ok())) {
       // check for throttle
       if (check_net_throttle(ACCEPT)) {
         // close the connection as we are in throttle state
@@ -512,13 +536,13 @@ NetAccept::acceptFastEvent(int event, void *ep)
         con.close();
         continue;
       }
-      Dbg(dbg_ctl_iocore_net, "accepted a new socket: %d", fd);
+      Dbg(dbg_ctl_iocore_net, "accepted a new socket: %d", sock.get_fd());
       Metrics::Counter::increment(net_rsb.tcp_accept);
       if (opt.send_bufsize > 0) {
-        if (unlikely(SocketManager::set_sndbuf_size(fd, opt.send_bufsize))) {
+        if (unlikely(sock.set_sndbuf_size(opt.send_bufsize))) {
           bufsz = ROUNDUP(opt.send_bufsize, 1024);
           while (bufsz > 0) {
-            if (!SocketManager::set_sndbuf_size(fd, bufsz)) {
+            if (!sock.set_sndbuf_size(bufsz)) {
               break;
             }
             bufsz -= 1024;
@@ -526,10 +550,10 @@ NetAccept::acceptFastEvent(int event, void *ep)
         }
       }
       if (opt.recv_bufsize > 0) {
-        if (unlikely(SocketManager::set_rcvbuf_size(fd, opt.recv_bufsize))) {
+        if (unlikely(sock.set_rcvbuf_size(opt.recv_bufsize))) {
           bufsz = ROUNDUP(opt.recv_bufsize, 1024);
           while (bufsz > 0) {
-            if (!SocketManager::set_rcvbuf_size(fd, bufsz)) {
+            if (!sock.set_rcvbuf_size(bufsz)) {
               break;
             }
             bufsz -= 1024;
@@ -537,7 +561,7 @@ NetAccept::acceptFastEvent(int event, void *ep)
         }
       }
     } else {
-      res = fd;
+      res = sock.get_fd();
     }
     // check return value from accept()
     if (res < 0) {
@@ -554,12 +578,12 @@ NetAccept::acceptFastEvent(int event, void *ep)
         goto Ldone;
       }
       if (!action_->cancelled) {
-        action_->continuation->handleEvent(EVENT_ERROR, (void *)static_cast<intptr_t>(res));
+        action_->continuation->handleEvent(EVENT_ERROR, reinterpret_cast<void *>(res));
       }
       goto Lerror;
     }
 
-    vc = (UnixNetVConnection *)this->getNetProcessor()->allocate_vc(e->ethread);
+    vc = static_cast<UnixNetVConnection *>(this->getNetProcessor()->allocate_vc(e->ethread));
     ink_release_assert(vc);
     vc->enable_inbound_connection_tracking(conn_track_group);
 

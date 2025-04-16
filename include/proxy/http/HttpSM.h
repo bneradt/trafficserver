@@ -61,7 +61,7 @@
 
 // The default size for http header buffers when we don't
 //   need to include extra space for the document
-static size_t const HTTP_HEADER_BUFFER_SIZE_INDEX = CLIENT_CONNECTION_FIRST_READ_BUFFER_SIZE_INDEX;
+static size_t const HTTP_HEADER_BUFFER_SIZE_INDEX = BUFFER_SIZE_INDEX_4K;
 
 // We want to use a larger buffer size when reading response
 //   headers from the origin server since we want to get
@@ -460,7 +460,6 @@ private:
   HttpTunnelProducer *setup_server_transfer_to_transform();
   HttpTunnelProducer *setup_transfer_from_transform();
   HttpTunnelProducer *setup_cache_transfer_to_transform();
-  HttpTunnelProducer *setup_transfer_from_transform_to_cache_only();
 
   /** Configure consumers for client response transform plugins.
    *

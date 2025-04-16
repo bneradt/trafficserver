@@ -42,16 +42,13 @@ namespace
 void
 print_record_error_list(std::vector<shared::rpc::RecordLookUpResponse::RecordError> const &errors)
 {
-  if (errors.size()) {
+  if (auto iter = std::begin(errors); iter != std::end(errors)) {
     std::cout << "------------ Errors ----------\n";
-    auto iter = std::begin(errors);
-    if (iter != std::end(errors)) {
-      std::cout << *iter;
-    }
+    std::cout << *iter;
     ++iter;
-    for (auto err = iter; err != std::end(errors); ++err) {
+    for (; iter != std::end(errors); ++iter) {
       std::cout << "--\n";
-      std::cout << *err;
+      std::cout << *iter;
     }
   }
 }
@@ -105,18 +102,27 @@ RecordPrinter::write_output(YAML::Node const &result)
 {
   auto const &response = result.as<shared::rpc::RecordLookUpResponse>();
   std::string text;
+  // if yaml is needed
+  RecNameToYaml::RecInfoList recordList;
   for (auto &&recordInfo : response.recordList) {
     if (!recordInfo.registered) {
       std::cout << recordInfo.name
                 << ": Unrecognized configuration value. Record is a configuration name/value but is not registered\n";
       continue;
     }
-    if (!_printAsRecords) {
-      std::cout << recordInfo.name << ": " << recordInfo.currentValue << '\n';
+    if (!is_records_format()) {
+      std::cout << recordInfo.name << ": " << recordInfo.currentValue;
+      if (should_include_default()) {
+        std::cout << " # default " << recordInfo.defaultValue;
+      }
+      std::cout << '\n';
     } else {
-      std::cout << swoc::bwprint(text, "{} {} {} {} # default: {}\n", rec_labelof(recordInfo.rclass), recordInfo.name,
-                                 recordInfo.dataType, recordInfo.currentValue, recordInfo.defaultValue);
+      recordList.push_back(std::make_tuple(recordInfo.name, recordInfo.currentValue, recordInfo.defaultValue));
     }
+  }
+
+  if (is_records_format() && recordList.size() > 0) {
+    std::cout << RecNameToYaml{std::move(recordList), should_include_default()}.string() << '\n';
   }
   // we print errors if found.
   print_record_error_list(response.errorList);
@@ -135,22 +141,28 @@ MetricRecordPrinter::write_output(YAML::Node const &result)
 void
 DiffConfigPrinter::write_output(YAML::Node const &result)
 {
-  std::string text;
   auto        response = result.as<shared::rpc::RecordLookUpResponse>();
+  std::string text;
+
+  // if yaml is needed
+  RecNameToYaml::RecInfoList recordList;
   for (auto &&recordInfo : response.recordList) {
     auto const &currentValue = recordInfo.currentValue;
     auto const &defaultValue = recordInfo.defaultValue;
     const bool  hasChanged   = (currentValue != defaultValue);
     if (hasChanged) {
-      if (!_printAsRecords) {
+      if (!is_records_format()) {
         std::cout << swoc::bwprint(text, "{} has changed\n", recordInfo.name);
         std::cout << swoc::bwprint(text, "\tCurrent Value: {}\n", currentValue);
         std::cout << swoc::bwprint(text, "\tDefault Value: {}\n", defaultValue);
       } else {
-        std::cout << swoc::bwprint(text, "{} {} {} {} # default: {}\n", rec_labelof(recordInfo.rclass), recordInfo.name,
-                                   recordInfo.dataType, recordInfo.currentValue, recordInfo.defaultValue);
+        recordList.push_back(std::make_tuple(recordInfo.name, recordInfo.currentValue, recordInfo.defaultValue));
       }
     }
+  }
+
+  if (is_records_format() && recordList.size() > 0) {
+    std::cout << RecNameToYaml{std::move(recordList), WithDefaults}.string() << '\n';
   }
 }
 //------------------------------------------------------------------------------------------------------------------------------------

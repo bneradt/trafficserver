@@ -45,7 +45,7 @@
 #include "ts/ts.h"
 #include "records/RecCore.h"
 
-#include "../iocore/net/P_Net.h"
+#include "../iocore/net/P_UnixNetVConnection.h"
 #include "records/RecHttp.h"
 
 #include "proxy/http/HttpSM.h"
@@ -200,7 +200,7 @@ static int    synserver_txn_main_handler(TSCont contp, TSEvent event, void *data
 static char *
 get_body_ptr(const char *request)
 {
-  char *ptr = const_cast<char *>(strstr(request, (const char *)"\r\n\r\n"));
+  char *ptr = const_cast<char *>(strstr(request, "\r\n\r\n"));
   return (ptr != nullptr) ? (ptr + 4) : nullptr;
 }
 
@@ -1462,7 +1462,7 @@ client_handler(TSCont contp, TSEvent event, void *data)
     // happen until data arrives on the socket. Because we're just testing the accept()
     // we write a small amount of ignored data to make sure this gets triggered.
     UnixNetVConnection *vc = static_cast<UnixNetVConnection *>(data);
-    ink_release_assert(::write(vc->con.fd, "Bob's your uncle", 16) != 0);
+    ink_release_assert(vc->con.sock.write("Bob's your uncle", 16) != 0);
 
     sleep(1); // XXX this sleep ensures the server end gets the accept event.
 
@@ -8715,8 +8715,8 @@ std::array<std::string_view, TS_CONFIG_LAST_ENTRY> SDK_Overridable_Configs = {
    "proxy.config.body_factory.response_suppression_mode", "proxy.config.http.parent_proxy.enable_parent_timeout_markdowns",
    "proxy.config.http.parent_proxy.disable_parent_markdowns", "proxy.config.net.default_inactivity_timeout",
    "proxy.config.http.no_dns_just_forward_to_parent", "proxy.config.http.cache.ignore_query",
-   "proxy.config.http.drop_chunked_trailers", "proxy.config.http.strict_chunk_parsing",
-   }
+   "proxy.config.http.drop_chunked_trailers", "proxy.config.http.cache.post_method",
+   "proxy.config.http.strict_chunk_parsing", }
 };
 
 extern ClassAllocator<HttpSM> httpSMAllocator;

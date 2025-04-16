@@ -31,6 +31,8 @@
 #include "proxy/logging/LogFormat.h"
 #include "proxy/logging/LogBuffer.h"
 #include "tscore/Encoding.h"
+#include "../private/SSLProxySession.h"
+#include "tscore/ink_inet.h"
 
 char INVALID_STR[] = "!INVALID_STR!";
 
@@ -94,14 +96,17 @@ LogAccess::init()
     m_proxy_response = &(hdr->client_response);
     MIMEField *field = m_proxy_response->field_find(MIME_FIELD_CONTENT_TYPE, MIME_LEN_CONTENT_TYPE);
     if (field) {
-      m_proxy_resp_content_type_str = const_cast<char *>(field->value_get(&m_proxy_resp_content_type_len));
-
+      auto proxy_resp_content_type{field->value_get()};
+      m_proxy_resp_content_type_str = const_cast<char *>(proxy_resp_content_type.data());
+      m_proxy_resp_content_type_len = proxy_resp_content_type.length();
       LogUtils::remove_content_type_attributes(m_proxy_resp_content_type_str, &m_proxy_resp_content_type_len);
     } else {
       // If Content-Type field is missing, check for @Content-Type
       field = m_proxy_response->field_find(HIDDEN_CONTENT_TYPE, HIDDEN_CONTENT_TYPE_LEN);
       if (field) {
-        m_proxy_resp_content_type_str = const_cast<char *>(field->value_get(&m_proxy_resp_content_type_len));
+        auto proxy_resp_content_type{field->value_get()};
+        m_proxy_resp_content_type_str = const_cast<char *>(proxy_resp_content_type.data());
+        m_proxy_resp_content_type_len = proxy_resp_content_type.length();
         LogUtils::remove_content_type_attributes(m_proxy_resp_content_type_str, &m_proxy_resp_content_type_len);
       }
     }
@@ -426,6 +431,12 @@ LogAccess::marshal_ip(char *dest, sockaddr const *ip)
       data._ip6._addr   = ats_ip6_addr_cast(ip);
     }
     len = sizeof(data._ip6);
+  } else if (ats_is_unix(ip)) {
+    if (dest) {
+      data._un._family = AF_UNIX;
+      strncpy(data._un._path, ats_unix_cast(ip)->sun_path, TS_UNIX_SIZE);
+    }
+    len = sizeof(data._un);
   } else {
     data._ip._family = AF_UNSPEC;
   }
@@ -1051,6 +1062,10 @@ LogAccess::unmarshal_ip(char **buf, IpEndpoint *dest)
     LogFieldIp6 *ip6 = static_cast<LogFieldIp6 *>(raw);
     ats_ip6_set(dest, ip6->_addr);
     len = sizeof(*ip6);
+  } else if (AF_UNIX == raw->_family) {
+    LogFieldUn *un = static_cast<LogFieldUn *>(raw);
+    ats_unix_set(dest, un->_path, TS_UNIX_SIZE);
+    len = sizeof(*un);
   } else {
     ats_ip_invalidate(dest);
   }
@@ -1074,7 +1089,7 @@ LogAccess::unmarshal_ip_to_str(char **buf, char *dest, int len)
 
   if (len > 0) {
     unmarshal_ip(buf, &ip);
-    if (!ats_is_ip(&ip)) {
+    if (!ats_is_ip(&ip) && !ats_is_unix(ip)) {
       *dest = '0';
       Dbg(dbg_ctl_log_unmarshal_data, "Invalid IP address");
       return 1;
@@ -1101,7 +1116,7 @@ LogAccess::unmarshal_ip_to_hex(char **buf, char *dest, int len)
 
   if (len > 0) {
     unmarshal_ip(buf, &ip);
-    if (!ats_is_ip(&ip)) {
+    if (!ats_is_ip(&ip) && !ats_is_unix(ip)) {
       *dest = '0';
       Dbg(dbg_ctl_log_unmarshal_data, "Invalid IP address");
       return 1;
@@ -1583,6 +1598,19 @@ LogAccess::marshal_proxy_protocol_dst_ip(char *buf)
     ip = &m_http_sm->t_state.pp_info.dst_addr.sa;
   }
   return marshal_ip(buf, ip);
+}
+
+int
+LogAccess::marshal_proxy_protocol_authority(char *buf)
+{
+  if (buf && m_http_sm) {
+    if (auto authority = m_http_sm->t_state.pp_info.get_tlv(PP2_TYPE_AUTHORITY)) {
+      int len = static_cast<int>(authority->size());
+      marshal_str(buf, authority->data(), len);
+      return len;
+    }
+  }
+  return 0;
 }
 
 /*-------------------------------------------------------------------------
@@ -2902,8 +2930,9 @@ LogAccess::marshal_file_size(char *buf)
     HTTPHdr   *hdr = m_server_response ? m_server_response : m_cache_response;
 
     if (hdr && (fld = hdr->field_find(MIME_FIELD_CONTENT_RANGE, MIME_LEN_CONTENT_RANGE))) {
-      int   len;
-      char *str = const_cast<char *>(fld->value_get(&len));
+      auto  value{fld->value_get()};
+      int   len = value.length();
+      char *str = const_cast<char *>(value.data());
       char *pos = static_cast<char *>(memchr(str, '/', len)); // Find the /
 
       // If the size is not /* (which means unknown) use it as the file_size.
@@ -3092,7 +3121,9 @@ LogAccess::marshal_http_header_field(LogField::Container container, char *field,
       //
       int running_len = 0;
       while (fld) {
-        str = const_cast<char *>(fld->value_get(&actual_len));
+        auto value{fld->value_get()};
+        actual_len = value.length();
+        str        = const_cast<char *>(value.data());
         if (buf) {
           memcpy(buf, str, actual_len);
           buf += actual_len;
@@ -3193,8 +3224,10 @@ LogAccess::marshal_http_header_field_escapify(LogField::Container container, cha
       //
       int running_len = 0;
       while (fld) {
-        str     = const_cast<char *>(fld->value_get(&actual_len));
-        new_str = Encoding::escapify_url(&m_arena, str, actual_len, &new_len);
+        auto value{fld->value_get()};
+        actual_len = value.length();
+        str        = const_cast<char *>(value.data());
+        new_str    = Encoding::escapify_url(&m_arena, str, actual_len, &new_len);
         if (buf) {
           memcpy(buf, new_str, new_len);
           buf += new_len;

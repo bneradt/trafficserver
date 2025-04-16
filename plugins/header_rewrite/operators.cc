@@ -24,11 +24,93 @@
 #include <algorithm>
 #include <iomanip>
 
+#include "records/RecCore.h"
 #include "ts/ts.h"
 #include "swoc/swoc_file.h"
 
 #include "operators.h"
 #include "ts/apidefs.h"
+
+namespace
+{
+const unsigned int LOCAL_IP_ADDRESS = 0x0100007f;
+const unsigned int MAX_SIZE         = 256;
+const int          LOCAL_PORT       = 8080;
+
+int
+handleFetchEvents(TSCont cont, TSEvent event, void *edata)
+{
+  TSHttpTxn http_txn = static_cast<TSHttpTxn>(TSContDataGet(cont));
+
+  switch (static_cast<int>(event)) {
+  case OperatorSetBodyFrom::TS_EVENT_FETCHSM_SUCCESS: {
+    TSHttpTxn   fetchsm_txn = static_cast<TSHttpTxn>(edata);
+    int         data_len;
+    const char *data_start = TSFetchRespGet(fetchsm_txn, &data_len);
+    if (data_start && (data_len > 0)) {
+      const char  *data_end = data_start + data_len;
+      TSHttpParser parser   = TSHttpParserCreate();
+      TSMBuffer    hdr_buf  = TSMBufferCreate();
+      TSMLoc       hdr_loc  = TSHttpHdrCreate(hdr_buf);
+      TSHttpHdrTypeSet(hdr_buf, hdr_loc, TS_HTTP_TYPE_RESPONSE);
+      if (TSHttpHdrParseResp(parser, hdr_buf, hdr_loc, &data_start, data_end) == TS_PARSE_DONE) {
+        TSHttpTxnErrorBodySet(http_txn, TSstrdup(data_start), (data_end - data_start), nullptr);
+      } else {
+        TSWarning("[%s] Unable to parse set-custom-body fetch response", __FUNCTION__);
+      }
+      TSHttpParserDestroy(parser);
+      TSHandleMLocRelease(hdr_buf, nullptr, hdr_loc);
+      TSMBufferDestroy(hdr_buf);
+    } else {
+      TSWarning("[%s] Successful set-custom-body fetch did not result in any content", __FUNCTION__);
+    }
+    TSHttpTxnReenable(http_txn, TS_EVENT_HTTP_ERROR);
+  } break;
+  case OperatorSetBodyFrom::TS_EVENT_FETCHSM_FAILURE: {
+    Dbg(pi_dbg_ctl, "OperatorSetBodyFrom: Error getting custom body");
+    TSHttpTxnReenable(http_txn, TS_EVENT_HTTP_CONTINUE);
+  } break;
+  case OperatorSetBodyFrom::TS_EVENT_FETCHSM_TIMEOUT: {
+    Dbg(pi_dbg_ctl, "OperatorSetBodyFrom: Timeout getting custom body");
+    TSHttpTxnReenable(http_txn, TS_EVENT_HTTP_CONTINUE);
+  } break;
+  case TS_EVENT_HTTP_TXN_CLOSE: {
+    TSContDestroy(cont);
+    TSHttpTxnReenable(http_txn, TS_EVENT_HTTP_CONTINUE);
+  } break;
+  default:
+    TSError("[%s] handleFetchEvents got unknown event: %d", PLUGIN_NAME, event);
+    break;
+  }
+  return 0;
+}
+
+TSReturnCode
+createRequestString(const std::string_view &value, char (&req_buf)[MAX_SIZE], int *req_buf_size)
+{
+  const char *start = value.data();
+  const char *end   = start + value.size();
+  TSMLoc      url_loc;
+  TSMBuffer   url_buf = TSMBufferCreate();
+  int         host_len, url_len = 0;
+
+  if (TSUrlCreate(url_buf, &url_loc) == TS_SUCCESS && TSUrlParse(url_buf, url_loc, &start, end) == TS_PARSE_DONE) {
+    const char *host = TSUrlHostGet(url_buf, url_loc, &host_len);
+    const char *url  = TSUrlStringGet(url_buf, url_loc, &url_len);
+
+    *req_buf_size = snprintf(req_buf, MAX_SIZE, "GET %.*s HTTP/1.1\r\nHost: %.*s\r\n\r\n", url_len, url, host_len, host);
+
+    TSMBufferDestroy(url_buf);
+
+    return TS_SUCCESS;
+  } else {
+    Dbg(pi_dbg_ctl, "Failed to parse url %s", start);
+    TSMBufferDestroy(url_buf);
+    return TS_ERROR;
+  }
+}
+
+} // namespace
 
 // OperatorConfig
 void
@@ -45,7 +127,7 @@ OperatorSetConfig::initialize(Parser &p)
   }
 }
 
-void
+bool
 OperatorSetConfig::exec(const Resources &res) const
 {
   if (TS_CONFIG_NULL != _key) {
@@ -76,6 +158,7 @@ OperatorSetConfig::exec(const Resources &res) const
       break;
     }
   }
+  return true;
 }
 
 // OperatorSetStatus
@@ -108,7 +191,7 @@ OperatorSetStatus::initialize_hooks()
   add_allowed_hook(TS_REMAP_PSEUDO_HOOK);
 }
 
-void
+bool
 OperatorSetStatus::exec(const Resources &res) const
 {
   switch (get_hook()) {
@@ -127,6 +210,8 @@ OperatorSetStatus::exec(const Resources &res) const
   }
 
   Dbg(pi_dbg_ctl, "OperatorSetStatus::exec() invoked with status=%d", _status.get_int_value());
+
+  return true;
 }
 
 // OperatorSetStatusReason
@@ -147,7 +232,7 @@ OperatorSetStatusReason::initialize_hooks()
   add_allowed_hook(TS_HTTP_SEND_RESPONSE_HDR_HOOK);
 }
 
-void
+bool
 OperatorSetStatusReason::exec(const Resources &res) const
 {
   if (res.bufp && res.hdr_loc) {
@@ -159,6 +244,7 @@ OperatorSetStatusReason::exec(const Resources &res) const
       TSHttpHdrReasonSet(res.bufp, res.hdr_loc, reason.c_str(), reason.size());
     }
   }
+  return true;
 }
 
 // OperatorSetDestination
@@ -173,7 +259,7 @@ OperatorSetDestination::initialize(Parser &p)
   require_resources(RSRC_SERVER_REQUEST_HEADERS);
 }
 
-void
+bool
 OperatorSetDestination::exec(const Resources &res) const
 {
   if (res._rri || (res.bufp && res.hdr_loc)) {
@@ -189,7 +275,7 @@ OperatorSetDestination::exec(const Resources &res) const
       bufp = res.bufp;
       if (TSHttpHdrUrlGet(res.bufp, res.hdr_loc, &url_m_loc) != TS_SUCCESS) {
         Dbg(pi_dbg_ctl, "TSHttpHdrUrlGet was unable to return the url m_loc");
-        return;
+        return true;
       }
     }
 
@@ -280,6 +366,7 @@ OperatorSetDestination::exec(const Resources &res) const
     Dbg(pi_dbg_ctl, "OperatorSetDestination::exec() unable to continue due to missing bufp=%p or hdr_loc=%p, rri=%p!", res.bufp,
         res.hdr_loc, res._rri);
   }
+  return true;
 }
 
 #include <iostream>
@@ -316,7 +403,7 @@ OperatorRMDestination::initialize(Parser &p)
   require_resources(RSRC_SERVER_REQUEST_HEADERS);
 }
 
-void
+bool
 OperatorRMDestination::exec(const Resources &res) const
 {
   if (res._rri || (res.bufp && res.hdr_loc)) {
@@ -332,7 +419,7 @@ OperatorRMDestination::exec(const Resources &res) const
       bufp = res.bufp;
       if (TSHttpHdrUrlGet(res.bufp, res.hdr_loc, &url_m_loc) != TS_SUCCESS) {
         Dbg(pi_dbg_ctl, "TSHttpHdrUrlGet was unable to return the url m_loc");
-        return;
+        return true;
       }
     }
 
@@ -382,6 +469,7 @@ OperatorRMDestination::exec(const Resources &res) const
     Dbg(pi_dbg_ctl, "OperatorRMDestination::exec() unable to continue due to missing bufp=%p or hdr_loc=%p, rri=%p!", res.bufp,
         res.hdr_loc, res._rri);
   }
+  return true;
 }
 
 // OperatorSetRedirect
@@ -401,6 +489,14 @@ OperatorSetRedirect::initialize(Parser &p)
   require_resources(RSRC_CLIENT_RESPONSE_HEADERS);
   require_resources(RSRC_CLIENT_REQUEST_HEADERS);
   require_resources(RSRC_RESPONSE_STATUS);
+}
+
+void
+OperatorSetRedirect::initialize_hooks()
+{
+  add_allowed_hook(TS_HTTP_READ_RESPONSE_HDR_HOOK);
+  add_allowed_hook(TS_HTTP_SEND_RESPONSE_HDR_HOOK);
+  add_allowed_hook(TS_REMAP_PSEUDO_HOOK);
 }
 
 void
@@ -430,36 +526,7 @@ EditRedirectResponse(TSHttpTxn txnp, const std::string &location, TSHttpStatus s
   TSHttpTxnErrorBodySet(txnp, TSstrdup(msg.c_str()), msg.length(), TSstrdup("text/html"));
 }
 
-static int
-cont_add_location(TSCont contp, TSEvent event, void *edata)
-{
-  TSHttpTxn txnp = static_cast<TSHttpTxn>(edata);
-
-  OperatorSetRedirect *osd = static_cast<OperatorSetRedirect *>(TSContDataGet(contp));
-  // Set the new status code and reason.
-  TSHttpStatus status = osd->get_status();
-  switch (event) {
-  case TS_EVENT_HTTP_SEND_RESPONSE_HDR: {
-    TSMBuffer bufp;
-    TSMLoc    hdr_loc;
-    if (TSHttpTxnClientRespGet(txnp, &bufp, &hdr_loc) == TS_SUCCESS) {
-      EditRedirectResponse(txnp, osd->get_location(), status, bufp, hdr_loc);
-    } else {
-      Dbg(pi_dbg_ctl, "Could not retrieve the response header");
-    }
-
-  } break;
-
-  case TS_EVENT_HTTP_TXN_CLOSE:
-    TSContDestroy(contp);
-    break;
-  default:
-    break;
-  }
-  return 0;
-}
-
-void
+bool
 OperatorSetRedirect::exec(const Resources &res) const
 {
   if (res.bufp && res.hdr_loc && res.client_bufp && res.client_hdr_loc) {
@@ -525,27 +592,16 @@ OperatorSetRedirect::exec(const Resources &res) const
       const_cast<Resources &>(res).changed_url = true;
       res._rri->redirect                       = 1;
     } else {
+      Dbg(pi_dbg_ctl, "OperatorSetRedirect::exec() hook=%d", int(get_hook()));
       // Set the new status code and reason.
       TSHttpStatus status = static_cast<TSHttpStatus>(_status.get_int_value());
-      switch (get_hook()) {
-      case TS_HTTP_PRE_REMAP_HOOK: {
-        TSHttpTxnStatusSet(res.txnp, status);
-        TSCont contp = TSContCreate(cont_add_location, nullptr);
-        TSContDataSet(contp, const_cast<OperatorSetRedirect *>(this));
-        TSHttpTxnHookAdd(res.txnp, TS_HTTP_SEND_RESPONSE_HDR_HOOK, contp);
-        TSHttpTxnHookAdd(res.txnp, TS_HTTP_TXN_CLOSE_HOOK, contp);
-        TSHttpTxnReenable(res.txnp, TS_EVENT_HTTP_CONTINUE);
-        return;
-      } break;
-      default:
-        break;
-      }
       TSHttpHdrStatusSet(res.bufp, res.hdr_loc, status);
       EditRedirectResponse(res.txnp, value, status, res.bufp, res.hdr_loc);
     }
     Dbg(pi_dbg_ctl, "OperatorSetRedirect::exec() invoked with destination=%s and status code=%d", value.c_str(),
         _status.get_int_value());
   }
+  return true;
 }
 
 // OperatorSetTimeoutOut
@@ -570,7 +626,7 @@ OperatorSetTimeoutOut::initialize(Parser &p)
   _timeout.set_value(p.get_value());
 }
 
-void
+bool
 OperatorSetTimeoutOut::exec(const Resources &res) const
 {
   switch (_type) {
@@ -597,6 +653,7 @@ OperatorSetTimeoutOut::exec(const Resources &res) const
     TSError("[%s] unsupported timeout", PLUGIN_NAME);
     break;
   }
+  return true;
 }
 
 // OperatorSkipRemap
@@ -611,15 +668,16 @@ OperatorSkipRemap::initialize(Parser &p)
   }
 }
 
-void
+bool
 OperatorSkipRemap::exec(const Resources &res) const
 {
   Dbg(pi_dbg_ctl, "OperatorSkipRemap::exec() skipping remap: %s", _skip_remap ? "True" : "False");
   TSHttpTxnCntlSet(res.txnp, TS_HTTP_CNTL_SKIP_REMAPPING, _skip_remap);
+  return true;
 }
 
 // OperatorRMHeader
-void
+bool
 OperatorRMHeader::exec(const Resources &res) const
 {
   TSMLoc field_loc, tmp;
@@ -635,6 +693,7 @@ OperatorRMHeader::exec(const Resources &res) const
       field_loc = tmp;
     }
   }
+  return true;
 }
 
 // OperatorAddHeader
@@ -646,7 +705,7 @@ OperatorAddHeader::initialize(Parser &p)
   _value.set_value(p.get_value());
 }
 
-void
+bool
 OperatorAddHeader::exec(const Resources &res) const
 {
   std::string value;
@@ -656,7 +715,7 @@ OperatorAddHeader::exec(const Resources &res) const
   // Never set an empty header (I don't think that ever makes sense?)
   if (value.empty()) {
     Dbg(pi_dbg_ctl, "Would set header %s to an empty value, skipping", _header.c_str());
-    return;
+    return true;
   }
 
   if (res.bufp && res.hdr_loc) {
@@ -671,6 +730,7 @@ OperatorAddHeader::exec(const Resources &res) const
       TSHandleMLocRelease(res.bufp, res.hdr_loc, field_loc);
     }
   }
+  return true;
 }
 
 // OperatorSetHeader
@@ -682,7 +742,7 @@ OperatorSetHeader::initialize(Parser &p)
   _value.set_value(p.get_value());
 }
 
-void
+bool
 OperatorSetHeader::exec(const Resources &res) const
 {
   std::string value;
@@ -692,7 +752,7 @@ OperatorSetHeader::exec(const Resources &res) const
   // Never set an empty header (I don't think that ever makes sense?)
   if (value.empty()) {
     Dbg(pi_dbg_ctl, "Would set header %s to an empty value, skipping", _header.c_str());
-    return;
+    return true;
   }
 
   if (res.bufp && res.hdr_loc) {
@@ -728,6 +788,7 @@ OperatorSetHeader::exec(const Resources &res) const
       }
     }
   }
+  return true;
 }
 
 // OperatorSetBody
@@ -746,7 +807,7 @@ OperatorSetBody::initialize_hooks()
   add_allowed_hook(TS_HTTP_SEND_RESPONSE_HDR_HOOK);
 }
 
-void
+bool
 OperatorSetBody::exec(const Resources &res) const
 {
   std::string value;
@@ -754,6 +815,7 @@ OperatorSetBody::exec(const Resources &res) const
   _value.append_value(value, res);
   char *msg = TSstrdup(_value.get_value().c_str());
   TSHttpTxnErrorBodySet(res.txnp, msg, _value.size(), nullptr);
+  return true;
 }
 
 // OperatorCounter
@@ -783,20 +845,21 @@ OperatorCounter::initialize(Parser &p)
   }
 }
 
-void
+bool
 OperatorCounter::exec(const Resources & /* ATS_UNUSED res */) const
 {
   // Sanity
   if (_counter == TS_ERROR) {
-    return;
+    return true;
   }
 
   Dbg(pi_dbg_ctl, "OperatorCounter::exec() invoked on %s", _counter_name.c_str());
   TSStatIntIncrement(_counter, 1);
+  return true;
 }
 
 // OperatorRMCookie
-void
+bool
 OperatorRMCookie::exec(const Resources &res) const
 {
   if (res.bufp && res.hdr_loc) {
@@ -807,7 +870,7 @@ OperatorRMCookie::exec(const Resources &res) const
     field_loc = TSMimeHdrFieldFind(res.bufp, res.hdr_loc, TS_MIME_FIELD_COOKIE, TS_MIME_LEN_COOKIE);
     if (nullptr == field_loc) {
       Dbg(pi_dbg_ctl, "OperatorRMCookie::exec, no cookie");
-      return;
+      return true;
     }
 
     int         cookies_len = 0;
@@ -825,6 +888,7 @@ OperatorRMCookie::exec(const Resources &res) const
     }
     TSHandleMLocRelease(res.bufp, res.hdr_loc, field_loc);
   }
+  return true;
 }
 
 // OperatorAddCookie
@@ -835,7 +899,7 @@ OperatorAddCookie::initialize(Parser &p)
   _value.set_value(p.get_value());
 }
 
-void
+bool
 OperatorAddCookie::exec(const Resources &res) const
 {
   std::string value;
@@ -858,7 +922,7 @@ OperatorAddCookie::exec(const Resources &res) const
         }
         TSHandleMLocRelease(res.bufp, res.hdr_loc, field_loc);
       }
-      return;
+      return true;
     }
 
     int         cookies_len = 0;
@@ -870,6 +934,7 @@ OperatorAddCookie::exec(const Resources &res) const
       Dbg(pi_dbg_ctl, "OperatorAddCookie::exec, updated_cookie = [%s]", updated_cookie.c_str());
     }
   }
+  return true;
 }
 
 // OperatorSetCookie
@@ -880,7 +945,7 @@ OperatorSetCookie::initialize(Parser &p)
   _value.set_value(p.get_value());
 }
 
-void
+bool
 OperatorSetCookie::exec(const Resources &res) const
 {
   std::string value;
@@ -903,7 +968,7 @@ OperatorSetCookie::exec(const Resources &res) const
         }
         TSHandleMLocRelease(res.bufp, res.hdr_loc, field_loc);
       }
-      return;
+      return true;
     }
 
     int         cookies_len = 0;
@@ -916,6 +981,7 @@ OperatorSetCookie::exec(const Resources &res) const
     }
     TSHandleMLocRelease(res.bufp, res.hdr_loc, field_loc);
   }
+  return true;
 }
 
 bool
@@ -1025,13 +1091,14 @@ OperatorSetConnDSCP::initialize_hooks()
   add_allowed_hook(TS_REMAP_PSEUDO_HOOK);
 }
 
-void
+bool
 OperatorSetConnDSCP::exec(const Resources &res) const
 {
   if (res.txnp) {
     TSHttpTxnClientPacketDscpSet(res.txnp, _ds_value.get_int_value());
     Dbg(pi_dbg_ctl, "   Setting DSCP to %d", _ds_value.get_int_value());
   }
+  return true;
 }
 
 // OperatorSetConnMark
@@ -1051,13 +1118,14 @@ OperatorSetConnMark::initialize_hooks()
   add_allowed_hook(TS_REMAP_PSEUDO_HOOK);
 }
 
-void
+bool
 OperatorSetConnMark::exec(const Resources &res) const
 {
   if (res.txnp) {
     TSHttpTxnClientPacketMarkSet(res.txnp, _ds_value.get_int_value());
     Dbg(pi_dbg_ctl, "   Setting MARK to %d", _ds_value.get_int_value());
   }
+  return true;
 }
 
 // OperatorSetDebug
@@ -1076,46 +1144,20 @@ OperatorSetDebug::initialize_hooks()
   add_allowed_hook(TS_REMAP_PSEUDO_HOOK);
 }
 
-void
+bool
 OperatorSetDebug::exec(const Resources &res) const
 {
   TSHttpTxnCntlSet(res.txnp, TS_HTTP_CNTL_TXN_DEBUG, true);
-}
-
-// OperatorSetHttpCntl
-TSHttpCntlType
-parse_cntl_qualifier(const std::string &q) // Helper function for parsing modifiers
-{
-  TSHttpCntlType qual = TS_HTTP_CNTL_LOGGING_MODE;
-
-  if (q == "LOGGING") {
-    qual = TS_HTTP_CNTL_LOGGING_MODE;
-  } else if (q == "INTERCEPT_RETRY") {
-    qual = TS_HTTP_CNTL_INTERCEPT_RETRY_MODE;
-  } else if (q == "RESP_CACHEABLE") {
-    qual = TS_HTTP_CNTL_RESPONSE_CACHEABLE;
-  } else if (q == "REQ_CACHEABLE") {
-    qual = TS_HTTP_CNTL_REQUEST_CACHEABLE;
-  } else if (q == "SERVER_NO_STORE") {
-    qual = TS_HTTP_CNTL_SERVER_NO_STORE;
-  } else if (q == "TXN_DEBUG") {
-    qual = TS_HTTP_CNTL_TXN_DEBUG;
-  } else if (q == "SKIP_REMAP") {
-    qual = TS_HTTP_CNTL_SKIP_REMAPPING;
-  } else {
-    TSError("[%s] Invalid HTTP-CNTL() qualifier: %s", PLUGIN_NAME, q.c_str());
-  }
-
-  return qual;
+  return true;
 }
 
 void
 OperatorSetHttpCntl::initialize(Parser &p)
 {
   Operator::initialize(p);
-  _cntl_qual = parse_cntl_qualifier(p.get_arg());
+  _cntl_qual = parse_http_cntl_qualifier(p.get_arg());
 
-  std::string flag = p.copy_value();
+  std::string flag = p.get_value(); // Make a copy of the value
 
   std::transform(flag.begin(), flag.end(), flag.begin(), ::tolower);
 
@@ -1138,7 +1180,7 @@ static const char *const HttpCntls[] = {
   "LOGGING", "INTERCEPT_RETRY", "RESP_CACHEABLE", "REQ_CACHEABLE", "SERVER_NO_STORE", "TXN_DEBUG", "SKIP_REMAP",
 };
 
-void
+bool
 OperatorSetHttpCntl::exec(const Resources &res) const
 {
   if (_flag) {
@@ -1148,6 +1190,7 @@ OperatorSetHttpCntl::exec(const Resources &res) const
     TSHttpTxnCntlSet(res.txnp, _cntl_qual, false);
     Dbg(pi_dbg_ctl, "   Turning OFF %s for transaction", HttpCntls[static_cast<size_t>(_cntl_qual)]);
   }
+  return true;
 }
 
 void
@@ -1210,7 +1253,7 @@ OperatorRunPlugin::initialize_hooks()
   require_resources(RSRC_CLIENT_REQUEST_HEADERS); // Need this for the txnp
 }
 
-void
+bool
 OperatorRunPlugin::exec(const Resources &res) const
 {
   TSReleaseAssert(_plugin != nullptr);
@@ -1218,4 +1261,259 @@ OperatorRunPlugin::exec(const Resources &res) const
   if (res._rri && res.txnp) {
     _plugin->doRemap(res.txnp, res._rri);
   }
+  return true;
+}
+
+// OperatorSetBody
+void
+OperatorSetBodyFrom::initialize(Parser &p)
+{
+  Operator::initialize(p);
+  // we want the arg since body only takes one value
+  _value.set_value(p.get_arg());
+  require_resources(RSRC_SERVER_RESPONSE_HEADERS);
+  require_resources(RSRC_RESPONSE_STATUS);
+}
+
+void
+OperatorSetBodyFrom::initialize_hooks()
+{
+  add_allowed_hook(TS_HTTP_READ_RESPONSE_HDR_HOOK);
+}
+
+bool
+OperatorSetBodyFrom::exec(const Resources &res) const
+{
+  if (TSHttpTxnIsInternal(res.txnp)) {
+    // If this is triggered by an internal transaction, a infinte loop may occur
+    // It should only be triggered by the original transaction sent by the client
+    Dbg(pi_dbg_ctl, "OperatorSetBodyFrom triggered by an internal transaction");
+    return true;
+  }
+
+  char req_buf[MAX_SIZE];
+  int  req_buf_size = 0;
+  if (createRequestString(_value.get_value(), req_buf, &req_buf_size) == TS_SUCCESS) {
+    TSCont fetchCont = TSContCreate(handleFetchEvents, TSMutexCreate());
+    TSContDataSet(fetchCont, static_cast<void *>(res.txnp));
+
+    TSHttpTxnHookAdd(res.txnp, TS_HTTP_TXN_CLOSE_HOOK, fetchCont);
+
+    TSFetchEvent event_ids;
+    event_ids.success_event_id = TS_EVENT_FETCHSM_SUCCESS;
+    event_ids.failure_event_id = TS_EVENT_FETCHSM_FAILURE;
+    event_ids.timeout_event_id = TS_EVENT_FETCHSM_TIMEOUT;
+
+    struct sockaddr_in addr;
+    addr.sin_family      = AF_INET;
+    addr.sin_addr.s_addr = LOCAL_IP_ADDRESS;
+    addr.sin_port        = LOCAL_PORT;
+    TSFetchUrl(static_cast<const char *>(req_buf), req_buf_size, reinterpret_cast<struct sockaddr const *>(&addr), fetchCont,
+               AFTER_BODY, event_ids);
+
+    // Forces original status code in event TSHttpTxnErrorBodySet changed
+    // the code or another condition was set conflicting with this one.
+    // Set here because res is the only structure that contains the original status code.
+    TSHttpTxnStatusSet(res.txnp, res.resp_status);
+  } else {
+    TSError(PLUGIN_NAME, "OperatorSetBodyFrom:exec:: Could not create request");
+    return true;
+  }
+  return false;
+}
+
+void
+OperatorSetStateFlag::initialize(Parser &p)
+{
+  Operator::initialize(p);
+
+  _flag_ix = strtol(p.get_arg().c_str(), nullptr, 10);
+
+  if (_flag_ix < 0 || _flag_ix >= NUM_STATE_FLAGS) {
+    TSError("[%s] state flag with index %d is out of range", PLUGIN_NAME, _flag_ix);
+    return;
+  }
+
+  std::string flag = p.get_value(); // Make a copy of the value
+
+  std::transform(flag.begin(), flag.end(), flag.begin(), ::tolower);
+
+  if (flag == "1" || flag == "true" || flag == "on" || flag == "enable") {
+    _mask = 1ULL << _flag_ix;
+    _flag = true;
+  } else {
+    _mask = ~(1ULL << _flag_ix);
+    _flag = false;
+  }
+}
+
+// This operator should be allowed everywhere
+void
+OperatorSetStateFlag::initialize_hooks()
+{
+  add_allowed_hook(TS_HTTP_READ_REQUEST_HDR_HOOK);
+  add_allowed_hook(TS_HTTP_READ_RESPONSE_HDR_HOOK);
+  add_allowed_hook(TS_HTTP_SEND_RESPONSE_HDR_HOOK);
+  add_allowed_hook(TS_REMAP_PSEUDO_HOOK);
+  add_allowed_hook(TS_HTTP_PRE_REMAP_HOOK);
+  add_allowed_hook(TS_HTTP_SEND_REQUEST_HDR_HOOK);
+  add_allowed_hook(TS_HTTP_TXN_CLOSE_HOOK);
+  add_allowed_hook(TS_HTTP_TXN_START_HOOK);
+}
+
+bool
+OperatorSetStateFlag::exec(const Resources &res) const
+{
+  if (!res.txnp) {
+    TSError("[%s] OperatorSetStateFlag() failed. Transaction is null", PLUGIN_NAME);
+    return false;
+  }
+
+  Dbg(pi_dbg_ctl, "   Setting state flag %d to %d", _flag_ix, _flag);
+
+  auto data = reinterpret_cast<uint64_t>(TSUserArgGet(res.txnp, _txn_slot));
+
+  TSUserArgSet(res.txnp, _txn_slot, reinterpret_cast<void *>(_flag ? data | _mask : data & _mask));
+
+  return true;
+}
+
+void
+OperatorSetStateInt8::initialize(Parser &p)
+{
+  Operator::initialize(p);
+
+  _byte_ix = strtol(p.get_arg().c_str(), nullptr, 10);
+
+  if (_byte_ix < 0 || _byte_ix >= NUM_STATE_INT8S) {
+    TSError("[%s] state int8 with index %d is out of range", PLUGIN_NAME, _byte_ix);
+    return;
+  }
+
+  _value.set_value(p.get_value());
+  if (!_value.has_conds()) {
+    int v = _value.get_int_value();
+
+    if (v < 0 || v > 255) {
+      TSError("[%s] state int8 value %d is out of range", PLUGIN_NAME, v);
+      return;
+    }
+  }
+}
+
+// This operator should be allowed everywhere
+void
+OperatorSetStateInt8::initialize_hooks()
+{
+  add_allowed_hook(TS_HTTP_READ_REQUEST_HDR_HOOK);
+  add_allowed_hook(TS_HTTP_READ_RESPONSE_HDR_HOOK);
+  add_allowed_hook(TS_HTTP_SEND_RESPONSE_HDR_HOOK);
+  add_allowed_hook(TS_REMAP_PSEUDO_HOOK);
+  add_allowed_hook(TS_HTTP_PRE_REMAP_HOOK);
+  add_allowed_hook(TS_HTTP_SEND_REQUEST_HDR_HOOK);
+  add_allowed_hook(TS_HTTP_TXN_CLOSE_HOOK);
+  add_allowed_hook(TS_HTTP_TXN_START_HOOK);
+}
+
+bool
+OperatorSetStateInt8::exec(const Resources &res) const
+{
+  if (!res.txnp) {
+    TSError("[%s] OperatorSetStateInt8() failed. Transaction is null", PLUGIN_NAME);
+    return false;
+  }
+
+  auto ptr = reinterpret_cast<uint64_t>(TSUserArgGet(res.txnp, _txn_slot));
+  int  val = 0;
+
+  if (_value.has_conds()) { // If there are conditions, we need to evaluate them, which gives us a string
+    std::string v;
+
+    _value.append_value(v, res);
+    val = strtol(v.c_str(), nullptr, 10);
+    if (val < 0 || val > 255) {
+      TSWarning("[%s] state int8 value %d is out of range", PLUGIN_NAME, val);
+      return false;
+    }
+  } else {
+    // These values have already been checked at load time
+    val = _value.get_int_value();
+  }
+
+  Dbg(pi_dbg_ctl, "   Setting state int8 %d to %d", _byte_ix, val);
+  ptr &= ~STATE_INT8_MASKS[_byte_ix]; // Clear any old value
+  ptr |= (static_cast<uint64_t>(val) << (NUM_STATE_FLAGS + _byte_ix * 8));
+  TSUserArgSet(res.txnp, _txn_slot, reinterpret_cast<void *>(ptr));
+
+  return true;
+}
+
+void
+OperatorSetStateInt16::initialize(Parser &p)
+{
+  Operator::initialize(p);
+
+  int ix = strtol(p.get_arg().c_str(), nullptr, 10);
+
+  if (ix != 0) {
+    TSError("[%s] state int16 with index %d is out of range", PLUGIN_NAME, ix);
+    return;
+  }
+
+  _value.set_value(p.get_value());
+  if (!_value.has_conds()) {
+    int v = _value.get_int_value();
+
+    if (v < 0 || v > 65535) {
+      TSError("[%s] state int16 value %d is out of range", PLUGIN_NAME, v);
+      return;
+    }
+  }
+}
+
+// This operator should be allowed everywhere
+void
+OperatorSetStateInt16::initialize_hooks()
+{
+  add_allowed_hook(TS_HTTP_READ_REQUEST_HDR_HOOK);
+  add_allowed_hook(TS_HTTP_READ_RESPONSE_HDR_HOOK);
+  add_allowed_hook(TS_HTTP_SEND_RESPONSE_HDR_HOOK);
+  add_allowed_hook(TS_REMAP_PSEUDO_HOOK);
+  add_allowed_hook(TS_HTTP_PRE_REMAP_HOOK);
+  add_allowed_hook(TS_HTTP_SEND_REQUEST_HDR_HOOK);
+  add_allowed_hook(TS_HTTP_TXN_CLOSE_HOOK);
+  add_allowed_hook(TS_HTTP_TXN_START_HOOK);
+}
+
+bool
+OperatorSetStateInt16::exec(const Resources &res) const
+{
+  if (!res.txnp) {
+    TSError("[%s] OperatorSetStateInt16() failed. Transaction is null", PLUGIN_NAME);
+    return false;
+  }
+
+  auto ptr = reinterpret_cast<uint64_t>(TSUserArgGet(res.txnp, _txn_slot));
+  int  val = 0;
+
+  if (_value.has_conds()) { // If there are conditions, we need to evaluate them, which gives us a string
+    std::string v;
+
+    _value.append_value(v, res);
+    val = strtol(v.c_str(), nullptr, 10);
+    if (val < 0 || val > 65535) {
+      TSWarning("[%s] state int8 value %d is out of range", PLUGIN_NAME, val);
+      return false;
+    }
+  } else {
+    // These values have already been checked at load time
+    val = _value.get_int_value();
+  }
+
+  Dbg(pi_dbg_ctl, "   Setting state int16 to %d", val);
+  ptr &= ~STATE_INT16_MASK; // Clear any old value
+  ptr |= (static_cast<uint64_t>(val) << 48);
+  TSUserArgSet(res.txnp, _txn_slot, reinterpret_cast<void *>(ptr));
+
+  return true;
 }

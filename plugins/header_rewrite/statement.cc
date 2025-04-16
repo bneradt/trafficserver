@@ -73,6 +73,28 @@ Statement::initialize_hooks()
   add_allowed_hook(TS_HTTP_TXN_CLOSE_HOOK);
 }
 
+void
+Statement::acquire_txn_slot()
+{
+  // Don't do anything if we don't need it
+  if (!need_txn_slot() || _txn_slot >= 0) {
+    return;
+  }
+
+  // Only call the index reservation once per plugin load
+  static int txn_slot_index = []() -> int {
+    int index = -1;
+
+    if (TS_ERROR == TSUserArgIndexReserve(TS_USER_ARGS_TXN, PLUGIN_NAME, "HRW txn variables", &index)) {
+      TSError("[%s] failed to reserve user arg index", PLUGIN_NAME);
+      return -1; // Fallback value
+    }
+    return index;
+  }();
+
+  _txn_slot = txn_slot_index;
+}
+
 // Parse NextHop qualifiers
 NextHopQualifiers
 Statement::parse_next_hop_qualifier(const std::string &q) const
@@ -110,6 +132,33 @@ Statement::parse_url_qualifier(const std::string &q) const
     qual = URL_QUAL_URL;
   } else {
     TSError("[%s] Invalid URL() qualifier: %s", PLUGIN_NAME, q.c_str());
+  }
+
+  return qual;
+}
+
+// Parse HTTP CNTL qualifiers
+TSHttpCntlType
+Statement::parse_http_cntl_qualifier(const std::string &q) const
+{
+  TSHttpCntlType qual = TS_HTTP_CNTL_LOGGING_MODE;
+
+  if (q == "LOGGING") {
+    qual = TS_HTTP_CNTL_LOGGING_MODE;
+  } else if (q == "INTERCEPT_RETRY") {
+    qual = TS_HTTP_CNTL_INTERCEPT_RETRY_MODE;
+  } else if (q == "RESP_CACHEABLE") {
+    qual = TS_HTTP_CNTL_RESPONSE_CACHEABLE;
+  } else if (q == "REQ_CACHEABLE") {
+    qual = TS_HTTP_CNTL_REQUEST_CACHEABLE;
+  } else if (q == "SERVER_NO_STORE") {
+    qual = TS_HTTP_CNTL_SERVER_NO_STORE;
+  } else if (q == "TXN_DEBUG") {
+    qual = TS_HTTP_CNTL_TXN_DEBUG;
+  } else if (q == "SKIP_REMAP") {
+    qual = TS_HTTP_CNTL_SKIP_REMAPPING;
+  } else {
+    TSError("[%s] Invalid HTTP-CNTL() qualifier: %s", PLUGIN_NAME, q.c_str());
   }
 
   return qual;

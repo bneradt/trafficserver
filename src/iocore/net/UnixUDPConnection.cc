@@ -29,8 +29,8 @@
 
  ****************************************************************************/
 
-#include "P_Net.h"
 #include "P_UDPNet.h"
+#include "iocore/net/Net.h"
 
 namespace
 {
@@ -57,10 +57,9 @@ UnixUDPConnection::~UnixUDPConnection()
     callbackAction = nullptr;
   }
   Dbg(dbg_ctl_udpnet, "Destroying udp port = %d", getPortNum());
-  if (fd != NO_FD) {
-    SocketManager::close(fd);
+  if (sock.is_ok()) {
+    sock.close();
   }
-  fd = NO_FD;
 }
 
 // called with continuation lock taken out
@@ -107,7 +106,7 @@ UnixUDPConnection::callbackHandler(int event, void *data)
 void
 UDPConnection::bindToThread(Continuation *c, EThread *t)
 {
-  UnixUDPConnection *uc = (UnixUDPConnection *)this;
+  UnixUDPConnection *uc = static_cast<UnixUDPConnection *>(this);
   ink_assert(t);
   ink_assert(get_UDPNetHandler(t));
   uc->ethread = t;
@@ -120,7 +119,7 @@ UDPConnection::bindToThread(Continuation *c, EThread *t)
 Action *
 UDPConnection::send(Continuation *c, UDPPacket *p)
 {
-  UnixUDPConnection *conn = (UnixUDPConnection *)this;
+  UnixUDPConnection *conn = static_cast<UnixUDPConnection *>(this);
 
   if (shouldDestroy()) {
     ink_assert(!"freeing packet sent on dead connection");
@@ -142,7 +141,7 @@ UDPConnection::send(Continuation *c, UDPPacket *p)
 void
 UDPConnection::Release()
 {
-  UnixUDPConnection *p = (UnixUDPConnection *)this;
+  UnixUDPConnection *p = static_cast<UnixUDPConnection *>(this);
 
   if (ink_atomic_increment(&p->refcount, -1) == 1) {
     p->ep.stop();

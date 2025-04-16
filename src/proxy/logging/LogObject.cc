@@ -35,7 +35,6 @@
 #include "proxy/logging/LogConfig.h"
 #include "proxy/logging/LogAccess.h"
 #include "proxy/logging/Log.h"
-#include "tscore/TestBox.h"
 
 #include <algorithm>
 #include <vector>
@@ -602,10 +601,6 @@ LogObject::log(LogAccess *lad, std::string_view text_entry)
   if (lad && m_filter_list.toss_this_entry(lad)) {
     Dbg(dbg_ctl_log, "entry filtered, skipping ...");
     return Log::SKIP;
-  }
-
-  if (lad && m_filter_list.wipe_this_entry(lad)) {
-    Dbg(dbg_ctl_log, "entry wiped, ...");
   }
 
   if (lad && m_format->is_aggregate()) {
@@ -1393,6 +1388,7 @@ LogObjectManager::flush_all_objects()
 }
 
 #if TS_HAS_TESTS
+#include "tscore/TestBox.h"
 
 static LogObject *
 MakeTestLogObject(const char *name)

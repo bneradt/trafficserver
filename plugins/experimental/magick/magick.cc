@@ -25,6 +25,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <cassert>
@@ -176,10 +177,10 @@ struct EVPContext {
   ~EVPContext()
   {
     assert(nullptr != context);
-    EVP_MD_CTX_destroy(context);
+    EVP_MD_CTX_free(context);
   }
 
-  EVPContext() : context(EVP_MD_CTX_create()) { assert(nullptr != context); }
+  EVPContext() : context(EVP_MD_CTX_new()) { assert(nullptr != context); }
 };
 
 struct EVPKey {
@@ -203,6 +204,20 @@ struct EVPKey {
   }
 };
 
+/** Remove the last error from this thread's error queue and print it.
+ */
+static void
+ssl_error()
+{
+  if (unsigned long error_code{ERR_get_error()}; 0 != error_code) {
+    if (char const *reason{ERR_reason_error_string(error_code)}; NULL == reason) {
+      Dbg(dbg_ctl, "SSL error: error code %lu", error_code);
+    } else {
+      Dbg(dbg_ctl, "SSL error: %s", reason);
+    }
+  }
+}
+
 bool
 verify(const byte *const msg, const size_t mlen, const byte *const sig, const size_t slen, EVP_PKEY *const pkey)
 {
@@ -218,30 +233,21 @@ verify(const byte *const msg, const size_t mlen, const byte *const sig, const si
 
   EVPContext evp;
 
-  {
-    const int rc = EVP_DigestVerifyInit(evp.context, nullptr, EVP_sha256(), nullptr, pkey);
-    assert(1 == rc);
-    if (1 != rc) {
-      return false;
-    }
+  if (const int rc = EVP_DigestVerifyInit(evp.context, nullptr, EVP_sha256(), nullptr, pkey); 1 != rc) {
+    ssl_error();
+    return false;
   }
 
-  {
-    const int rc = EVP_DigestVerifyUpdate(evp.context, msg, mlen);
-    assert(1 == rc);
-    if (1 != rc) {
-      return false;
-    }
+  if (const int rc = EVP_DigestVerify(evp.context, sig, slen, msg, mlen); 1 == rc) {
+    return true;
+  } else {
+    // The OpenSSL 1.1.1 API distinguishes between a verification failure and a
+    // more serious error with a specific return value for the former, but we
+    // have collapsed them into one case because we don't do any special
+    // handling for serious errors.
+    ssl_error();
+    return false;
   }
-
-  ERR_clear_error();
-
-  {
-    const int rc = EVP_DigestVerifyFinal(evp.context, sig, slen);
-    return 1 == rc;
-  }
-
-  return false;
 }
 
 struct Exception {
@@ -353,7 +359,7 @@ struct QueryMap {
   std::string content_;
   Map         map_;
 
-  QueryMap(std::string &&s) : content_(s) { parse(); }
+  QueryMap(std::string &&s) : content_(std::move(s)) { parse(); }
 
   template <typename T>
   const Vector &

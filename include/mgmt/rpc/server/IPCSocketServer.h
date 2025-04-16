@@ -27,6 +27,7 @@
 #include <string_view>
 #include <memory>
 
+#include "mgmt/rpc/jsonrpc/Context.h"
 #include "swoc/MemSpan.h"
 #include "swoc/BufferWriter.h"
 #include "tsutil/ts_bw_format.h"
@@ -93,7 +94,6 @@ class IPCSocketServer : public BaseCommInterface
 
 public:
   IPCSocketServer() = default;
-  virtual ~IPCSocketServer() override;
 
   /// Configure the  local socket.
   bool configure(YAML::Node const &params) override;

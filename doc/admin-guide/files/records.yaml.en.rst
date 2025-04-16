@@ -378,7 +378,10 @@ Thread Variables
 .. ts:cv:: CONFIG proxy.config.exec_thread.listen INT 0
 
    If enabled (``1``) all the exec_threads listen for incoming connections. `proxy.config.accept_threads`
-   should be disabled to enable this variable.
+   should be disabled to enable this variable.  If a unix domain path is
+   configured as a server port and this setting is enabled, each exec thread
+   will create its own domain socket with a ``-<thread id>`` suffix added to the
+   end of the path.
 
 .. ts:cv:: CONFIG proxy.config.accept_threads INT 1
 
@@ -711,31 +714,36 @@ HTTP Engine
 
    Quick reference chart:
 
-   =========== =============== ========================================
-   Name        Note            Definition
-   =========== =============== ========================================
-   *number*    Required        The local port.
-   blind                       Blind (``CONNECT``) port.
-   compress    Not Implemented Compressed.
-   ipv4        Default         Bind to IPv4 address family.
-   ipv6                        Bind to IPv6 address family.
-   ip-in       Value           Local inbound IP address.
-   ip-out      Value           Local outbound IP address.
-   ip-resolve  Value           IP address resolution style.
-   proto       Value           List of supported session protocols.
-   pp                          Enable Proxy Protocol.
-   ssl                         SSL terminated.
-   quic                        QUIC terminated.
-   tr-full                     Fully transparent (inbound and outbound)
-   tr-in                       Inbound transparent.
-   tr-out                      Outbound transparent.
-   tr-pass                     Pass through enabled.
-   mptcp                       Multipath TCP.
-   allow-plain                 Allow failback to non-TLS for TLS ports
-   =========== =============== ========================================
+   ============ =============== ========================================
+   Name         Note            Definition
+   ============ =============== ========================================
+   *port/path*  Required        The local IP port or Unix domain path.
+   blind                        Blind (``CONNECT``) port.
+   compress     Not Implemented Compressed.
+   ipv4         Default         Bind to IPv4 address family.
+   ipv6                         Bind to IPv6 address family.
+   ip-in        Value           Local inbound IP address.
+   ip-out       Value           Local outbound IP address.
+   ip-resolve   Value           IP address resolution style.
+   proto        Value           List of supported session protocols.
+   pp                           Enable Proxy Protocol.
+   ssl                          SSL terminated.
+   quic                         QUIC terminated.
+   tr-full                      Fully transparent (inbound and outbound)
+   tr-in                        Inbound transparent.
+   tr-out                       Outbound transparent.
+   tr-pass                      Pass through enabled.
+   mptcp                        Multipath TCP.
+   allow-plain                  Allow failback to non-TLS for TLS ports
+   ============ =============== ========================================
 
-*number*
-   Local IP port to bind. This is the port to which ATS clients will connect.
+*port*
+   Local IP port number to bind. This is the port to which ATS clients will connect.
+
+*path*
+   Unix Domain Socket path to bind to.  This socket will be available for local
+   clients to connect to. Some port descriptors below are not applicable to
+   domain sockets.
 
 blind
    Accept only the ``CONNECT`` method on this port.
@@ -825,6 +833,13 @@ allow-plain
    Listen on port 80 on any address for IPv4 and IPv6.::
 
       80 80:ipv6
+
+.. topic:: Example
+
+   Listen on unix domain socket at /var/run/trafficserver/proxy.sock and enable
+   Proxy Protocol
+
+      /var/run/trafficserver/proxy.sock:pp
 
 .. topic:: Example
 
@@ -1062,12 +1077,22 @@ allow-plain
    to use the client HTTP version for upstream requests.
 
 .. ts:cv:: CONFIG proxy.config.http.auth_server_session_private INT 1
+   :reloadable:
    :overridable:
 
-   If enabled (``1``) anytime a request contains a ``Authorization``,
-   ``Proxy-Authorization``, or ``Www-Authenticate`` header the connection will
-   be closed and not reused. This marks the connection as private. When disabled
-   (``0``) the connection will be available for reuse.
+   Specifies whether |TS| should close the origin connection and not reuse it if the request contains an
+   ``Authorization``, ``Proxy-Authorization``, or ``Www-Authenticate`` header.  Private connections are
+   associated with a single client connection and are not shared with other client connections.
+
+   ===== ======================================================================
+   Value Description
+   ===== ======================================================================
+   ``0`` The origin connection will be available for reuse.
+   ``1`` The origin connection will be closed after the client is done with it and if the request contains an
+         ``Authorization``, ``Proxy-Authorization``, or ``Www-Authenticate`` header.
+   ``2`` The origin connection will be closed after the client is done with it and if the request contains a
+         ``Proxy-Authorization`` or ``Www-Authenticate`` header.
+   ===== ======================================================================
 
 .. ts:cv:: CONFIG proxy.config.http.server_session_sharing.match STRING both
    :overridable:
@@ -2484,6 +2509,25 @@ Cache Control
 
    Objects larger than the limit are not hit evacuated. A value of 0 disables the limit.
 
+.. ts:cv:: CONFIG proxy.config.cache.dir.sync_frequency INT 60
+   :units: seconds
+
+   How often we will sync the cache directory entries to disk. Note that this is
+   a minimum time, and the actual sync may be delayed if the disks are larger than
+   how fast we allow it to write to disk (see next options).
+
+.. ts:cv:: CONFIG proxy.config.cache.dir.sync_max_writes INT 2097152
+   :units: bytes
+
+   How much of a stripes cache directory we will write to disk in each write cycle.
+   Together with the sync_delay, this controls how fast we can sync the entire directory
+   structure to disk. The default is 2MB.
+
+.. ts:cv:: CONFIG proxy.config.cache.dir.sync_delay INT 500
+   :units: millisecond
+
+   How long to wait between each write cycle when syncing the cache directory to disk.
+
 .. ts:cv:: CONFIG proxy.config.cache.limits.http.max_alts INT 5
 
    The maximum number of alternates that are allowed for any given URL.
@@ -3413,6 +3457,8 @@ Diagnostic Logging Configuration
 
    When set to 2, interprets the :ts:cv:`proxy.config.diags.debug.client_ip` setting determine whether diagnostic messages are logged.
 
+   See the :ref:`Enable debug using traffic_ctl<traffic-control-command-server-debug>` for a convenient way to handle this.
+
 .. ts:cv:: CONFIG proxy.config.diags.debug.client_ip STRING NULL
 
    if :ts:cv:`proxy.config.diags.debug.enabled` is set to 2, this value is tested against the source IP of the incoming connection.  If there is a match, all the diagnostic messages for that connection and the related outgoing connection will be logged.
@@ -3626,7 +3672,7 @@ SSL Termination
 
    TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256:TLS_CHACHA20_POLY1305_SHA256
 
-   This configuration works with OpenSSL v1.1.1 and above.
+   This configuration works with OpenSSL v1.1.1 and above. BoringSSL does not support customizing the list.
 
 .. ts:cv:: CONFIG proxy.config.ssl.server.honor_cipher_order INT 1
 
@@ -3638,13 +3684,13 @@ SSL Termination
    By enabling it (``1``) |TS| will temporarily reprioritize ChaCha20-Poly1305 ciphers to the top of the
    server cipher list if a ChaCha20-Poly1305 cipher is at the top of the client cipher list.
 
-   This configuration works with OpenSSL v1.1.1 and above.
+   This configuration works with OpenSSL v1.1.1 and above. BoringSSL does not support this.
 
 .. ts:cv:: CONFIG proxy.config.ssl.client.TLSv1_3.cipher_suites STRING <See notes under proxy.config.ssl.server.tls.cipher_suites>
 
    Configures the cipher_suites which |TS| will use for TLSv1.3
    connections to origin or next hop. This configuration works
-   with OpenSSL v1.1.1 and above.
+   with OpenSSL v1.1.1 and above. BoringSSL does not support customizing the list.
 
    The current default is:
 
@@ -3936,7 +3982,6 @@ SSL Termination
   multiple requests over concurrent TLS connections as per RFC 8446 clients SHOULDN'T reuse TLS Tickets.
 
   For more information see https://www.openssl.org/docs/man1.1.1/man3/SSL_CTX_set_num_tickets.html
-  [Requires OpenSSL v1.1.1 and higher]
 
 .. ts:cv:: CONFIG proxy.config.ssl.hsts_max_age INT -1
    :overridable:
@@ -4047,6 +4092,12 @@ Client-Related Configuration
    :overridable:
 
    The filename of SSL client certificate installed on |TS|.
+
+.. ts:cv:: CONFIG proxy.config.ssl.client.cert.exit_on_load_fail INT 0
+
+   By default (``0``), |TS| will start even if problems occur when loading the
+   SSL client certificates.  If true (``1``), SSL client certificate load
+   failures will prevent |TS| from starting.
 
 .. ts:cv:: CONFIG proxy.config.ssl.client.cert.path STRING /config
    :reloadable:

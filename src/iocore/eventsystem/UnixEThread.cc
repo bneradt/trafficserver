@@ -32,6 +32,7 @@
 //
 /////////////////////////////////////////////////////////////////////
 #include "P_EventSystem.h"
+#include "iocore/eventsystem/Lock.h"
 
 #if HAVE_EVENTFD
 #include <sys/eventfd.h>
@@ -44,9 +45,12 @@ struct AIOCallback;
 
 // !! THIS MUST BE IN THE ENUM ORDER !!
 char const *const EThread::Metrics::Slice::STAT_NAME[] = {
-  "proxy.process.eventloop.count",      "proxy.process.eventloop.events", "proxy.process.eventloop.events.min",
-  "proxy.process.eventloop.events.max", "proxy.process.eventloop.wait",   "proxy.process.eventloop.time.min",
-  "proxy.process.eventloop.time.max"};
+  "proxy.process.eventloop.count",       "proxy.process.eventloop.events",
+  "proxy.process.eventloop.events.min",  "proxy.process.eventloop.events.max",
+  "proxy.process.eventloop.wait",        "proxy.process.eventloop.time.min",
+  "proxy.process.eventloop.time.max",    "proxy.process.eventloop.drain.queue.max",
+  "proxy.process.eventloop.io.wait.max", "proxy.process.eventloop.io.work.max",
+};
 
 int thread_max_heartbeat_mseconds = THREAD_MAX_HEARTBEAT_MSECONDS;
 
@@ -296,6 +300,10 @@ EThread::execute_regular()
       sleep_time = 0;
     }
 
+    // drained the queue by this point
+    ink_hrtime post_drain  = ink_get_hrtime();
+    ink_hrtime drain_queue = post_drain - loop_start_time;
+
     tail_cb->waitForActivity(sleep_time);
 
     // loop cleanup
@@ -308,6 +316,7 @@ EThread::execute_regular()
     metrics.decay();
     metrics.record_loop_time(delta);
     current_slice->record_event_count(ev_count);
+    current_slice->record_drain_queue(drain_queue);
   }
 }
 
@@ -328,9 +337,10 @@ EThread::execute()
   // Do the start event first.
   // coverity[lock]
   if (start_event) {
-    MUTEX_TAKE_LOCK_FOR(start_event->mutex, this, start_event->continuation);
-    start_event->continuation->handleEvent(EVENT_IMMEDIATE, start_event);
-    MUTEX_UNTAKE_LOCK(start_event->mutex, this);
+    {
+      SCOPED_MUTEX_LOCK(lock, start_event->mutex, this);
+      start_event->continuation->handleEvent(EVENT_IMMEDIATE, start_event);
+    }
     free_event(start_event);
     start_event = nullptr;
   }
@@ -362,13 +372,16 @@ EThread::execute()
 EThread::Metrics::Slice &
 EThread::Metrics::Slice::operator+=(Slice const &that)
 {
-  this->_events._max    = std::max(this->_events._max, that._events._max);
-  this->_events._min    = std::min(this->_events._min, that._events._min);
-  this->_events._total += that._events._total;
-  this->_duration._min  = std::min(this->_duration._min, that._duration._min);
-  this->_duration._max  = std::max(this->_duration._max, that._duration._max);
-  this->_count         += that._count;
-  this->_wait          += that._wait;
+  this->_events._max                = std::max(this->_events._max, that._events._max);
+  this->_events._min                = std::min(this->_events._min, that._events._min);
+  this->_events._total             += that._events._total;
+  this->_duration._min              = std::min(this->_duration._min, that._duration._min);
+  this->_duration._max              = std::max(this->_duration._max, that._duration._max);
+  this->_count                     += that._count;
+  this->_wait                      += that._wait;
+  this->_duration._max_drain_queue  = std::max(this->_duration._max_drain_queue, that._duration._max_drain_queue);
+  this->_duration._max_io_wait      = std::max(this->_duration._max_io_wait, that._duration._max_io_wait);
+  this->_duration._max_io_work      = std::max(this->_duration._max_io_work, that._duration._max_io_work);
   return *this;
 }
 

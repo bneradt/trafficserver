@@ -25,12 +25,27 @@
 
 #include <atomic>
 
+#include "tscore/List.h"
+#include "iocore/eventsystem/VIO.h"
 #include "iocore/eventsystem/EventSystem.h"
-#include "../../../src/iocore/net/P_UnixNetState.h"
 #include "iocore/net/EventIO.h"
 #include "iocore/net/ReadWriteEventIO.h"
 
 class NetHandler;
+
+class Event;
+class NetEvent;
+
+struct NetState {
+  int             enabled = 0;
+  VIO             vio;
+  Link<NetEvent>  ready_link;
+  SLink<NetEvent> enable_link;
+  int             in_enabled_list = 0;
+  int             triggered       = 0;
+
+  NetState() : vio(VIO::NONE) {}
+};
 
 // this class is used to NetHandler to hide some detail of NetEvent.
 // To combine the `UDPConenction` and `NetEvent`. NetHandler should
@@ -40,9 +55,9 @@ class NetEvent
 public:
   NetEvent() = default;
   virtual ~NetEvent() {}
-  virtual void net_read_io(NetHandler *nh, EThread *lthread)  = 0;
-  virtual void net_write_io(NetHandler *nh, EThread *lthread) = 0;
-  virtual void free_thread(EThread *t)                        = 0;
+  virtual void net_read_io(NetHandler *nh)  = 0;
+  virtual void net_write_io(NetHandler *nh) = 0;
+  virtual void free_thread(EThread *t)      = 0;
 
   // since we want this class to be independent from VConnection, Continutaion. There should be
   // a pure virtual function which connect sub class and NetHandler.

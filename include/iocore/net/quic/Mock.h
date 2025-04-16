@@ -23,11 +23,8 @@
 
 #pragma once
 
-#include "../../../../src/iocore/net/P_Net.h"
-
 #include "iocore/net/quic/QUICApplication.h"
 #include "iocore/net/quic/QUICStreamManager.h"
-#include "iocore/net/quic/QUICEvents.h"
 #include "iocore/net/quic/QUICStreamAdapter.h"
 #include "iocore/net/quic/QUICStream.h"
 
@@ -283,7 +280,7 @@ public:
     return 0;
   }
   int
-  set_tcp_congestion_control(int /* side ATS_UNUSED */) override
+  set_tcp_congestion_control(tcp_congestion_control_side /* side ATS_UNUSED */) override
   {
     return 0;
   }

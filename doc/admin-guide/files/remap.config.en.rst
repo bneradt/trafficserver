@@ -557,7 +557,7 @@ activated implicitly in default. To stop applying the special rule, disable the 
    .deactivatefilter ip_allow
    map ...
    map ...
-   .activateefilter ip_allow
+   .activatefilter ip_allow
 
 Note this entirely disables :file:`ip_allow.yaml` checks for those remap rules.
 

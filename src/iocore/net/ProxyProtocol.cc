@@ -22,13 +22,14 @@
  */
 
 #include "iocore/net/ProxyProtocol.h"
-#include "tscore/Diags.h"
-
 #include "tscore/ink_assert.h"
 #include "tscore/ink_string.h"
 #include "tscore/ink_inet.h"
 #include "swoc/TextView.h"
 #include "swoc/bwf_base.h"
+#include "tsutil/DbgCtl.h"
+#include <optional>
+#include <string_view>
 
 namespace
 {
@@ -217,8 +218,6 @@ proxy_protocol_v1_parse(ProxyProtocol *pp_info, swoc::TextView hdr)
 /**
    PROXY Protocol v2 Parser
 
-   TODO: TLVs Support
-
    @return read length
  */
 size_t
@@ -233,8 +232,10 @@ proxy_protocol_v2_parse(ProxyProtocol *pp_info, const swoc::TextView &msg)
   // length check
   const uint16_t len       = ntohs(hdr_v2->len);
   const size_t   total_len = PPv2_CONNECTION_HEADER_LEN + len;
+  uint16_t       tlv_len   = 0;
 
   if (msg.size() < total_len) {
+    Dbg(dbg_ctl_proxyprotocol_v2, "The amount of available data is smaller than the expected size");
     return 0;
   }
 
@@ -243,6 +244,7 @@ proxy_protocol_v2_parse(ProxyProtocol *pp_info, const swoc::TextView &msg)
   case PPv2_CMD_LOCAL: {
     // protocol byte should be UNSPEC (\x00) with LOCAL command
     if (hdr_v2->fam != PPv2_PROTO_UNSPEC) {
+      Dbg(dbg_ctl_proxyprotocol_v2, "UNSPEC is unexpected");
       return 0;
     }
 
@@ -253,42 +255,34 @@ proxy_protocol_v2_parse(ProxyProtocol *pp_info, const swoc::TextView &msg)
   }
   case PPv2_CMD_PROXY: {
     switch (hdr_v2->fam) {
-    case PPv2_PROTO_TCP4: {
-      if (len < PPv2_ADDR_LEN_INET) {
-        return 0;
-      }
-
-      IpAddr src_addr(reinterpret_cast<in_addr_t>(hdr_v2->addr.ip4.src_addr));
-      pp_info->src_addr.assign(src_addr, hdr_v2->addr.ip4.src_port);
-
-      IpAddr dst_addr(reinterpret_cast<in_addr_t>(hdr_v2->addr.ip4.dst_addr));
-      pp_info->dst_addr.assign(dst_addr, hdr_v2->addr.ip4.dst_port);
-
-      pp_info->version   = ProxyProtocolVersion::V2;
-      pp_info->ip_family = AF_INET;
-
-      break;
-    }
-    case PPv2_PROTO_TCP6: {
-      if (len < PPv2_ADDR_LEN_INET6) {
-        return 0;
-      }
-
-      IpAddr src_addr(reinterpret_cast<in6_addr const &>(hdr_v2->addr.ip6.src_addr));
-      pp_info->src_addr.assign(src_addr, hdr_v2->addr.ip6.src_port);
-
-      IpAddr dst_addr(reinterpret_cast<in6_addr const &>(hdr_v2->addr.ip6.dst_addr));
-      pp_info->dst_addr.assign(dst_addr, hdr_v2->addr.ip6.dst_port);
-
-      pp_info->version   = ProxyProtocolVersion::V2;
-      pp_info->ip_family = AF_INET6;
-
-      break;
-    }
+    case PPv2_PROTO_TCP4:
     case PPv2_PROTO_UDP4:
-      [[fallthrough]];
+      if (len < PPv2_ADDR_LEN_INET) {
+        Dbg(dbg_ctl_proxyprotocol_v2, "There is not enough data left for IPv4 info");
+        return 0;
+      }
+      tlv_len = len - PPv2_ADDR_LEN_INET;
+
+      pp_info->set_ipv4_addrs(reinterpret_cast<in_addr_t>(hdr_v2->addr.ip4.src_addr), hdr_v2->addr.ip4.src_port,
+                              reinterpret_cast<in_addr_t>(hdr_v2->addr.ip4.dst_addr), hdr_v2->addr.ip4.dst_port);
+      pp_info->type    = hdr_v2->fam == PPv2_PROTO_TCP4 ? SOCK_STREAM : SOCK_DGRAM;
+      pp_info->version = ProxyProtocolVersion::V2;
+
+      break;
+    case PPv2_PROTO_TCP6:
     case PPv2_PROTO_UDP6:
-      [[fallthrough]];
+      if (len < PPv2_ADDR_LEN_INET6) {
+        Dbg(dbg_ctl_proxyprotocol_v2, "There is not enough data left for IPv6 info");
+        return 0;
+      }
+      tlv_len = len - PPv2_ADDR_LEN_INET6;
+
+      pp_info->set_ipv6_addrs(reinterpret_cast<in6_addr const &>(hdr_v2->addr.ip6.src_addr), hdr_v2->addr.ip6.src_port,
+                              reinterpret_cast<in6_addr const &>(hdr_v2->addr.ip6.dst_addr), hdr_v2->addr.ip6.dst_port);
+      pp_info->type    = hdr_v2->fam == PPv2_PROTO_TCP6 ? SOCK_STREAM : SOCK_DGRAM;
+      pp_info->version = ProxyProtocolVersion::V2;
+
+      break;
     case PPv2_PROTO_UNIX_STREAM:
       [[fallthrough]];
     case PPv2_PROTO_UNIX_DATAGRAM:
@@ -297,14 +291,21 @@ proxy_protocol_v2_parse(ProxyProtocol *pp_info, const swoc::TextView &msg)
       [[fallthrough]];
     default:
       // unsupported
+      Dbg(dbg_ctl_proxyprotocol_v2, "Unsupported protocol family (%d)", hdr_v2->fam);
       return 0;
     }
 
-    // TODO: Parse TLVs
+    if (tlv_len > 0) {
+      if (pp_info->set_additional_data(msg.substr(total_len - tlv_len, tlv_len)) < 0) {
+        Dbg(dbg_ctl_proxyprotocol_v2, "Failed to parse additional fields");
+        return 0;
+      }
+    }
 
     return total_len;
   }
   default:
+    Dbg(dbg_ctl_proxyprotocol_v2, "Unsupported command (%d)", hdr_v2->ver_cmd);
     break;
   }
 
@@ -507,4 +508,83 @@ proxy_protocol_version_cast(int i)
   default:
     return ProxyProtocolVersion::UNDEFINED;
   }
+}
+
+void
+ProxyProtocol::set_ipv4_addrs(in_addr_t src_addr, uint16_t src_port, in_addr_t dst_addr, uint16_t dst_port)
+{
+  IpAddr src(src_addr);
+  IpAddr dst(dst_addr);
+
+  this->src_addr.assign(src, src_port);
+  this->dst_addr.assign(dst, dst_port);
+
+  this->ip_family = AF_INET;
+}
+
+void
+ProxyProtocol::set_ipv6_addrs(const in6_addr &src_addr, uint16_t src_port, const in6_addr &dst_addr, uint16_t dst_port)
+{
+  IpAddr src(src_addr);
+  IpAddr dst(dst_addr);
+
+  this->src_addr.assign(src, src_port);
+  this->dst_addr.assign(dst, dst_port);
+
+  this->ip_family = AF_INET6;
+}
+
+std::optional<std::string_view>
+ProxyProtocol::get_tlv(const uint8_t tlvCode) const
+{
+  if (version == ProxyProtocolVersion::V2) {
+    if (auto v = tlv.find(tlvCode); v != tlv.end()) {
+      return v->second;
+    }
+  }
+  return std::nullopt;
+}
+
+int
+ProxyProtocol::set_additional_data(std::string_view data)
+{
+  uint16_t len = data.length();
+  Dbg(dbg_ctl_proxyprotocol_v2, "Parsing %d byte additional data", len);
+  additional_data = static_cast<char *>(ats_malloc(len));
+  if (additional_data == nullptr) {
+    Dbg(dbg_ctl_proxyprotocol_v2, "Memory allocation failed");
+    return -1;
+  }
+  data.copy(additional_data, len);
+
+  const char *p   = additional_data;
+  const char *end = p + len;
+  while (p != end) {
+    if (end - p < 3) {
+      // The size of a TLV entry must be 3 bytes or more
+      Dbg(dbg_ctl_proxyprotocol_v2, "Remaining data (%ld bytes) is not enough for a TLV field", end - p);
+      return -2;
+    }
+
+    // Type
+    uint8_t type  = *p;
+    p            += 1;
+
+    // Length
+    uint16_t length  = ntohs(*reinterpret_cast<const uint16_t *>(p));
+    p               += 2;
+
+    // Value
+    if (end - p < length) {
+      // Does not have enough data
+      Dbg(dbg_ctl_proxyprotocol_v2, "Remaining data (%ld bytes) is not enough for a TLV field (ID:%u LEN:%hu)", end - p, type,
+          length);
+      return -3;
+    }
+    Dbg(dbg_ctl_proxyprotocol, "TLV: ID=%u LEN=%hu", type, length);
+    tlv.emplace(type, std::string_view(p, length));
+    p += length;
+  }
+
+  return 0;
 }

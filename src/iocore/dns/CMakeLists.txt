@@ -15,7 +15,7 @@
 #
 #######################
 
-add_library(inkdns STATIC DNS.cc DNSConnection.cc DNSEventIO.cc Inline.cc SplitDNS.cc)
+add_library(inkdns STATIC DNS.cc DNSConnection.cc DNSEventIO.cc SplitDNS.cc)
 add_library(ts::inkdns ALIAS inkdns)
 
 target_include_directories(
@@ -30,3 +30,5 @@ target_link_libraries(
          #ts::inknet cyclic dependency
          ts::proxy ts::tsutil ts::tscore
 )
+
+clang_tidy_check(inkdns)

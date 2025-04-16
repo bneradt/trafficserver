@@ -96,9 +96,9 @@ SCENARIO("Parsing ACL named filters", "[proxy][remap]")
       .definefilter deny_methods @action=deny @method=CONNECT @action=allow @method=PUT @method=DELETE
       )RMCFG";
       auto        cpath  = write_test_remap(config, "test2");
-      THEN("For ATS 10.0.x, this doesnt fail")
+      THEN("The remap parse fails with an error")
       {
-        REQUIRE(remap_parse_config_bti(cpath.c_str(), &bti) == true);
+        REQUIRE(remap_parse_config_bti(cpath.c_str(), &bti) == false);
       }
     }
 
@@ -112,9 +112,8 @@ SCENARIO("Parsing ACL named filters", "[proxy][remap]")
       THEN("The rule uses the last action specified")
       {
         REQUIRE(remap_parse_config_bti(cpath.c_str(), &bti) == true);
-        REQUIRE(bti.rules_list != nullptr);
-        REQUIRE(bti.rules_list->next == nullptr);
-        REQUIRE(bti.rules_list->allow_flag == true);
+        REQUIRE((bti.rules_list != nullptr && bti.rules_list->next == nullptr));
+        REQUIRE((bti.rules_list != nullptr && bti.rules_list->allow_flag == true));
       }
     }
   }

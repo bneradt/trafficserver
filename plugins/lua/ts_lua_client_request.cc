@@ -28,6 +28,7 @@ static int ts_lua_client_request_header_set(lua_State *L);
 static int ts_lua_client_request_header_table_get(lua_State *L);
 static int ts_lua_client_request_header_table_set(lua_State *L);
 static int ts_lua_client_request_get_headers(lua_State *L);
+static int ts_lua_client_request_get_header_block(lua_State *L);
 static int ts_lua_client_request_get_url(lua_State *L);
 static int ts_lua_client_request_get_pristine_url(lua_State *L);
 static int ts_lua_client_request_get_url_host(lua_State *L);
@@ -336,6 +337,9 @@ ts_lua_inject_client_request_headers_api(lua_State *L)
 {
   lua_pushcfunction(L, ts_lua_client_request_get_headers);
   lua_setfield(L, -2, "get_headers");
+
+  lua_pushcfunction(L, ts_lua_client_request_get_header_block);
+  lua_setfield(L, -2, "get_header_block");
 }
 
 static int
@@ -392,6 +396,65 @@ ts_lua_client_request_get_headers(lua_State *L)
     field_loc = next_field_loc;
   }
 
+  return 1;
+}
+
+static int
+ts_lua_client_request_get_header_block(lua_State *L)
+{
+  TSIOBuffer       output_buffer;
+  TSIOBufferReader reader;
+  int              total_avail;
+
+  TSIOBufferBlock block;
+  const char     *block_start;
+  int64_t         block_avail;
+
+  char   *output_string;
+  int64_t output_len;
+
+  ts_lua_http_ctx *http_ctx;
+
+  GET_HTTP_CONTEXT(http_ctx, L);
+
+  output_buffer = TSIOBufferCreate();
+  reader        = TSIOBufferReaderAlloc(output_buffer);
+
+  TSMimeHdrPrint(http_ctx->client_request_hdrp, output_buffer);
+
+  total_avail = TSIOBufferReaderAvail(reader);
+
+  output_string = static_cast<char *>(TSmalloc(total_avail + 1));
+  output_len    = 0;
+
+  block = TSIOBufferReaderStart(reader);
+  while (block) {
+    block_start = TSIOBufferBlockReadStart(block, reader, &block_avail);
+
+    if (block_avail == 0) {
+      break;
+    }
+
+    memcpy(output_string + output_len, block_start, block_avail);
+    output_len += block_avail;
+
+    TSIOBufferReaderConsume(reader, block_avail);
+    block = TSIOBufferReaderStart(reader);
+  }
+
+  output_string[output_len] = '\0';
+  output_len++;
+
+  TSIOBufferReaderFree(reader);
+  TSIOBufferDestroy(output_buffer);
+
+  if (output_string && output_len) {
+    lua_pushlstring(L, output_string, output_len);
+  } else {
+    lua_pushnil(L);
+  }
+
+  TSfree(output_string);
   return 1;
 }
 
@@ -699,7 +762,7 @@ static int
 ts_lua_client_request_client_addr_get_ip(lua_State *L)
 {
   struct sockaddr const *client_ip;
-  char                   cip[128];
+  char                   cip[128] = "";
   ts_lua_http_ctx       *http_ctx;
 
   GET_HTTP_CONTEXT(http_ctx, L);
@@ -712,7 +775,7 @@ ts_lua_client_request_client_addr_get_ip(lua_State *L)
   } else {
     if (client_ip->sa_family == AF_INET) {
       inet_ntop(AF_INET, (const void *)&((struct sockaddr_in *)client_ip)->sin_addr, cip, sizeof(cip));
-    } else {
+    } else if (client_ip->sa_family == AF_INET6) {
       inet_ntop(AF_INET6, (const void *)&((struct sockaddr_in6 *)client_ip)->sin6_addr, cip, sizeof(cip));
     }
 
@@ -781,9 +844,9 @@ ts_lua_client_request_client_addr_get_addr(lua_State *L)
 {
   struct sockaddr const *client_ip;
   ts_lua_http_ctx       *http_ctx;
-  int                    port;
-  int                    family;
-  char                   cip[128];
+  int                    port     = 0;
+  int                    family   = AF_UNSPEC;
+  char                   cip[128] = "";
 
   GET_HTTP_CONTEXT(http_ctx, L);
 
@@ -799,7 +862,7 @@ ts_lua_client_request_client_addr_get_addr(lua_State *L)
       port = ntohs(((struct sockaddr_in *)client_ip)->sin_port);
       inet_ntop(AF_INET, (const void *)&((struct sockaddr_in *)client_ip)->sin_addr, cip, sizeof(cip));
       family = AF_INET;
-    } else {
+    } else if (client_ip->sa_family == AF_INET6) {
       port = ntohs(((struct sockaddr_in6 *)client_ip)->sin6_port);
       inet_ntop(AF_INET6, (const void *)&((struct sockaddr_in6 *)client_ip)->sin6_addr, cip, sizeof(cip));
       family = AF_INET6;

@@ -33,7 +33,8 @@
 #include "iocore/dns/DNSEventIO.h"
 #include "iocore/dns/DNSProcessor.h"
 
-#include "tscore/ink_platform.h"
+#include "iocore/eventsystem/UnixSocket.h"
+
 #include "tscore/ink_rand.h"
 #include "tscore/List.h"
 #include "tscore/Ptr.h"
@@ -80,7 +81,7 @@ struct DNSConnection {
     self &setLocalIpv4(sockaddr const *addr);
   };
 
-  int        fd;
+  UnixSocket sock{NO_SOCK};
   IpEndpoint ip;
   int        num = 0;
   Options    opt;
@@ -103,11 +104,7 @@ struct DNSConnection {
     }
   } tcp_data;
 
-  int connect(sockaddr const *addr, Options const &opt = DEFAULT_OPTIONS);
-  /*
-                bool non_blocking_connect = NON_BLOCKING_CONNECT,
-                bool use_tcp = CONNECT_WITH_TCP, bool non_blocking = NON_BLOCKING, bool bind_random_port = BIND_ANY_PORT);
-  */
+  int  connect(sockaddr const *addr, Options const &opt = DEFAULT_OPTIONS);
   int  close();
   void trigger();
 

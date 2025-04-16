@@ -44,7 +44,7 @@ public:
   void initialize(Parser &p) override;
 
 protected:
-  void exec(const Resources &res) const override;
+  bool exec(const Resources &res) const override;
 
 private:
   TSOverridableConfigKey _key  = TS_CONFIG_NULL;
@@ -67,7 +67,7 @@ public:
 
 protected:
   void initialize_hooks() override;
-  void exec(const Resources &res) const override;
+  bool exec(const Resources &res) const override;
 
 private:
   Value       _status;
@@ -88,7 +88,7 @@ public:
 
 protected:
   void initialize_hooks() override;
-  void exec(const Resources &res) const override;
+  bool exec(const Resources &res) const override;
 
 private:
   Value _reason;
@@ -106,7 +106,7 @@ public:
   void initialize(Parser &p) override;
 
 protected:
-  void exec(const Resources &res) const override;
+  bool exec(const Resources &res) const override;
 
 private:
   UrlQualifiers _url_qual = URL_QUAL_NONE;
@@ -126,7 +126,7 @@ public:
   void initialize(Parser &p) override;
 
 protected:
-  void exec(const Resources &res) const override;
+  bool exec(const Resources &res) const override;
 
 private:
   UrlQualifiers                 _url_qual = URL_QUAL_NONE;
@@ -159,7 +159,9 @@ public:
   }
 
 protected:
-  void exec(const Resources &res) const override;
+  void initialize_hooks() override;
+
+  bool exec(const Resources &res) const override;
 
 private:
   Value _status;
@@ -176,7 +178,11 @@ public:
   void operator=(const OperatorNoOp &) = delete;
 
 protected:
-  void exec(const Resources & /* res ATS_UNUSED */) const override {};
+  bool
+  exec(const Resources & /* res ATS_UNUSED */) const override
+  {
+    return true;
+  };
 };
 
 class OperatorSetTimeoutOut : public Operator
@@ -191,7 +197,7 @@ public:
   void initialize(Parser &p) override;
 
 protected:
-  void exec(const Resources &res) const override;
+  bool exec(const Resources &res) const override;
 
 private:
   enum TimeoutOutType {
@@ -218,7 +224,7 @@ public:
   void initialize(Parser &p) override;
 
 protected:
-  void exec(const Resources &res) const override;
+  bool exec(const Resources &res) const override;
 
 private:
   bool _skip_remap = false;
@@ -235,7 +241,7 @@ public:
   void operator=(const OperatorRMHeader &)   = delete;
 
 protected:
-  void exec(const Resources &res) const override;
+  bool exec(const Resources &res) const override;
 };
 
 class OperatorAddHeader : public OperatorHeaders
@@ -250,7 +256,7 @@ public:
   void initialize(Parser &p) override;
 
 protected:
-  void exec(const Resources &res) const override;
+  bool exec(const Resources &res) const override;
 
 private:
   Value _value;
@@ -268,7 +274,7 @@ public:
   void initialize(Parser &p) override;
 
 protected:
-  void exec(const Resources &res) const override;
+  bool exec(const Resources &res) const override;
 
 private:
   Value _value;
@@ -286,7 +292,7 @@ public:
   void initialize(Parser &p) override;
 
 protected:
-  void exec(const Resources &res) const override;
+  bool exec(const Resources &res) const override;
 
 private:
   std::string _counter_name;
@@ -303,7 +309,7 @@ public:
   void operator=(const OperatorRMCookie &)   = delete;
 
 protected:
-  void exec(const Resources &res) const override;
+  bool exec(const Resources &res) const override;
 };
 
 class OperatorAddCookie : public OperatorCookies
@@ -318,7 +324,7 @@ public:
   void initialize(Parser &p) override;
 
 protected:
-  void exec(const Resources &res) const override;
+  bool exec(const Resources &res) const override;
 
 private:
   Value _value;
@@ -336,7 +342,7 @@ public:
   void initialize(Parser &p) override;
 
 protected:
-  void exec(const Resources &res) const override;
+  bool exec(const Resources &res) const override;
 
 private:
   Value _value;
@@ -367,7 +373,7 @@ public:
 
 protected:
   void initialize_hooks() override;
-  void exec(const Resources &res) const override;
+  bool exec(const Resources &res) const override;
 
 private:
   Value _ds_value;
@@ -386,7 +392,7 @@ public:
 
 protected:
   void initialize_hooks() override;
-  void exec(const Resources &res) const override;
+  bool exec(const Resources &res) const override;
 
 private:
   Value _ds_value;
@@ -405,7 +411,7 @@ public:
 
 protected:
   void initialize_hooks() override;
-  void exec(const Resources &res) const override;
+  bool exec(const Resources &res) const override;
 };
 
 class OperatorSetBody : public Operator
@@ -421,7 +427,7 @@ public:
 
 protected:
   void initialize_hooks() override;
-  void exec(const Resources &res) const override;
+  bool exec(const Resources &res) const override;
 
 private:
   Value _value;
@@ -440,7 +446,7 @@ public:
 
 protected:
   void initialize_hooks() override;
-  void exec(const Resources &res) const override;
+  bool exec(const Resources &res) const override;
 
 private:
   bool           _flag = false;
@@ -473,8 +479,119 @@ public:
 
 protected:
   void initialize_hooks() override;
-  void exec(const Resources &res) const override;
+  bool exec(const Resources &res) const override;
 
 private:
   RemapPluginInst *_plugin = nullptr;
+};
+
+class OperatorSetBodyFrom : public Operator
+{
+public:
+  OperatorSetBodyFrom() { Dbg(pi_dbg_ctl, "Calling CTOR for OperatorSetBodyFrom"); }
+
+  // noncopyable
+  OperatorSetBodyFrom(const OperatorSetBodyFrom &) = delete;
+  void operator=(const OperatorSetBodyFrom &)      = delete;
+
+  void initialize(Parser &p) override;
+
+  enum { TS_EVENT_FETCHSM_SUCCESS = 70000, TS_EVENT_FETCHSM_FAILURE = 70001, TS_EVENT_FETCHSM_TIMEOUT = 70002 };
+
+protected:
+  void initialize_hooks() override;
+  bool exec(const Resources &res) const override;
+
+private:
+  Value _value;
+};
+
+class OperatorSetStateFlag : public Operator
+{
+public:
+  OperatorSetStateFlag()
+  {
+    static_assert(sizeof(void *) == 8, "State Variables requires a 64-bit system.");
+    Dbg(dbg_ctl, "Calling CTOR for OperatorSetStateFlag");
+  }
+
+  // noncopyable
+  OperatorSetStateFlag(const OperatorSetStateFlag &) = delete;
+  void operator=(const OperatorSetStateFlag &)       = delete;
+
+  void initialize(Parser &p) override;
+
+protected:
+  void initialize_hooks() override;
+  bool exec(const Resources &res) const override;
+
+  bool
+  need_txn_slot() const override
+  {
+    return true;
+  }
+
+private:
+  int      _flag_ix = -1;
+  int      _flag    = false;
+  uint64_t _mask    = 0;
+};
+
+class OperatorSetStateInt8 : public Operator
+{
+public:
+  OperatorSetStateInt8()
+  {
+    static_assert(sizeof(void *) == 8, "State Variables requires a 64-bit system.");
+    Dbg(dbg_ctl, "Calling CTOR for OperatorSetStateInt8");
+  }
+
+  // noncopyable
+  OperatorSetStateInt8(const OperatorSetStateInt8 &) = delete;
+  void operator=(const OperatorSetStateInt8 &)       = delete;
+
+  void initialize(Parser &p) override;
+
+protected:
+  void initialize_hooks() override;
+  bool exec(const Resources &res) const override;
+
+  bool
+  need_txn_slot() const override
+  {
+    return true;
+  }
+
+private:
+  int   _byte_ix = -1;
+  Value _value;
+};
+
+class OperatorSetStateInt16 : public Operator
+{
+public:
+  OperatorSetStateInt16()
+  {
+    static_assert(sizeof(void *) == 8, "State Variables requires a 64-bit system.");
+    Dbg(dbg_ctl, "Calling CTOR for OperatorSetStateInt16");
+  }
+
+  // noncopyable
+  OperatorSetStateInt16(const OperatorSetStateInt16 &) = delete;
+  void operator=(const OperatorSetStateInt16 &)        = delete;
+
+  void initialize(Parser &p) override;
+
+protected:
+  void initialize_hooks() override;
+  bool exec(const Resources &res) const override;
+
+  bool
+  need_txn_slot() const override
+  {
+    return true;
+  }
+
+private:
+  Value _value;
 };

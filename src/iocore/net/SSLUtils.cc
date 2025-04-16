@@ -19,46 +19,35 @@
   limitations under the License.
  */
 
-#include "swoc/swoc_file.h"
-#include "swoc/Errata.h"
-#include "swoc/bwf_std.h"
-
+#include "BoringSSLUtils.h"
 #include "P_SSLUtils.h"
+#include "P_Net.h"
+#include "P_OCSPStapling.h"
+#include "P_SSLConfig.h"
+#include "P_SSLNetVConnection.h"
+#include "P_TLSKeyLogger.h"
+#include "SSLStats.h"
+#include "SSLSessionCache.h"
+#include "SSLSessionTicket.h"
+#include "SSLDynlock.h" // IWYU pragma: keep - for ssl_dyn_*
 
+#include "iocore/net/SSLMultiCertConfigLoader.h"
+#include "iocore/net/SSLAPIHooks.h"
+#include "iocore/net/SSLDiags.h"
+#include "iocore/net/TLSSessionResumptionSupport.h"
+#include "records/RecHttp.h"
+#include "tscore/MatcherUtils.h"
 #include "tscore/ink_config.h"
-#include "tscore/ink_platform.h"
 #include "tscore/SimpleTokenizer.h"
 #include "tscore/Layout.h"
 #include "tscore/ink_cap.h"
 #include "tscore/ink_mutex.h"
 #include "tscore/Filenames.h"
-#include "records/RecHttp.h"
-
-#include "P_Net.h"
-#include "api/InkAPIInternal.h"
-
-#include "P_OCSPStapling.h"
-#include "P_SSLConfig.h"
-#include "P_TLSKeyLogger.h"
-#include "BoringSSLUtils.h"
-#include "iocore/net/ProxyProtocol.h"
-#include "iocore/net/SSLAPIHooks.h"
-#include "SSLSessionCache.h"
-#include "SSLSessionTicket.h"
-#include "SSLDynlock.h"
-#include "iocore/net/SSLDiags.h"
-#include "SSLStats.h"
-#include "iocore/net/TLSSessionResumptionSupport.h"
 #if TS_USE_QUIC == 1
 #include "iocore/net/QUICSupport.h"
 #endif
-#include "P_SSLNetVConnection.h"
-
-#include <string>
-#include <unistd.h>
-#include <termios.h>
-#include <vector>
-
+#include "swoc/swoc_file.h"
+#include "swoc/Errata.h"
 #include <openssl/asn1.h>
 #include <openssl/bio.h>
 #include <openssl/bn.h>
@@ -72,10 +61,15 @@
 #include <openssl/rand.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
-
 #if HAVE_OPENSSL_TS_H
 #include <openssl/ts.h>
 #endif
+
+#include <utility>
+#include <string>
+#include <unistd.h>
+#include <termios.h>
+#include <vector>
 
 using namespace std::literals;
 
@@ -280,17 +274,14 @@ ssl_verify_client_callback(int preverify_ok, X509_STORE_CTX *ctx)
   Dbg(dbg_ctl_ssl_verify, "Callback: verify client cert");
   auto              *ssl   = static_cast<SSL *>(X509_STORE_CTX_get_ex_data(ctx, SSL_get_ex_data_X509_STORE_CTX_idx()));
   SSLNetVConnection *netvc = SSLNetVCAccess(ssl);
+  TLSBasicSupport   *tbs   = TLSBasicSupport::getInstance(ssl);
 
-  if (!netvc || netvc->ssl != ssl) {
-    Dbg(dbg_ctl_ssl_verify, "ssl_verify_client_callback call back on stale netvc");
+  if (tbs == nullptr) {
+    Dbg(dbg_ctl_ssl_verify, "call back on stale netvc");
     return false;
   }
 
-  netvc->set_verify_cert(ctx);
-  netvc->callHooks(TS_EVENT_SSL_VERIFY_CLIENT);
-  netvc->set_verify_cert(nullptr);
-
-  if (netvc->getSSLHandShakeComplete()) { // hook moved the handshake state to terminal
+  if (tbs->verify_certificate(ctx) == 1) { // hook moved the handshake state to terminal
     Warning("TS_EVENT_SSL_VERIFY_CLIENT plugin failed the client certificate check for %s.", netvc->options.sni_servername.get());
     return false;
   }
@@ -301,75 +292,45 @@ ssl_verify_client_callback(int preverify_ok, X509_STORE_CTX *ctx)
 #if HAVE_SSL_CTX_SET_CLIENT_HELLO_CB
 // Pausable callback
 static int
-ssl_client_hello_callback(SSL *s, int *al, void *arg)
+ssl_client_hello_callback(SSL *s, int * /* al ATS_UNUSED */, void * /* arg ATS_UNUSED */)
 {
-  TLSSNISupport *snis = TLSSNISupport::getInstance(s);
-  if (snis) {
-    snis->on_client_hello(s, al, arg);
-    int ret = snis->perform_sni_action(*s);
-    if (ret != SSL_TLSEXT_ERR_OK) {
-      return SSL_CLIENT_HELLO_ERROR;
-    }
-  } else {
-    // This error suggests either of these:
-    // 1) Call back on unsupported netvc -- Don't register callback unnecessarily
-    // 2) Call back on stale netvc
-    Dbg(dbg_ctl_ssl_error, "ssl_client_hello_callback was called unexpectedly");
-    return SSL_CLIENT_HELLO_ERROR;
-  }
-
-  SSLNetVConnection *netvc = dynamic_cast<SSLNetVConnection *>(snis);
-  if (netvc) {
-    if (netvc->ssl != s) {
-      Dbg(dbg_ctl_ssl_error, "ssl_client_hello_callback call back on stale netvc");
-      return SSL_CLIENT_HELLO_ERROR;
-    }
-
-    bool reenabled = netvc->callHooks(TS_EVENT_SSL_CLIENT_HELLO);
-    if (!reenabled) {
-      return SSL_CLIENT_HELLO_RETRY;
-    }
-  }
-
-  return SSL_CLIENT_HELLO_SUCCESS;
-}
+  TLSSNISupport::ClientHello ch = {s};
 #elif HAVE_SSL_CTX_SET_SELECT_CERTIFICATE_CB
 static ssl_select_cert_result_t
 ssl_client_hello_callback(const SSL_CLIENT_HELLO *client_hello)
 {
-  SSL           *s    = client_hello->ssl;
-  TLSSNISupport *snis = TLSSNISupport::getInstance(s);
+  SSL                       *s  = client_hello->ssl;
+  TLSSNISupport::ClientHello ch = {client_hello};
+#endif
 
+  TLSSNISupport *snis = TLSSNISupport::getInstance(s);
   if (snis) {
-    snis->on_client_hello(client_hello);
+    snis->on_client_hello(ch);
     int ret = snis->perform_sni_action(*s);
     if (ret != SSL_TLSEXT_ERR_OK) {
-      return ssl_select_cert_error;
+      return CLIENT_HELLO_ERROR;
     }
   } else {
     // This error suggests either of these:
     // 1) Call back on unsupported netvc -- Don't register callback unnecessarily
     // 2) Call back on stale netvc
     Dbg(dbg_ctl_ssl_error, "ssl_client_hello_callback was called unexpectedly");
-    return ssl_select_cert_error;
+    return CLIENT_HELLO_ERROR;
   }
 
-  SSLNetVConnection *netvc = dynamic_cast<SSLNetVConnection *>(snis);
-  if (netvc) {
-    if (netvc->ssl != s) {
-      Dbg(dbg_ctl_ssl_error, "ssl_client_hello_callback call back on stale netvc");
-      return ssl_select_cert_error;
-    }
-
-    bool reenabled = netvc->callHooks(TS_EVENT_SSL_CLIENT_HELLO);
+  TLSEventSupport *es = TLSEventSupport::getInstance(s);
+  if (es) {
+    bool reenabled = es->callHooks(TS_EVENT_SSL_CLIENT_HELLO);
     if (!reenabled) {
-      return ssl_select_cert_retry;
+      return CLIENT_HELLO_RETRY;
     }
+  } else {
+    Dbg(dbg_ctl_ssl_error, "ssl_client_hello_callback call back on stale netvc");
+    return CLIENT_HELLO_ERROR;
   }
 
-  return ssl_select_cert_success;
+  return CLIENT_HELLO_SUCCESS;
 }
-#endif
 
 /**
  * Called before either the server or the client certificate is used
@@ -379,6 +340,7 @@ static int
 ssl_cert_callback(SSL *ssl, [[maybe_unused]] void *arg)
 {
   TLSCertSwitchSupport *tcss     = TLSCertSwitchSupport::getInstance(ssl);
+  TLSEventSupport      *tes      = TLSEventSupport::getInstance(ssl);
   SSLNetVConnection    *sslnetvc = dynamic_cast<SSLNetVConnection *>(tcss);
   bool                  reenabled;
   int                   retval = 1;
@@ -404,28 +366,30 @@ ssl_cert_callback(SSL *ssl, [[maybe_unused]] void *arg)
   }
 #endif
 
-  if (sslnetvc) {
-    // Do the common certificate lookup only once.  If we pause
-    // and restart processing, do not execute the common logic again
-    if (!sslnetvc->calledHooks(TS_EVENT_SSL_CERT)) {
-      retval = sslnetvc->selectCertificate(ssl, ctxType);
-      if (retval != 1) {
-        return retval;
+  if (tcss) {
+    if (tes) {
+      // Do the common certificate lookup only once.  If we pause
+      // and restart processing, do not execute the common logic again
+      if (!tes->calledHooks(TS_EVENT_SSL_CERT)) {
+        retval = tcss->selectCertificate(ssl, ctxType);
+        if (retval != 1) {
+          return retval;
+        }
       }
-    }
 
-    // Call the plugin cert code
-    reenabled = sslnetvc->callHooks(TS_EVENT_SSL_CERT);
-    // If it did not re-enable, return the code to
-    // stop the accept processing
-    if (!reenabled) {
-      retval = -1; // Pause
-    }
-  } else {
-    if (tcss && tcss->selectCertificate(ssl, ctxType) == 1) {
-      retval = 1;
+      // Call the plugin cert code
+      reenabled = tes->callHooks(TS_EVENT_SSL_CERT);
+      // If it did not re-enable, return the code to
+      // stop the accept processing
+      if (!reenabled) {
+        retval = -1; // Pause
+      }
     } else {
-      retval = 0;
+      if (tcss->selectCertificate(ssl, ctxType) == 1) {
+        retval = 1;
+      } else {
+        retval = 0;
+      }
     }
   }
 
@@ -458,6 +422,9 @@ ssl_servername_callback(SSL *ssl, int *al, void *arg)
 {
   TLSSNISupport *snis = TLSSNISupport::getInstance(ssl);
   if (snis) {
+    if (TLSEventSupport *es = TLSEventSupport::getInstance(ssl); es) {
+      es->callHooks(TS_EVENT_SSL_SERVERNAME);
+    }
     snis->on_servername(ssl, al, arg);
 #if !TS_USE_HELLO_CB
     // Only call the SNI actions here if not already performed in the HELLO_CB
@@ -925,6 +892,7 @@ SSLInitializeLibrary()
   ssl_vc_index = SSL_get_ex_new_index(0, (void *)"NetVC index", nullptr, nullptr, nullptr);
 
   TLSBasicSupport::initialize();
+  TLSEventSupport::initialize();
   ALPNSupport::initialize();
   TLSSessionResumptionSupport::initialize();
   TLSSNISupport::initialize();
@@ -1480,19 +1448,16 @@ SSLMultiCertConfigLoader::_set_verify_path(SSL_CTX *ctx, const SSLMultiCertConfi
 bool
 SSLMultiCertConfigLoader::_setup_session_ticket(SSL_CTX *ctx, const SSLMultiCertConfigParams *sslMultCertSettings)
 {
-#if defined(SSL_OP_NO_TICKET)
   // Session tickets are enabled by default. Disable if explicitly requested.
   if (sslMultCertSettings->session_ticket_enabled == 0) {
     SSL_CTX_set_options(ctx, SSL_OP_NO_TICKET);
     Dbg(dbg_ctl_ssl_load, "ssl session ticket is disabled");
   }
-#endif
-#if defined(TLS1_3_VERSION) && !defined(LIBRESSL_VERSION_NUMBER) && !defined(OPENSSL_IS_BORINGSSL)
+
   if (!(this->_params->ssl_ctx_options & SSL_OP_NO_TLSv1_3)) {
     SSL_CTX_set_num_tickets(ctx, sslMultCertSettings->session_ticket_number);
     Dbg(dbg_ctl_ssl_load, "ssl session ticket number set to %d", sslMultCertSettings->session_ticket_number);
   }
-#endif
   return true;
 }
 
@@ -1688,7 +1653,7 @@ SSLMultiCertConfigLoader::_prep_ssl_ctx(const shared_SSLMultiCertConfigParams  &
    Do NOT call SSL_CTX_set_* functions from here. SSL_CTX should be set up by SSLMultiCertConfigLoader::init_server_ssl_ctx().
  */
 bool
-SSLMultiCertConfigLoader::_store_ssl_ctx(SSLCertLookup *lookup, const shared_SSLMultiCertConfigParams sslMultCertSettings)
+SSLMultiCertConfigLoader::_store_ssl_ctx(SSLCertLookup *lookup, const shared_SSLMultiCertConfigParams &sslMultCertSettings)
 {
   bool                                           retval = true;
   std::set<std::string>                          common_names;
@@ -1702,8 +1667,9 @@ SSLMultiCertConfigLoader::_store_ssl_ctx(SSLCertLookup *lookup, const shared_SSL
 
   std::vector<SSLLoadingContext> ctxs = this->init_server_ssl_ctx(data, sslMultCertSettings.get());
   for (const auto &loadingctx : ctxs) {
-    shared_SSL_CTX ctx(loadingctx.ctx, SSL_CTX_free);
-    if (!sslMultCertSettings || !this->_store_single_ssl_ctx(lookup, sslMultCertSettings, ctx, loadingctx.ctx_type, common_names)) {
+    if (!sslMultCertSettings ||
+        !this->_store_single_ssl_ctx(lookup, sslMultCertSettings, shared_SSL_CTX{loadingctx.ctx, SSL_CTX_free}, loadingctx.ctx_type,
+                                     common_names)) {
       if (!common_names.empty()) {
         std::string names;
         for (auto const &name : data.cert_names_list) {
@@ -1735,8 +1701,8 @@ SSLMultiCertConfigLoader::_store_ssl_ctx(SSLCertLookup *lookup, const shared_SSL
 
     std::vector<SSLLoadingContext> ctxs = this->init_server_ssl_ctx(single_data, sslMultCertSettings.get());
     for (const auto &loadingctx : ctxs) {
-      shared_SSL_CTX unique_ctx(loadingctx.ctx, SSL_CTX_free);
-      if (!this->_store_single_ssl_ctx(lookup, sslMultCertSettings, unique_ctx, loadingctx.ctx_type, iter->second)) {
+      if (!this->_store_single_ssl_ctx(lookup, sslMultCertSettings, shared_SSL_CTX{loadingctx.ctx, SSL_CTX_free},
+                                       loadingctx.ctx_type, iter->second)) {
         retval = false;
       } else {
         lookup->register_cert_secrets(data.cert_names_list, iter->second);
@@ -2149,12 +2115,12 @@ SSLMultiCertConfigLoader::load_certs_and_cross_reference_names(
   const SSLMultiCertConfigParams *sslMultCertSettings, std::set<std::string> &common_names,
   std::unordered_map<int, std::set<std::string>> &unique_names, SSLCertContextType *certType)
 {
-  SimpleTokenizer cert_tok(sslMultCertSettings && sslMultCertSettings->cert ? (const char *)sslMultCertSettings->cert : "",
+  SimpleTokenizer cert_tok(sslMultCertSettings && sslMultCertSettings->cert ? sslMultCertSettings->cert : "",
                            SSL_CERT_SEPARATE_DELIM);
 
   SimpleTokenizer key_tok(SSL_CERT_SEPARATE_DELIM);
   if (sslMultCertSettings && sslMultCertSettings->key) {
-    key_tok.setString((const char *)sslMultCertSettings->key);
+    key_tok.setString(sslMultCertSettings->key);
   } else {
     key_tok.setString("");
   }
@@ -2399,7 +2365,7 @@ SSLMultiCertConfigLoader::load_certs(SSL_CTX *ctx, const std::vector<std::string
 
     if (secret_key_data.empty()) {
       Dbg(dbg_ctl_ssl_load, "empty private key for public key %s", cert_names_list[i].c_str());
-      secret_key_data = secret_data;
+      secret_key_data = std::move(secret_data);
     }
     if (!SSLPrivateKeyHandler(ctx, keyPath.c_str(), secret_key_data.data(), secret_key_data.size())) {
       SSLError("failed to load certificate: %s of length %ld with key path: %s", cert_names_list[i].c_str(), secret_key_data.size(),

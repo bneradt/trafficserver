@@ -21,15 +21,15 @@
   limitations under the License.
  */
 
-#include "P_Cache.h"
-
 #include "iocore/cache/Store.h"
-
+#include "records/RecCore.h"
+#include "tscore/Diags.h"
 #include "tscore/ink_platform.h"
 #include "tscore/Layout.h"
 #include "tscore/Filenames.h"
 #include "tscore/ink_file.h"
 #include "tscore/SimpleTokenizer.h"
+#include "tsutil/DbgCtl.h"
 
 #if defined(__linux__)
 #include <linux/major.h>
@@ -234,7 +234,7 @@ Store::read_config()
   fd = ::open(storage_path, O_RDONLY);
   if (fd < 0) {
     Error("%s failed to load", ts::filename::STORAGE);
-    return Result::failure("open %s: %s", (const char *)storage_path, strerror(errno));
+    return Result::failure("open %s: %s", storage_path.get(), strerror(errno));
   }
 
   // For each line
@@ -367,7 +367,7 @@ Span::init(const char *path, int64_t size)
   span_error_t        serr;
   ink_device_geometry geometry;
 
-  ats_scoped_fd fd(SocketManager::open(path, O_RDONLY));
+  ats_scoped_fd fd(safe_open(path, O_RDONLY));
   if (fd < 0) {
     serr = make_span_error(errno);
     Warning("unable to open '%s': %s", path, strerror(errno));

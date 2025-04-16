@@ -18,6 +18,7 @@ limitations under the License.
 // This file is based on the example code from https://github.com/eBay/NuRaft/tree/master/examples
 
 #include <cassert>
+#include <utility>
 
 #include <libnuraft/nuraft.hxx>
 
@@ -58,14 +59,18 @@ STEKShareLogStore::start_index() const
 nuraft::ptr<nuraft::log_entry>
 STEKShareLogStore::last_entry() const
 {
-  uint64_t                    next_idx = next_slot();
-  std::lock_guard<std::mutex> l(logs_lock_);
-  auto                        entry = logs_.find(next_idx - 1);
-  if (entry == logs_.end()) {
-    entry = logs_.find(0);
+  uint64_t                       next_idx = next_slot();
+  std::lock_guard<std::mutex>    l(logs_lock_);
+  auto                           search = logs_.find(next_idx - 1);
+  nuraft::ptr<nuraft::log_entry> src    = nullptr;
+
+  if (search == logs_.end()) {
+    src = logs_.at(0); // dummy entry
+  } else {
+    src = search->second;
   }
 
-  return make_clone(entry->second);
+  return make_clone(src);
 }
 
 uint64_t
@@ -82,6 +87,8 @@ STEKShareLogStore::append(nuraft::ptr<nuraft::log_entry> &entry)
 void
 STEKShareLogStore::write_at(uint64_t index, nuraft::ptr<nuraft::log_entry> &entry)
 {
+  // We prepare what we can before taking the logs lock to minimize how long
+  // we hold it.
   nuraft::ptr<nuraft::log_entry> clone = make_clone(entry);
 
   // Discard all logs equal to or greater than "index".
@@ -90,7 +97,7 @@ STEKShareLogStore::write_at(uint64_t index, nuraft::ptr<nuraft::log_entry> &entr
   while (itr != logs_.end()) {
     itr = logs_.erase(itr);
   }
-  logs_[index] = clone;
+  logs_[index] = std::move(clone);
 }
 
 nuraft::ptr<std::vector<nuraft::ptr<nuraft::log_entry>>>
@@ -152,11 +159,13 @@ STEKShareLogStore::entry_at(uint64_t index)
   nuraft::ptr<nuraft::log_entry> src = nullptr;
   {
     std::lock_guard<std::mutex> l(logs_lock_);
-    auto                        entry = logs_.find(index);
-    if (entry == logs_.end()) {
-      entry = logs_.find(0);
+    auto                        search = logs_.find(index);
+
+    if (search == logs_.end()) {
+      src = logs_.at(0); // dummy entry;
+    } else {
+      src = search->second;
     }
-    src = entry->second;
   }
   return make_clone(src);
 }
@@ -166,12 +175,17 @@ STEKShareLogStore::term_at(uint64_t index)
 {
   uint64_t term = 0;
   {
-    std::lock_guard<std::mutex> l(logs_lock_);
-    auto                        entry = logs_.find(index);
-    if (entry == logs_.end()) {
-      entry = logs_.find(0);
+    std::lock_guard<std::mutex>    l(logs_lock_);
+    auto                           search = logs_.find(index);
+    nuraft::ptr<nuraft::log_entry> src    = nullptr;
+
+    if (search == logs_.end()) {
+      src = logs_.at(0); // dummy entry;
+    } else {
+      src = search->second;
     }
-    term = entry->second->get_term();
+
+    term = src->get_term();
   }
   return term;
 }

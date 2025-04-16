@@ -327,7 +327,7 @@ LogField::milestones_from_m_name(TSMilestonesType *ms1, TSMilestonesType *ms2)
 }
 
 // Container field ctor
-LogField::LogField(const char *field, Container container, SetFunc _setfunc)
+LogField::LogField(const char *field, Container container)
   : m_name(ats_strdup(field)),
     m_symbol(ats_strdup(container_names[container])),
     m_type(LogField::STRING),
@@ -367,6 +367,7 @@ LogField::LogField(const char *field, Container container, SetFunc _setfunc)
 
   case ICFG:
     m_unmarshal_func = &(LogAccess::unmarshal_int_to_str);
+    m_type           = LogField::sINT;
     break;
 
   case RECORD:
@@ -379,6 +380,7 @@ LogField::LogField(const char *field, Container container, SetFunc _setfunc)
       Note("Invalid milestone name in LogField ctor: %s", m_name);
     }
     m_unmarshal_func = &(LogAccess::unmarshal_int_to_str);
+    m_type           = LogField::sINT;
     break;
 
   case MSDMS: {
@@ -387,6 +389,7 @@ LogField::LogField(const char *field, Container container, SetFunc _setfunc)
       Note("Invalid milestone range in LogField ctor: %s", m_name);
     }
     m_unmarshal_func = &(LogAccess::unmarshal_int_to_str);
+    m_type           = LogField::sINT;
     break;
   }
 
@@ -406,8 +409,8 @@ LogField::LogField(const LogField &rhs)
     m_agg_op(rhs.m_agg_op),
     m_agg_cnt(0),
     m_agg_val(0),
-    m_milestone1(TS_MILESTONE_LAST_ENTRY),
-    m_milestone2(TS_MILESTONE_LAST_ENTRY),
+    m_milestone1(rhs.m_milestone1),
+    m_milestone2(rhs.m_milestone2),
     m_time_field(rhs.m_time_field),
     m_alias_map(rhs.m_alias_map),
     m_set_func(rhs.m_set_func)
@@ -514,7 +517,7 @@ LogField::updateField(LogAccess *lad, char *buf, int len)
 /*-------------------------------------------------------------------------
   LogField::marshal
 
-  This routine will marshsal the given field into the buffer provided.
+  This routine will marshal the given field into the buffer provided.
   -------------------------------------------------------------------------*/
 unsigned
 LogField::marshal(LogAccess *lad, char *buf)
