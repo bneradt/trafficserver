@@ -105,6 +105,8 @@ public:
   // NetVConnection
   int         populate_protocol(std::string_view *results, int n) const override;
   const char *protocol_contains(std::string_view tag) const override;
+  const char *get_server_name() const override;
+  bool        support_sni() const override;
 
   // QUICConnection
   QUICStreamManager *stream_manager() override;

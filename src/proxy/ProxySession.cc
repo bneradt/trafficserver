@@ -335,11 +335,7 @@ ProxySession::reenable(VIO *vio)
 bool
 ProxySession::support_sni() const
 {
-  if (this->_vc) {
-    return this->_vc->get_service<TLSSNISupport>() != nullptr;
-  } else {
-    return false;
-  }
+  return _vc ? _vc->support_sni() : false;
 }
 
 PoolableSession *

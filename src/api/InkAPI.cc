@@ -7962,14 +7962,17 @@ TSVConnSslSniGet(TSVConn sslp, int *length)
     }
     return nullptr;
   }
-
   char const     *server_name = nullptr;
   NetVConnection *vc          = reinterpret_cast<NetVConnection *>(sslp);
-  if (auto snis = vc->get_service<TLSSNISupport>(); snis) {
-    server_name = snis->get_sni_server_name();
-    if (length) {
-      *length = server_name ? strlen(server_name) : 0;
-    }
+
+  if (vc == nullptr) {
+    return nullptr;
+  }
+
+  server_name = vc->get_server_name();
+
+  if (length) {
+    *length = server_name ? strlen(server_name) : 0;
   }
 
   return server_name;

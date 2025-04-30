@@ -766,6 +766,18 @@ QUICNetVConnection::protocol_contains(std::string_view prefix) const
   return retval;
 }
 
+const char *
+QUICNetVConnection::get_server_name() const
+{
+  return get_sni_server_name();
+}
+
+bool
+QUICNetVConnection::support_sni() const
+{
+  return true;
+}
+
 QUICConnection *
 QUICNetVConnection::get_quic_connection()
 {

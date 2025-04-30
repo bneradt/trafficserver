@@ -1,6 +1,6 @@
 /** @file
 
-  Implementation file for SSLProxySession class.
+  Catch based unit tests for inknet
 
   @section license License
 
@@ -21,19 +21,14 @@
   limitations under the License.
  */
 
-#include "SSLProxySession.h"
+#include "iocore/net/NetProcessor.h"
 #include "iocore/net/NetVConnection.h"
 
-class TLSSNISupport;
+#include <catch.hpp>
 
-void
-SSLProxySession::init(NetVConnection const &new_vc)
+TEST_CASE("When we allocate a VC, it should not have a server name yet.")
 {
-  if (new_vc.get_service<TLSSNISupport>() != nullptr) {
-    if (char const *name = new_vc.get_server_name()) {
-      _client_sni_server_name.assign(name);
-    }
-  }
-
-  _client_provided_cert = new_vc.peer_provided_cert();
+  NetVConnection *vc{netProcessor.allocate_vc(this_ethread())};
+  CHECK(nullptr == vc->get_server_name());
+  vc->do_io_close();
 }
