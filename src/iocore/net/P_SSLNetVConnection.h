@@ -256,7 +256,6 @@ public:
   bool          protocol_mask_set = false;
   unsigned long protocol_mask     = 0;
 
-
   const char *
   get_sni_servername() const override
   {

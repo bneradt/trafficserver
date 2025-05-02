@@ -1129,7 +1129,7 @@ config_reloader(TSCont cont, TSEvent /* event ATS_UNUSED */, void *edata)
     if (time_diff > 0) {
       long delay = cal_reload_delay(time_diff);
       Dbg(dbg_ctl, "scheduling config reload with %ld seconds delay for version: %s %s", delay, s3->versionString(),
-             config_fname.c_str());
+          config_fname.c_str());
       s3->reset_conf_reload_count();
       s3->schedule_conf_reload(delay);
     } else {
@@ -1248,8 +1248,8 @@ TSRemapNewInstance(int argc, char *argv[], void **ih, char * /* errbuf ATS_UNUSE
                      std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     if (time_diff > 0) {
       long delay = cal_reload_delay(time_diff);
-      Dbg(dbg_ctl,"[%s] scheduling config reload with %ld seconds delay for version: %s %s", PLUGIN_NAME, delay, s3->versionString(),
-             config_fname.c_str());
+      Dbg(dbg_ctl, "[%s] scheduling config reload with %ld seconds delay for version: %s %s", PLUGIN_NAME, delay,
+          s3->versionString(), config_fname.c_str());
       s3->reset_conf_reload_count();
       s3->schedule_conf_reload(delay);
     } else {
