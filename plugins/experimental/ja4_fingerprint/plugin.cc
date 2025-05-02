@@ -70,6 +70,8 @@ constexpr char const *PLUGIN_NAME{"ja4_fingerprint"};
 constexpr char const *PLUGIN_VENDOR{"Apache Software Foundation"};
 constexpr char const *PLUGIN_SUPPORT_EMAIL{"dev@trafficserver.apache.org"};
 
+constexpr std::string_view JA4_VIA_HEADER{"x-ja4-via"};
+
 constexpr unsigned int EXT_ALPN{0x10};
 constexpr unsigned int EXT_SUPPORTED_VERSIONS{0x2b};
 constexpr int          SSL_SUCCESS{1};
@@ -338,6 +340,17 @@ append_JA4_header(TSCont /* cont ATS_UNUSED */, TSHttpTxn txnp, std::string cons
   TSMLoc    hdr_loc;
   if (TS_SUCCESS == TSHttpTxnClientReqGet(txnp, &bufp, &hdr_loc)) {
     append_to_field(bufp, hdr_loc, "ja4", 3, fingerprint->data(), fingerprint->size());
+
+    TSMgmtString proxy_name = nullptr;
+    if (TS_SUCCESS != TSMgmtStringGet("proxy.config.proxy_name", &proxy_name)) {
+      TSError("[%s] Failed to get proxy name for %s, set 'proxy.config.proxy_name' in records.config", PLUGIN_NAME,
+              JA4_VIA_HEADER.data());
+      proxy_name = TSstrdup("unknown");
+    }
+    append_to_field(bufp, hdr_loc, JA4_VIA_HEADER.data(), static_cast<int>(JA4_VIA_HEADER.length()), proxy_name,
+                    static_cast<int>(std::strlen(proxy_name)));
+    TSfree(proxy_name);
+
   } else {
     Dbg(dbg_ctl, "Failed to get headers.");
   }

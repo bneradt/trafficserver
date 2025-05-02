@@ -88,6 +88,7 @@ class JA3FingerprintTest:
                 "x-ja3-raw: first-signature", "Verify the already-existing raw header was preserved.", reflags=re.IGNORECASE)
             self._server.Streams.All += Testers.ExcludesExpression(
                 "x-ja3-raw: first-signature;", "Verify no extra values were added due to preserve.", reflags=re.IGNORECASE)
+            self._server.Streams.All += Testers.ContainsExpression("x-ja3-via: test.proxy.com", "The x-ja3-via string was added.")
 
     def _configure_trafficserver(self) -> None:
         """Configure Traffic Server to be used in the test."""
@@ -105,7 +106,7 @@ class JA3FingerprintTest:
                 f'map https://http2.server.com https://http2.backend.com:{server_port} '
                 '@plugin=ja3_fingerprint.so @pparam=--ja3log')
         else:
-            arguments = '--ja3log --ja3raw --preserve'
+            arguments = '--ja3log --ja3raw --jaws --preserve'
             if self._modify_incoming:
                 arguments += ' --modify-incoming'
             self._ts.Disk.plugin_config.AddLine(f'ja3_fingerprint.so {arguments}')
@@ -118,6 +119,7 @@ class JA3FingerprintTest:
                 'proxy.config.ssl.client.verify.server.policy': 'PERMISSIVE',
                 'proxy.config.dns.nameservers': f"127.0.0.1:{self._dns.Variables.Port}",
                 'proxy.config.dns.resolv_conf': 'NULL',
+                'proxy.config.proxy_name': 'test.proxy.com',
                 'proxy.config.diags.debug.enabled': 1,
                 'proxy.config.diags.debug.tags': 'http|ja3_fingerprint',
             })

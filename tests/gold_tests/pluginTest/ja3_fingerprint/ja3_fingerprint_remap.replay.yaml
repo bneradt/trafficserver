@@ -44,6 +44,9 @@ sessions:
       headers:
         fields:
         - [ X-Request, { value: 'https-request', as: equal } ]
+        - [ x-ja3-via, { as: absent } ]
+        - [ x-jaws, { as: absent } ]
+        - [ x-jaws-via, { as: absent } ]
         - [ X-JA3-Sig, { as: absent } ]
         - [ X-JA3-Raw, { as: absent } ]
 
@@ -91,8 +94,11 @@ sessions:
       headers:
         fields:
         - [ x-request, { value: 'http2-request', as: equal } ]
+        - [ x-ja3-via, { as: present } ]
         - [ X-JA3-Sig, { as: present } ]
         - [ X-JA3-Raw, { as: absent } ]
+        - [ x-jaws, { as: absent } ]
+        - [ x-jaws-via, { as: absent } ]
 
     server-response:
       headers:
