@@ -60,7 +60,7 @@ static void               add_ciphers(JA4::TLSClientHelloSummary &summary, SSL *
 static void               add_extensions(JA4::TLSClientHelloSummary &summary, SSL *ssl);
 static std::string        hash_with_SHA256(std::string_view sv);
 static int                handle_read_request_hdr(TSCont cont, TSEvent event, void *edata);
-static void               append_JA4_header(TSCont cont, TSHttpTxn txnp, std::string const *fingerprint);
+static void               append_JA4_headers(TSCont cont, TSHttpTxn txnp, std::string const *fingerprint);
 static void append_to_field(TSMBuffer bufp, TSMLoc hdr_loc, char const *field, int field_len, char const *value, int value_len);
 static int  handle_vconn_close(TSCont cont, TSEvent event, void *edata);
 
@@ -324,7 +324,7 @@ handle_read_request_hdr(TSCont cont, TSEvent event, void *edata)
 
   std::string *fingerprint{static_cast<std::string *>(TSUserArgGet(vconn, *get_user_arg_index()))};
   if (fingerprint) {
-    append_JA4_header(cont, txnp, fingerprint);
+    append_JA4_headers(cont, txnp, fingerprint);
   } else {
     Dbg(dbg_ctl, "No JA4 fingerprint attached to vconn!");
   }
@@ -334,7 +334,7 @@ handle_read_request_hdr(TSCont cont, TSEvent event, void *edata)
 }
 
 void
-append_JA4_header(TSCont /* cont ATS_UNUSED */, TSHttpTxn txnp, std::string const *fingerprint)
+append_JA4_headers(TSCont /* cont ATS_UNUSED */, TSHttpTxn txnp, std::string const *fingerprint)
 {
   TSMBuffer bufp;
   TSMLoc    hdr_loc;

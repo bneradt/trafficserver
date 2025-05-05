@@ -84,7 +84,9 @@ sessions:
         - [ uuid, http2-request ]
         - [ x-request, http2-request ]
         - [ x-ja3-raw, first-signature ]
+        - [ x-ja3-via, first-via ]
         - [ x-jaws, first-signature ]
+        - [ x-jaws-via, first-via ]
       content:
         size: 399
 
@@ -92,8 +94,8 @@ sessions:
       headers:
         fields:
         - [ x-request, { value: 'http2-request', as: equal } ]
-        - [ x-ja3-via, { value: 'test.proxy.com', as: equal } ]
-        - [ x-jaws-via, { value: 'test.proxy.com', as: equal } ]
+        - [ x-ja3-via, { value: 'first-via', as: equal } ]
+        - [ x-jaws-via, { value: 'first-via', as: equal } ]
         - [ X-JA3-Sig, { as: present } ]
         - [ X-JA3-Raw, { as: present } ]
         - [ x-jaws, { as: present } ]

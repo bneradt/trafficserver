@@ -53,7 +53,7 @@ class JA3FingerprintTest:
 
         self._modify_incoming = modify_incoming
 
-        tr = Test.AddTestRun('Testing ja3_fingerprint plugin.')
+        tr = Test.AddTestRun(f'test_remap: {test_remap}, modify_incoming: {modify_incoming}')
         self._configure_dns(tr)
         self._configure_server(tr)
         self._configure_trafficserver()
@@ -192,10 +192,17 @@ class JA3FingerprintTest:
         p = tr.Processes.Default
         p.Command = f'grep --after-context=20 "Proxy\'s Request after hooks" {traffic_out}'
 
-        if self._modify_incoming:
-            p.Streams.All += "modify-incoming-proxy.gold"
+        if self._test_remap:
+            if self._modify_incoming:
+                p.Streams.All += "modify-incoming-remap-proxy.gold"
+            else:
+                p.Streams.All += "modify-sent-remap-proxy.gold"
         else:
-            p.Streams.All += "modify-sent-proxy.gold"
+            # Uses --preserve, so casing is different.
+            if self._modify_incoming:
+                p.Streams.All += "modify-incoming-global-proxy.gold"
+            else:
+                p.Streams.All += "modify-sent-global-proxy.gold"
 
 
 JA3FingerprintTest(test_remap=False, modify_incoming=False)
