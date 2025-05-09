@@ -232,20 +232,6 @@ public:
 
   std::shared_ptr<SSL_SESSION> client_sess = nullptr;
 
-  // The serverName is either a pointer to the (null-terminated) name fetched from the
-  // SSL object or the empty string.
-  const char *
-  get_server_name() const override
-  {
-    return get_sni_server_name() ? get_sni_server_name() : "";
-  }
-
-  bool
-  support_sni() const override
-  {
-    return true;
-  }
-
   /// Set by asynchronous hooks to request a specific operation.
   SslVConnOp hookOpRequested = SslVConnOp::SSL_HOOK_OP_DEFAULT;
 
@@ -255,12 +241,6 @@ public:
 
   bool          protocol_mask_set = false;
   unsigned long protocol_mask     = 0;
-
-  const char *
-  get_sni_servername() const override
-  {
-    return SSL_get_servername(this->ssl, TLSEXT_NAMETYPE_host_name);
-  }
 
   bool
   peer_provided_cert() const override
