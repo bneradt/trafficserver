@@ -1,0 +1,38 @@
+version: 2
+updates:
+    - package-ecosystem: cargo
+      directory: /
+      schedule:
+        interval: weekly
+        time: "02:00"
+        day: friday
+      allow:
+        - dependency-type: all
+    - package-ecosystem: docker
+      schedule:
+        interval: weekly
+        time: "02:00"
+        day: friday
+      allow:
+        - dependency-type: all
+      directories:
+        - /ci/docker/deb
+        - /ci/docker/yum
+        - /contrib/docker/ubuntu/noble
+        - /tools/http3
+    - package-ecosystem: github-actions
+      directory: /
+      schedule:
+        interval: weekly
+        time: "02:00"
+        day: friday
+      allow:
+        - dependency-type: all
+    - package-ecosystem: pip
+      directory: /
+      schedule:
+        interval: weekly
+        time: "02:00"
+        day: friday
+      allow:
+        - dependency-type: all
