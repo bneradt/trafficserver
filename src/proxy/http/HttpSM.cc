@@ -1833,6 +1833,11 @@ HttpSM::state_http_server_open(int event, void *data)
   case NET_EVENT_OPEN_FAILED: {
     t_state.current.state = HttpTransact::CONNECTION_ERROR;
     t_state.outbound_conn_track_state.clear();
+    if (server_entry) {
+      ink_assert(server_entry->vc_type == HTTP_SERVER_VC);
+      vc_table.cleanup_entry(server_entry);
+      server_entry = nullptr;
+    }
     if (_netvc != nullptr) {
       if (event == VC_EVENT_ERROR || event == NET_EVENT_OPEN_FAILED) {
         t_state.set_connect_fail(_netvc->lerrno);
