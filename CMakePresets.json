@@ -164,7 +164,7 @@
       "inherits": ["ci"],
       "cacheVariables": {
         "ENABLE_PROBES": "ON",
-        "OPENSSL_ROOT_DIR": "/opt/openssl-quic",
+        "OPENSSL_ROOT_DIR": "/opt/openssl",
         "opentelemetry_ROOT": "/opt",
         "CURL_ROOT": "/opt",
         "wamr_ROOT": "/opt",

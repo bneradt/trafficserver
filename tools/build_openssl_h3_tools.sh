@@ -28,7 +28,7 @@ readonly WORKDIR
 cd "${WORKDIR}"
 
 # Update this as the draft we support updates.
-OPENSSL_BRANCH=${OPENSSL_BRANCH:-"openssl-3.1.4+quic"}
+OPENSSL_BRANCH=${OPENSSL_BRANCH:-"openssl-3.5.0"}
 
 # Set these, if desired, to change these to your preferred installation
 # directory
@@ -90,19 +90,19 @@ else
 fi
 
 echo "Building OpenSSL with QUIC support"
-[ ! -d openssl-quic ] && git clone -b ${OPENSSL_BRANCH} --depth 1 https://github.com/quictls/openssl.git openssl-quic
-cd openssl-quic
-./config enable-tls1_3 --prefix=${OPENSSL_PREFIX}
-${MAKE} -j ${num_threads}
-sudo ${MAKE} install_sw
-sudo chmod -R a+rX ${BASE}
-
-# The symlink target provides a more convenient path for the user while also
-# providing, in the symlink source, the precise branch of the OpenSSL build.
-sudo ln -sf ${OPENSSL_PREFIX} ${OPENSSL_BASE}
-sudo chmod -R a+rX ${BASE}
-cd ..
-
+#[ ! -d openssl-quic ] && git clone --quiet -b ${OPENSSL_BRANCH} --depth 1 https://github.com/openssl/openssl.git openssl-quic
+#cd openssl-quic
+#./config enable-tls1_3 --prefix=${OPENSSL_PREFIX}
+#${MAKE} -j ${num_threads}
+#sudo ${MAKE} install_sw
+#sudo chmod -R a+rX ${BASE}
+#
+## The symlink target provides a more convenient path for the user while also
+## providing, in the symlink source, the precise branch of the OpenSSL build.
+#sudo ln -sf ${OPENSSL_PREFIX} ${OPENSSL_BASE}
+#sudo chmod -R a+rX ${BASE}
+#cd ..
+#
 # OpenSSL will install in /lib or lib64 depending upon the architecture.
 if [ -d "${OPENSSL_PREFIX}/lib" ]; then
   OPENSSL_LIB="${OPENSSL_PREFIX}/lib"
@@ -113,104 +113,76 @@ else
   exit 1
 fi
 LDFLAGS=${LDFLAGS:-"-Wl,-rpath,${OPENSSL_LIB}"}
-
-# Build quiche
-# Steps borrowed from: https://github.com/apache/trafficserver-ci/blob/main/docker/rockylinux8/Dockerfile
-echo "Building quiche"
+#
+## Build quiche
+## Steps borrowed from: https://github.com/apache/trafficserver-ci/blob/main/docker/rockylinux8/Dockerfile
+#echo "Building quiche"
 QUICHE_BASE="${BASE:-/opt}/quiche"
-[ ! -d quiche ] && git clone https://github.com/cloudflare/quiche.git
-cd quiche
-git checkout 0.23.2
-
-PKG_CONFIG_PATH="$OPENSSL_LIB"/pkgconfig LD_LIBRARY_PATH="$OPENSSL_LIB" \
-  cargo build -j4 --package quiche --release --features ffi,pkg-config-meta,qlog,openssl
-
-sudo mkdir -p ${QUICHE_BASE}/lib/pkgconfig
-sudo mkdir -p ${QUICHE_BASE}/include
-sudo cp target/release/libquiche.a ${QUICHE_BASE}/lib/
-[ -f target/release/libquiche.so ] && sudo cp target/release/libquiche.so ${QUICHE_BASE}/lib/
-# Why a link? https://github.com/cloudflare/quiche/issues/1808#issuecomment-2196233378
-sudo ln -s ${QUICHE_BASE}/lib/libquiche.so ${QUICHE_BASE}/lib/libquiche.so.0
-sudo cp quiche/include/quiche.h ${QUICHE_BASE}/include/
-sudo cp target/release/quiche.pc ${QUICHE_BASE}/lib/pkgconfig
-sudo chmod -R a+rX ${BASE}
-cd ..
-
-
-# Then nghttp3
-echo "Building nghttp3..."
-[ ! -d nghttp3 ] && git clone --depth 1 -b v1.8.0 https://github.com/ngtcp2/nghttp3.git
-cd nghttp3
-git submodule update --init
-autoreconf -if
-./configure \
-  --prefix=${BASE} \
-  PKG_CONFIG_PATH=${BASE}/lib/pkgconfig:${OPENSSL_LIB}/pkgconfig \
-  CFLAGS="${CFLAGS}" \
-  CXXFLAGS="${CXXFLAGS}" \
-  LDFLAGS="${LDFLAGS}" \
-  --enable-lib-only
-${MAKE} -j ${num_threads}
-sudo ${MAKE} install
-sudo chmod -R a+rX ${BASE}
-cd ..
-
-# Now ngtcp2
-echo "Building ngtcp2..."
-[ ! -d ngtcp2 ] && git clone --depth 1 -b v1.11.0 https://github.com/ngtcp2/ngtcp2.git
-cd ngtcp2
-autoreconf -if
-./configure \
-  --prefix=${BASE} \
-  PKG_CONFIG_PATH=${BASE}/lib/pkgconfig:${OPENSSL_LIB}/pkgconfig \
-  CFLAGS="${CFLAGS}" \
-  CXXFLAGS="${CXXFLAGS}" \
-  LDFLAGS="${LDFLAGS}" \
-  --enable-lib-only
-${MAKE} -j ${num_threads}
-sudo ${MAKE} install
-sudo chmod -R a+rX ${BASE}
-cd ..
-
-# Then nghttp2, with support for H3
-echo "Building nghttp2 ..."
-[ ! -d nghttp2 ] && git clone --depth 1 -b v1.65.0 https://github.com/tatsuhiro-t/nghttp2.git
-cd nghttp2
-git submodule update --init
-autoreconf -if
-if [ `uname -s` = "Darwin" ] || [ `uname -s` = "FreeBSD" ]
-then
-  # --enable-app requires systemd which is not available on Mac/FreeBSD.
-  ENABLE_APP=""
-else
-  ENABLE_APP="--enable-app"
-fi
-
-# Note for FreeBSD: This will not build h2load. h2load can be run on a remote machine.
-./configure \
-  --prefix=${BASE} \
-  PKG_CONFIG_PATH=${BASE}/lib/pkgconfig:${OPENSSL_LIB}/pkgconfig \
-  CFLAGS="${CFLAGS}" \
-  CXXFLAGS="${CXXFLAGS}" \
-  LDFLAGS="${LDFLAGS} -L${OPENSSL_LIB}" \
-  --enable-http3 \
-  ${ENABLE_APP}
-${MAKE} -j ${num_threads}
-sudo ${MAKE} install
-sudo chmod -R a+rX ${BASE}
-cd ..
+#[ ! -d quiche ] && git clone https://github.com/cloudflare/quiche.git
+#cd quiche
+#git checkout 0.23.2
+#
+#PKG_CONFIG_PATH="$OPENSSL_LIB"/pkgconfig LD_LIBRARY_PATH="$OPENSSL_LIB" \
+#  cargo build -j4 --package quiche --release --features ffi,pkg-config-meta,qlog,openssl
+#
+#sudo mkdir -p ${QUICHE_BASE}/lib/pkgconfig
+#sudo mkdir -p ${QUICHE_BASE}/include
+#sudo cp target/release/libquiche.a ${QUICHE_BASE}/lib/
+#[ -f target/release/libquiche.so ] && sudo cp target/release/libquiche.so ${QUICHE_BASE}/lib/
+## Why a link? https://github.com/cloudflare/quiche/issues/1808#issuecomment-2196233378
+#sudo ln -s ${QUICHE_BASE}/lib/libquiche.so ${QUICHE_BASE}/lib/libquiche.so.0
+#sudo cp quiche/include/quiche.h ${QUICHE_BASE}/include/
+#sudo cp target/release/quiche.pc ${QUICHE_BASE}/lib/pkgconfig
+#sudo chmod -R a+rX ${BASE}
+#cd ..
+#
+#
+## Then nghttp3
+#echo "Building nghttp3..."
+#[ ! -d nghttp3 ] && git clone --depth 1 -b v1.9.0 https://github.com/ngtcp2/nghttp3.git
+#cd nghttp3
+#git submodule update --init
+#autoreconf -if
+#./configure \
+#  --prefix=${BASE} \
+#  PKG_CONFIG_PATH=${BASE}/lib/pkgconfig:${OPENSSL_LIB}/pkgconfig \
+#  CFLAGS="${CFLAGS}" \
+#  CXXFLAGS="${CXXFLAGS}" \
+#  LDFLAGS="${LDFLAGS}" \
+#  --enable-lib-only
+#${MAKE} -j ${num_threads}
+#sudo ${MAKE} install
+#sudo chmod -R a+rX ${BASE}
+#cd ..
+#
+## Now ngtcp2
+#echo "Building ngtcp2..."
+#[ ! -d ngtcp2 ] && git clone --depth 1 -b v1.12.0 https://github.com/ngtcp2/ngtcp2.git
+#cd ngtcp2
+#autoreconf -if
+#./configure \
+#  --prefix=${BASE} \
+#  PKG_CONFIG_PATH=${BASE}/lib/pkgconfig:${OPENSSL_LIB}/pkgconfig \
+#  CFLAGS="${CFLAGS}" \
+#  CXXFLAGS="${CXXFLAGS}" \
+#  LDFLAGS="${LDFLAGS}" \
+#  --enable-lib-only \
+#  --with-openssl
+#${MAKE} -j ${num_threads}
+#sudo ${MAKE} install
+#sudo chmod -R a+rX ${BASE}
+#cd ..
 
 # Then curl
 echo "Building curl ..."
-[ ! -d curl ] && git clone --depth 1 -b curl-8_12_1 https://github.com/curl/curl.git
+[ ! -d curl ] && git clone --depth 1 -b curl-8_13_0 https://github.com/curl/curl.git
 cd curl
 # On mac autoreconf fails on the first attempt with an issue finding ltmain.sh.
 # The second runs fine.
 autoreconf -fi || autoreconf -fi
 ./configure \
   --prefix=${BASE} \
-  --with-ssl=${OPENSSL_PREFIX} \
-  --with-nghttp2=${BASE} \
+  --with-openssl=${OPENSSL_PREFIX} \
   --with-nghttp3=${BASE} \
   --with-ngtcp2=${BASE} \
   CFLAGS="${CFLAGS}" \
