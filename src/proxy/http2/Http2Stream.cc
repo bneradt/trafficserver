@@ -231,8 +231,10 @@ Http2Stream::main_event_handler(int event, void *edata)
     } else if (_sm && write_vio.ntodo() > 0) {
       this->signal_write_event(event);
     } else {
-      Warning("HTTP/2 unknown case of %d event - session_id=%" PRId64 " stream_id=%u", event, this->_proxy_ssn->connection_id(),
-              this->_id);
+      ip_port_text_buffer ipb;
+      const char         *remote_ip = ats_ip_ntop(this->_proxy_ssn->get_remote_addr(), ipb, sizeof(ipb));
+      Warning("HTTP/2 unknown case of event=%d (%s) - remote_ip=%s session_id=%" PRId64 " stream_id=%u", event,
+              HttpDebugNames::get_event_name(event), remote_ip, this->_proxy_ssn->connection_id(), this->_id);
     }
     break;
   case VC_EVENT_WRITE_READY:
