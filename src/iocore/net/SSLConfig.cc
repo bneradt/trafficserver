@@ -680,7 +680,7 @@ SSLCertificateConfig::reconfigure()
 {
   bool                     retStatus = true;
   SSLConfig::scoped_config params;
-  SSLCertLookup           *lookup = new SSLCertLookup();
+  SSLCertLookup           *lookup = new SSLCertLookup(num_of_net_threads);
 
   // Test SSL certificate loading startup. With large numbers of certificates, reloading can take time, so delay
   // twice the healthcheck period to simulate a loading a large certificate set.
@@ -904,7 +904,7 @@ SSLConfigParams::updateCTX(const std::string &cert_secret_name) const
 
   // Update the server cert
   SSLMultiCertConfigLoader loader(this);
-  loader.update_ssl_ctx(cert_secret_name);
+  loader.update_ssl_ctx(cert_secret_name, num_of_net_threads);
 
   secret_for_updateCTX = nullptr;
 }

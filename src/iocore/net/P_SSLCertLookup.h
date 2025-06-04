@@ -132,27 +132,29 @@ public:
 };
 
 struct SSLCertLookup : public ConfigInfo {
-  std::unique_ptr<SSLContextStorage> ssl_storage;
-  std::unique_ptr<SSLContextStorage> ec_storage;
+  std::vector<std::unique_ptr<SSLContextStorage>> ssl_storage;
+#ifdef OPENSSL_IS_BORINGSSL
+  std::vector<std::unique_ptr<SSLContextStorage>> ec_storage;
+#endif // OPENSSL_IS_BORINGSSL
 
   std::vector<shared_SSL_CTX> ssl_default;
   bool                        is_valid = true;
 
-  int insert(const char *name, SSLCertContext const &cc);
-  int insert(const IpEndpoint &address, SSLCertContext const &cc);
+  int insert(const char *name, SSLCertContext const &cc, int threadIndex);
+  int insert(const IpEndpoint &address, SSLCertContext const &cc, int threadIndex);
 
   /** Find certificate context by IP address.
       The IP addresses are taken from the socket @a s.
       Exact matches have priority, then wildcards. The destination address is preferred to the source address.
       @return @c A pointer to the matched context, @c nullptr if no match is found.
   */
-  SSLCertContext *find(const IpEndpoint &address) const;
+  SSLCertContext *find(const IpEndpoint &address, int threadIndex) const;
 
   /** Find certificate context by name (FQDN).
       Exact matches have priority, then wildcards. Only destination based matches are checked.
       @return @c A pointer to the matched context, @c nullptr if no match is found.
   */
-  SSLCertContext *find(const std::string &name, SSLCertContextType ctxType = SSLCertContextType::GENERIC) const;
+  SSLCertContext *find(const std::string &name, int threadIndex, SSLCertContextType ctxType = SSLCertContextType::GENERIC) const;
 
   // Return the last-resort default TLS context if there is no name or address match.
   SSL_CTX *
@@ -161,13 +163,16 @@ struct SSLCertLookup : public ConfigInfo {
     return ssl_default[threadIndex].get();
   }
 
-  unsigned        count(SSLCertContextType ctxType = SSLCertContextType::GENERIC) const;
-  SSLCertContext *get(unsigned i, SSLCertContextType ctxType = SSLCertContextType::GENERIC) const;
+  unsigned        count(int threadIndex, SSLCertContextType ctxType = SSLCertContextType::GENERIC) const;
+  SSLCertContext *get(unsigned i, int threadIndex, SSLCertContextType ctxType = SSLCertContextType::GENERIC) const;
 
   void register_cert_secrets(std::vector<std::string> const &cert_secrets, std::set<std::string> &lookup_names);
-  void getPolicies(const std::string &secret_name, std::set<shared_SSLMultiCertConfigParams> &policies) const;
+  void getPolicies(const std::string &secret_name, std::set<shared_SSLMultiCertConfigParams> &policies, int threadIndex) const;
 
-  SSLCertLookup();
+  /**
+   * @param[in] The number of threads SSL contexts will be used in.
+   */
+  SSLCertLookup(int nthreads);
   ~SSLCertLookup() override;
 
 private:

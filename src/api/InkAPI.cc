@@ -27,6 +27,7 @@
 #include <string_view>
 #include <string>
 
+#include "iocore/eventsystem/Continuation.h"
 #include "iocore/net/NetVConnection.h"
 #include "iocore/net/NetHandler.h"
 #include "iocore/net/UDPNet.h"
@@ -8024,7 +8025,7 @@ TSSslContextFindByName(const char *name)
   TSSslContext   ret    = nullptr;
   SSLCertLookup *lookup = SSLCertificateConfig::acquire();
   if (lookup != nullptr) {
-    SSLCertContext *cc = lookup->find(name);
+    SSLCertContext *cc = lookup->find(name, this_ethread()->id);
     if (cc) {
       shared_SSL_CTX ctx = cc->getCtx();
       if (ctx) {
@@ -8043,7 +8044,7 @@ TSSslContextFindByAddr(struct sockaddr const *addr)
   if (lookup != nullptr) {
     IpEndpoint ip;
     ip.assign(addr);
-    SSLCertContext *cc = lookup->find(ip);
+    SSLCertContext *cc = lookup->find(ip, this_ethread()->id);
     if (cc) {
       shared_SSL_CTX ctx = cc->getCtx();
       if (ctx) {
@@ -8326,7 +8327,7 @@ TSSslServerCertUpdate(const char *cert_path, const char *key_path)
     Dbg(dbg_ctl_ssl_cert_update, "Updating from %s with common name %s", cert_path, common_name_str);
 
     // Update context to use cert
-    cc = lookup->find(common_name_str);
+    cc = lookup->find(common_name_str, this_ethread()->id);
     if (cc && cc->getCtx()) {
       test_ctx = shared_SSL_CTX(SSLCreateServerContext(config, cc->userconfig.get(), cert_path, key_path), SSLReleaseContext);
       if (!test_ctx) {

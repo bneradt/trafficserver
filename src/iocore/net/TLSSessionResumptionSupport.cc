@@ -104,7 +104,7 @@ TLSSessionResumptionSupport::processSessionTicket(SSL *ssl, unsigned char *keyna
 
   // Get the IP address to look up the keyblock
   const IpEndpoint     &ip       = this->_getLocalEndpoint();
-  SSLCertContext       *cc       = lookup->find(ip);
+  SSLCertContext       *cc       = lookup->find(ip, this_ethread()->id);
   ssl_ticket_key_block *keyblock = nullptr;
   if (cc == nullptr || cc->keyblock == nullptr) {
     // Try the default

@@ -74,7 +74,7 @@ public:
   static int  check_server_cert_now(X509 *cert, const char *certname);
   static void clear_pw_references(SSL_CTX *ssl_ctx);
 
-  bool update_ssl_ctx(const std::string &secret_name);
+  bool update_ssl_ctx(const std::string &secret_name, int nthreads);
 
 protected:
   const SSLConfigParams *_params;

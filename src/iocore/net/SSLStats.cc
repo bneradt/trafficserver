@@ -121,9 +121,9 @@ SSLPeriodicMetricsUpdate()
 
   Dbg(dbg_ctl_ssl, "Starting to update the new session metrics");
   if (certLookup) {
-    const unsigned ctxCount = certLookup->count();
+    const unsigned ctxCount = certLookup->count(this_ethread()->id);
     for (size_t i = 0; i < ctxCount; i++) {
-      SSLCertContext *cc = certLookup->get(i);
+      SSLCertContext *cc = certLookup->get(i, this_ethread()->id);
       if (cc) {
         shared_SSL_CTX ctx = cc->getCtx();
         if (ctx) {

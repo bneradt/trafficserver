@@ -31,6 +31,7 @@
 #include "P_SSLClientUtils.h"
 #include "P_SSLNetVConnection.h"
 #include "P_UnixNetProcessor.h"
+#include "iocore/eventsystem/Continuation.h"
 #include "iocore/net/NetHandler.h"
 #include "iocore/net/NetVConnection.h"
 #include "iocore/net/ProxyProtocol.h"
@@ -1006,7 +1007,7 @@ SSLNetVConnection::sslStartHandShake(int event, int &err)
         Dbg(dbg_ctl_ssl, "Failed to get dest ip, errno = [%d]", errno);
         return EVENT_ERROR;
       }
-      SSLCertContext *cc = lookup->find(dst);
+      SSLCertContext *cc = lookup->find(dst, this_ethread()->id);
       if (dbg_ctl_ssl.on()) {
         IpEndpoint          src;
         ip_port_text_buffer ipb1, ipb2;
@@ -1793,7 +1794,7 @@ SSLNetVConnection::_lookupContextByName(const std::string &servername, SSLCertCo
 {
   shared_SSL_CTX                      ctx = nullptr;
   SSLCertificateConfig::scoped_config lookup;
-  SSLCertContext                     *cc = lookup->find(servername, ctxType);
+  SSLCertContext                     *cc = lookup->find(servername, this_ethread()->id, ctxType);
 
   if (cc) {
     ctx = cc->getCtx();
@@ -1826,7 +1827,7 @@ SSLNetVConnection::_lookupContextByIP()
     ip.sa = *(this->get_proxy_protocol_dst_addr());
     ip_port_text_buffer ipb1;
     ats_ip_nptop(&ip, ipb1, sizeof(ipb1));
-    cc = lookup->find(ip);
+    cc = lookup->find(ip, this_ethread()->id);
     if (dbg_ctl_proxyprotocol.on()) {
       IpEndpoint          src;
       ip_port_text_buffer ipb2;
@@ -1841,7 +1842,7 @@ SSLNetVConnection::_lookupContextByIP()
                lookup->defaultContext(this_ethread()->id));
     }
   } else if (0 == safe_getsockname(this->get_socket(), &ip.sa, &namelen)) {
-    cc = lookup->find(ip);
+    cc = lookup->find(ip, this_ethread()->id);
   }
   if (cc) {
     ctx = cc->getCtx();
