@@ -270,10 +270,7 @@ SSLCertContext::setCtx(shared_SSL_CTX sc)
 }
 
 SSLCertLookup::SSLCertLookup()
-  : ssl_storage(std::make_unique<SSLContextStorage>()),
-    ec_storage(std::make_unique<SSLContextStorage>()),
-    ssl_default(nullptr),
-    is_valid(true)
+  : ssl_storage(std::make_unique<SSLContextStorage>()), ec_storage(std::make_unique<SSLContextStorage>()), is_valid(true)
 {
 }
 

@@ -141,6 +141,8 @@ extern void initializeRegistry();
 
 extern void Initialize_Errata_Settings();
 
+int num_of_net_threads = 0;
+
 namespace
 {
 
@@ -160,7 +162,6 @@ void        load_ssl_file_callback(const char *ssl_file);
 void        task_threads_started_callback();
 static void check_max_records_argument(const ArgumentDescription *arg, unsigned int nargs, const char *val);
 
-int num_of_net_threads = 0;
 int num_accept_threads = 0;
 
 int num_of_udp_threads = 0;

@@ -47,6 +47,8 @@
 #include <cstring>
 #include <cmath>
 
+extern int num_of_net_threads;
+
 int                SSLConfig::config_index                                = 0;
 int                SSLConfig::configids[]                                 = {0, 0};
 int                SSLCertificateConfig::configid                         = 0;
@@ -688,7 +690,7 @@ SSLCertificateConfig::reconfigure()
     ink_hrtime_sleep(HRTIME_SECONDS(secs));
   }
 
-  auto errata = SSLMultiCertConfigLoader(params).load(lookup);
+  auto errata = SSLMultiCertConfigLoader(params).load(lookup, num_of_net_threads);
   if (!lookup->is_valid || (errata.has_severity() && errata.severity() >= ERRATA_ERROR)) {
     retStatus = false;
   }

@@ -32,6 +32,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 struct SSLConfigParams;
 struct SSLContextStorage;
@@ -134,8 +135,8 @@ struct SSLCertLookup : public ConfigInfo {
   std::unique_ptr<SSLContextStorage> ssl_storage;
   std::unique_ptr<SSLContextStorage> ec_storage;
 
-  shared_SSL_CTX ssl_default;
-  bool           is_valid = true;
+  std::vector<shared_SSL_CTX> ssl_default;
+  bool                        is_valid = true;
 
   int insert(const char *name, SSLCertContext const &cc);
   int insert(const IpEndpoint &address, SSLCertContext const &cc);
@@ -155,9 +156,9 @@ struct SSLCertLookup : public ConfigInfo {
 
   // Return the last-resort default TLS context if there is no name or address match.
   SSL_CTX *
-  defaultContext() const
+  defaultContext(int threadIndex) const
   {
-    return ssl_default.get();
+    return ssl_default[threadIndex].get();
   }
 
   unsigned        count(SSLCertContextType ctxType = SSLCertContextType::GENERIC) const;

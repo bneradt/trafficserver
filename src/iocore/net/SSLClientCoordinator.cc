@@ -29,7 +29,6 @@
 #endif
 
 std::unique_ptr<ConfigUpdateHandler<SSLClientCoordinator>> sslClientUpdate;
-
 void
 SSLClientCoordinator::reconfigure()
 {
