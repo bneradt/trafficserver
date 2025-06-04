@@ -1834,9 +1834,10 @@ SSLMultiCertConfigLoader::_store_single_ssl_ctx(SSLCertLookup *lookup, const sha
   // this code is updated to reconfigure the SSL certificates, it will need some sort of
   // refcounting or alternate way of avoiding double frees.
   for (auto const &sni_name : names) {
-    if (lookup->insert(sni_name.c_str(), SSLCertContext(ctx, ctx_type, sslMultCertSettings, keyblock)) >= 0) {
-      inserted = true;
-    }
+    // if (lookup->insert(sni_name.c_str(), SSLCertContext(ctx, ctx_type, sslMultCertSettings, keyblock)) >= 0) {
+    lookup->insert(sni_name.c_str(), SSLCertContext(ctx, ctx_type, sslMultCertSettings, keyblock));
+    inserted = true;
+    //}
   }
 
   if (inserted) {
