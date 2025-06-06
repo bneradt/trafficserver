@@ -141,8 +141,6 @@ extern void initializeRegistry();
 
 extern void Initialize_Errata_Settings();
 
-int num_of_net_threads = 0;
-
 namespace
 {
 
@@ -162,6 +160,7 @@ void        load_ssl_file_callback(const char *ssl_file);
 void        task_threads_started_callback();
 static void check_max_records_argument(const ArgumentDescription *arg, unsigned int nargs, const char *val);
 
+int num_of_net_threads = 0;
 int num_accept_threads = 0;
 
 int num_of_udp_threads = 0;
@@ -2062,6 +2061,8 @@ main(int /* argc ATS_UNUSED */, const char **argv)
   num_of_net_threads = ink_number_of_processors();
   Dbg(dbg_ctl_threads, "number of processors: %d", num_of_net_threads);
   num_of_net_threads = adjust_num_of_net_threads(num_of_net_threads);
+  Dbg(dbg_ctl_threads, "number of net threads: %d", num_of_net_threads);
+  SSLConfigParams::number_of_ssl_threads = num_of_net_threads;
 
   size_t stacksize;
   stacksize = RecGetRecordInt("proxy.config.thread.default.stacksize").value_or(0);
