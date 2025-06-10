@@ -2055,7 +2055,7 @@ main(int /* argc ATS_UNUSED */, const char **argv)
   Machine::init(hostname, &machine_addr.sa);
   ats_free(hostname);
 
-  RecRegisterStatString(RECT_PROCESS, "proxy.process.version.server.uuid", (char *)Machine::instance()->uuid.getString(),
+  RecRegisterStatString(RECT_PROCESS, "proxy.process.version.server.uuid", (char *)Machine::instance()->process_uuid.getString(),
                         RECP_NON_PERSISTENT);
 
   REC_ReadConfigInteger(res_track_memory, "proxy.config.res_track_memory");

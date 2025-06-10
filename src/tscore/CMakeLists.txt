@@ -57,6 +57,7 @@ add_library(
   ParseRules.cc
   Random.cc
   Regression.cc
+  SnowflakeID.cc
   TextBuffer.cc
   Throttler.cc
   Tokenizer.cc
@@ -167,6 +168,7 @@ if(BUILD_TESTING)
     unit_tests/test_PriorityQueue.cc
     unit_tests/test_Ptr.cc
     unit_tests/test_Random.cc
+    unit_tests/test_SnowflakeID.cc
     unit_tests/test_Throttler.cc
     unit_tests/test_Tokenizer.cc
     unit_tests/test_arena.cc
