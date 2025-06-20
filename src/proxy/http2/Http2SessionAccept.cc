@@ -42,7 +42,7 @@ Http2SessionAccept::~Http2SessionAccept() = default;
 bool
 Http2SessionAccept::accept(NetVConnection *netvc, MIOBuffer *iobuf, IOBufferReader *reader)
 {
-  sockaddr const *client_ip = nullptr;
+  sockaddr const *client_ip = netvc->get_remote_addr();
 
   for (int i = 0; i < IpAllow::Subject::MAX_SUBJECTS; ++i) {
     if (IpAllow::Subject::PEER == IpAllow::subjects[i]) {
