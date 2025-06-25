@@ -1091,6 +1091,22 @@ TXN_DEBUG        Enable transaction debugging (default: ``off``)
 SKIP_REMAP       Don't require a remap match for the transaction (default: ``off``)
 ================ ====================================================================
 
+set-plugin-cntl
+~~~~~~~~~~~~~~~
+::
+
+  set-plugin-cntl <controller> <value>
+
+This operator lets you control the fundamental behavior of this plugin for a particular transaction.
+The available controllers are:
+
+================== ===================== =============================================================================================
+Controller         Operators/Conditions  Description
+================== ===================== =============================================================================================
+TIMEZONE           ``NOW``               If ``GMT`` is passed, the operators and conditions use GMT regardles of the timezone setting
+                                         on your system. The default value is ``LOCAL``.
+================== ===================== =============================================================================================
+
 Operator Flags
 --------------
 
@@ -1147,25 +1163,36 @@ parameters by writing it as::
 
 The URL part names which may be used for these conditions and actions are:
 
+.. code-block::
+
+  ┌─────────────────────────────────────────────────────────────────────────────────────────┐
+  │                                          URL                                            │
+  ├─────────────────────────────────────────────────────────────────────────────────────────┤
+  │  https://docs.trafficserver.apache.org:443/en/latest/search.html?q=header_rewrite&...   │
+  │  ┬────   ┬──────────────────────────── ┬── ─┬─────────────────── ┬───────────────────   │
+  │  │       │                             │    │                    │                      │
+  │  SCHEME  HOST                          PORT PATH                 QUERY                  │
+  └─────────────────────────────────────────────────────────────────────────────────────────┘
+
 ======== ======================================================================
-Part     Description
+Part     Description and value for ``https://docs.trafficserver.apache.org/en/latest/search.html?q=header_rewrite``
 ======== ======================================================================
-HOST     Full hostname.
+SCHEME   URL scheme in use (e.g. ``http`` and ``https``). ``Value`` = `https`
+
+HOST     Full hostname. ``Value`` = `docs.trafficserver.apache.org`
+
+PORT     Port number. (Regardless if directly specified in the URL). ``Value`` = `443`
 
 PATH     URL substring beginning with (but not including) the first ``/`` after
          the hostname up to, but not including, the query string. **Note**: previous
          versions of ATS had a `%{PATH}` directive, this will no longer work. Instead,
-         you want to use `%{CLIENT-URL:PATH}`.
-
-PORT     Port number.
+         you want to use `%{CLIENT-URL:PATH}`. ``Value`` = `en/latest/search.html`
 
 QUERY    URL substring from the ``?``, signifying the beginning of the query
          parameters, until the end of the URL. Empty string if there were no
-         query parameters.
+         query parameters. ``Value`` = `  `
 
-SCHEME   URL scheme in use (e.g. ``http`` and ``https``).
-
-URL      The complete URL.
+URL      The complete URL.  ``Value`` = `https://docs.trafficserver.apache.org/en/latest/search.html?q=header_rewrite`
 ======== ======================================================================
 
 As another example, a remap rule might use the `set-destination`_ operator to
