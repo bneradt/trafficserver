@@ -193,6 +193,29 @@ TLSBasicSupport::set_valid_tls_version_max(int max)
   SSL_set_max_proto_version(ssl, ver);
 }
 
+void
+TLSBasicSupport::set_legacy_cipher_suite(std::string const &cipher_suite)
+{
+  auto ssl = this->_get_ssl_object();
+  SSL_set_cipher_list(ssl, cipher_suite.c_str());
+}
+
+void
+TLSBasicSupport::set_cipher_suite([[maybe_unused]] std::string const &cipher_suite)
+{
+#if TS_USE_TLS_SET_CIPHERSUITES
+  auto ssl = this->_get_ssl_object();
+  SSL_set_ciphersuites(ssl, cipher_suite.c_str());
+#endif
+}
+
+bool
+TLSBasicSupport::set_groups_list(std::string const &groups_list)
+{
+  auto ssl = this->_get_ssl_object();
+  return SSL_set1_groups_list(ssl, groups_list.c_str());
+}
+
 int
 TLSBasicSupport::verify_certificate(X509_STORE_CTX *ctx)
 {
@@ -208,22 +231,6 @@ X509_STORE_CTX *
 TLSBasicSupport::get_tls_cert_to_verify() const
 {
   return this->_cert_to_verify;
-}
-
-void
-TLSBasicSupport::set_legacy_cipher_suite(std::string const &cipher_suite)
-{
-  auto ssl = this->_get_ssl_object();
-  SSL_set_cipher_list(ssl, cipher_suite.c_str());
-}
-
-void
-TLSBasicSupport::set_cipher_suite([[maybe_unused]] std::string const &cipher_suite)
-{
-#if TS_USE_TLS_SET_CIPHERSUITES
-  auto ssl = this->_get_ssl_object();
-  SSL_set_ciphersuites(ssl, cipher_suite.c_str());
-#endif
 }
 
 void
