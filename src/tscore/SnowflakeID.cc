@@ -34,10 +34,6 @@
 
 std::atomic<uint64_t> SnowflakeIDUtils::global_machine_id{0};
 
-uint64_t   SnowflakeID::m_last_timestamp{0};
-uint64_t   SnowflakeID::m_last_sequence{0};
-std::mutex SnowflakeID::m_mutex;
-
 DbgCtl dbg_ctl_snowflake{"snowflake"};
 
 SnowflakeIDUtils::SnowflakeIDUtils(uint64_t id) : m_snowflake_value{id} {}
@@ -54,12 +50,12 @@ SnowflakeIDUtils::get_string() const
 {
   if (m_id_string.empty()) {
     // Base64 encode the snowflake ID as m_id_string.
-    size_t const max_encoded_size = ats_base64_encode_dstlen(sizeof(m_snowflake_value));
-    auto         encoded_buffer   = std::make_unique<char[]>(max_encoded_size);
-    size_t       encoded_length   = 0;
-    auto        *snowflake_char_p = reinterpret_cast<char const *>(&m_snowflake_value);
-    if (ats_base64_encode(snowflake_char_p, sizeof(m_snowflake_value), encoded_buffer.get(), max_encoded_size, &encoded_length)) {
-      m_id_string = std::string(encoded_buffer.get(), encoded_length);
+    constexpr size_t                   max_encoded_size = ats_base64_encode_dstlen(sizeof(m_snowflake_value));
+    std::array<char, max_encoded_size> encoded_buffer;
+    size_t                             encoded_length   = 0;
+    auto                              *snowflake_char_p = reinterpret_cast<char const *>(&m_snowflake_value);
+    if (ats_base64_encode(snowflake_char_p, sizeof(m_snowflake_value), encoded_buffer.data(), max_encoded_size, &encoded_length)) {
+      m_id_string = std::string(encoded_buffer.data(), encoded_length);
     } else {
       // Very unlikely.
       Error("Failed to encode snowflake ID: %" PRIx64, m_snowflake_value);
@@ -68,11 +64,18 @@ SnowflakeIDUtils::get_string() const
   return m_id_string;
 }
 
+SnowflakeID::SnowflakeIDGenerator &
+SnowflakeID::SnowflakeIDGenerator::instance()
+{
+  static SnowflakeIDGenerator g;
+  return g;
+}
+
 uint64_t
-SnowflakeID::generate_next_snowflake_value()
+SnowflakeID::SnowflakeIDGenerator::get_next_id()
 {
   ink_release_assert(SnowflakeIDUtils::get_machine_id() != 0);
-  snowflake_t new_snowflake{.value = 0};
+  snowflake_t new_snowflake;
   new_snowflake.pieces.always_zero = 0;
   new_snowflake.pieces.machine_id  = SnowflakeIDUtils::get_machine_id();
   uint64_t now                     = ink_hrtime_to_msec(ink_get_hrtime()) - SnowflakeIDUtils::EPOCH;
@@ -107,10 +110,16 @@ SnowflakeID::generate_next_snowflake_value()
   return new_snowflake.value;
 }
 
+uint64_t
+SnowflakeID::generate_next_snowflake_value()
+{
+  return SnowflakeIDGenerator::instance().get_next_id();
+}
+
 SnowflakeID::SnowflakeID() : m_snowflake{.value = generate_next_snowflake_value()}, m_utils{m_snowflake.value} {}
 
 std::string_view
-SnowflakeID::get_string()
+SnowflakeID::get_string() const
 {
   return m_utils.get_string();
 }
@@ -118,7 +127,7 @@ SnowflakeID::get_string()
 uint64_t
 SnowflakeIdNoSequence::generate_next_snowflake_value()
 {
-  snowflake_t new_snowflake{.value = 0};
+  snowflake_t new_snowflake;
   new_snowflake.pieces.always_zero = 0;
   new_snowflake.pieces.machine_id  = SnowflakeIDUtils::get_machine_id();
   uint64_t const now               = ink_hrtime_to_msec(ink_get_hrtime());
@@ -131,7 +140,7 @@ SnowflakeIdNoSequence::SnowflakeIdNoSequence() : m_snowflake{.value = generate_n
 }
 
 std::string_view
-SnowflakeIdNoSequence::get_string()
+SnowflakeIdNoSequence::get_string() const
 {
   // No sequence number, so we can use the same method as SnowflakeIDUtils.
   return m_utils.get_string();
