@@ -32,13 +32,10 @@
 
 #include "CtrlCommands.h"
 #include "FileConfigCommand.h"
+#include "TrafficCtlStatus.h"
 
-constexpr int CTRL_EX_OK            = 0;
-constexpr int CTRL_EX_ERROR         = 2;
-constexpr int CTRL_EX_UNIMPLEMENTED = 3;
-
-int status_code{CTRL_EX_OK};
-
+// Define the global variable
+int App_Exit_Status_Code = CTRL_EX_OK; // Initialize it to a default value
 namespace
 {
 void
@@ -70,7 +67,7 @@ main([[maybe_unused]] int argc, const char **argv)
 
   auto CtrlUnimplementedCommand = [](std::string_view cmd) {
     std::cout << "Command " << cmd << " unimplemented.\n";
-    status_code = CTRL_EX_UNIMPLEMENTED;
+    App_Exit_Status_Code = CTRL_EX_UNIMPLEMENTED;
   };
 
   parser.add_description("Apache Traffic Server RPC CLI");
@@ -81,7 +78,9 @@ main([[maybe_unused]] int argc, const char **argv)
     .add_option("--version", "-V", "Print version string")
     .add_option("--help", "-h", "Print usage information")
     .add_option("--run-root", "", "using TS_RUNROOT as sandbox", "TS_RUNROOT", 1)
-    .add_option("--format", "-f", "Use a specific output format {json|rpc}", "", 1, "", "format");
+    .add_option("--format", "-f", "Use a specific output format {json|rpc}", "", 1, "", "format")
+    .add_option("--read-timeout-ms", "", "Read timeout for RPC (in milliseconds)", "", 1, "10000", "read-timeout")
+    .add_option("--read-attempts", "", "Read attempts for RPC", "", 1, "100", "read-attempts");
 
   auto &config_command     = parser.add_command("config", "Manipulate configuration records").require_commands();
   auto &metric_command     = parser.add_command("metric", "Manipulate performance metrics").require_commands();
@@ -132,7 +131,7 @@ main([[maybe_unused]] int argc, const char **argv)
   config_command.add_command("registry", "Show configuration file registry", [&]() { command->execute(); })
     .add_example_usage("traffic_ctl config registry");
   // host commands
-  host_command.add_command("status", "Get one or more host statuses", "", MORE_THAN_ONE_ARG_N, [&]() { command->execute(); })
+  host_command.add_command("status", "Get one or more host statuses", "", MORE_THAN_ZERO_ARG_N, [&]() { command->execute(); })
     .add_example_usage("traffic_ctl host status HOST  [HOST  ...]");
   host_command.add_command("down", "Set down one or more host(s)", "", MORE_THAN_ONE_ARG_N, [&]() { command->execute(); })
     .add_example_usage("traffic_ctl host down HOST [OPTIONS]")
@@ -242,9 +241,9 @@ main([[maybe_unused]] int argc, const char **argv)
     // Execute
     args.invoke();
   } catch (std::exception const &ex) {
-    status_code = CTRL_EX_ERROR;
+    App_Exit_Status_Code = CTRL_EX_ERROR;
     std::cerr << "Error found:\n" << ex.what() << '\n';
   }
 
-  return status_code;
+  return App_Exit_Status_Code;
 }

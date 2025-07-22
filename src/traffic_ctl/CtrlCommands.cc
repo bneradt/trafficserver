@@ -38,6 +38,7 @@ extern std::unordered_map<int, std::function<void()>> Signal_Handler;
 extern void                                           subscribe_to_signal_handler(int signal_num, std::function<void()> handler);
 extern void                                           unsubscribe_signal(int signal_num);
 
+#include "TrafficCtlStatus.h"
 namespace
 {
 /// We use yamlcpp as codec implementation.
@@ -88,14 +89,14 @@ CtrlCommand::execute()
 }
 
 std::string
-RPCAccessor::invoke_rpc(std::string const &request)
+RPCAccessor::invoke_rpc(std::string const &request, std::chrono::milliseconds timeout_ms, int attempts)
 {
   if (_printer->print_rpc_message()) {
     std::string text;
     swoc::bwprint(text, "--> {}", request);
     _printer->write_debug(std::string_view{text});
   }
-  if (auto resp = _rpcClient.invoke(request); !resp.empty()) {
+  if (auto resp = _rpcClient.invoke(request, timeout_ms, attempts); !resp.empty()) {
     // all good.
     if (_printer->print_rpc_message()) {
       std::string text;
@@ -109,18 +110,19 @@ RPCAccessor::invoke_rpc(std::string const &request)
 }
 
 shared::rpc::JSONRPCResponse
-RPCAccessor::invoke_rpc(shared::rpc::ClientRequest const &request)
+RPCAccessor::invoke_rpc(shared::rpc::ClientRequest const &request, std::chrono::milliseconds timeout_ms, int attempts)
 {
   std::string encodedRequest = Codec::encode(request);
-  std::string resp           = invoke_rpc(encodedRequest);
+  std::string resp           = invoke_rpc(encodedRequest, timeout_ms, attempts);
   return Codec::decode(resp);
 }
 
 void
-RPCAccessor::invoke_rpc(shared::rpc::ClientRequest const &request, std::string &resp)
+RPCAccessor::invoke_rpc(shared::rpc::ClientRequest const &request, std::string &resp, std::chrono::milliseconds timeout_ms,
+                        int attempts)
 {
   std::string encodedRequest = Codec::encode(request);
-  resp                       = invoke_rpc(encodedRequest);
+  resp                       = invoke_rpc(encodedRequest, timeout_ms, attempts);
 }
 // -----------------------------------------------------------------------------------------------------------------------------------
 ConfigCommand::ConfigCommand(ts::Arguments *args) : RecordCommand(args)
@@ -167,6 +169,24 @@ RecordCommand::record_fetch(ts::ArgumentData argData, bool isRegex, RecordQueryT
                         recQueryType == RecordQueryType::CONFIG ? shared::rpc::CONFIG_REC_TYPES : shared::rpc::METRIC_REC_TYPES);
   }
   return invoke_rpc(request);
+}
+
+std::string
+CtrlCommand::invoke_rpc(std::string const &request)
+{
+  auto timeout  = std::chrono::milliseconds(std::stoi(get_parsed_arguments()->get("read-timeout").value()));
+  auto attempts = std::stoi(get_parsed_arguments()->get("read-attempts").value());
+
+  return RPCAccessor::invoke_rpc(request, timeout, attempts);
+}
+
+shared::rpc::JSONRPCResponse
+CtrlCommand::invoke_rpc(shared::rpc::ClientRequest const &request)
+{
+  auto timeout  = std::chrono::milliseconds(std::stoi(get_parsed_arguments()->get("read-timeout").value()));
+  auto attempts = std::stoi(get_parsed_arguments()->get("read-attempts").value());
+
+  return RPCAccessor::invoke_rpc(request, timeout, attempts);
 }
 
 void
@@ -502,6 +522,7 @@ DirectRPCCommand::from_file_request()
       }
 
     } catch (std::exception const &ex) {
+      App_Exit_Status_Code = CTRL_EX_ERROR;
       _printer->write_output(swoc::bwprint(text, "Error found: {}\n", ex.what()));
     }
   }
@@ -533,6 +554,7 @@ DirectRPCCommand::read_from_input()
     _printer->write_output("--> Request sent.\n");
     _printer->write_output(swoc::bwprint(text, "\n<-- {}\n", response));
   } catch (std::exception const &ex) {
+    App_Exit_Status_Code = CTRL_EX_ERROR;
     _printer->write_output(swoc::bwprint(text, "Error found: {}\n", ex.what()));
   }
 }
