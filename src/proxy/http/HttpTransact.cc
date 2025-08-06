@@ -2176,7 +2176,12 @@ HttpTransact::DecideCacheLookup(State *s)
     if (s->redirect_info.redirect_in_process) {
       // without calling out the CACHE_LOOKUP_COMPLETE_HOOK
       if (s->txn_conf->cache_http) {
-        HttpTransact::set_cache_prepare_write_action_for_new_request(s);
+        if (s->cache_info.write_lock_state == CacheWriteLock_t::FAIL) {
+          s->cache_info.action           = CacheAction_t::PREPARE_TO_WRITE;
+          s->cache_info.write_lock_state = CacheWriteLock_t::INIT;
+        } else if (s->cache_info.write_lock_state == CacheWriteLock_t::SUCCESS) {
+          s->cache_info.action = CacheAction_t::WRITE;
+        }
       }
       LookupSkipOpenServer(s);
     } else {
@@ -3287,7 +3292,7 @@ HttpTransact::HandleCacheOpenReadMiss(State *s)
   } else if (s->api_server_response_no_store) { // plugin may have decided not to cache the response
     s->cache_info.action = CacheAction_t::NO_ACTION;
   } else {
-    HttpTransact::set_cache_prepare_write_action_for_new_request(s);
+    s->cache_info.action = CacheAction_t::PREPARE_TO_WRITE;
   }
 
   ///////////////////////////////////////////////////////////////
@@ -3340,28 +3345,6 @@ HttpTransact::HandleCacheOpenReadMiss(State *s)
   }
 
   return;
-}
-
-void
-HttpTransact::set_cache_prepare_write_action_for_new_request(State *s)
-{
-  // This method must be called no more than one time per request. It should
-  // not be called for non-cacheable requests.
-  if (s->cache_info.write_lock_state == CacheWriteLock_t::SUCCESS) {
-    // If and only if this is a redirected request, we may have already
-    // prepared a cache write (during the handling of the previous request
-    // which got the 3xx response) and can safely re-use it. Otherwise, we
-    // risk storing the response under the wrong cache key. This is a release
-    // assert because the correct behavior would be to prepare a new write,
-    // but we can't do that because we failed to release the lock. To recover
-    // we would have to tell the state machine to abort its write, and we
-    // don't have a state for that.
-    ink_release_assert(s->redirect_info.redirect_in_process);
-    s->cache_info.action = CacheAction_t::WRITE;
-  } else {
-    s->cache_info.action           = CacheAction_t::PREPARE_TO_WRITE;
-    s->cache_info.write_lock_state = HttpTransact::CacheWriteLock_t::INIT;
-  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
