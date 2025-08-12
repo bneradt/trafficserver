@@ -1314,11 +1314,15 @@ isTxnTransformable(TSHttpTxn txnp, bool is_cache_txn, const OptionInfo *pOptionI
     return false;
   }
 
-  // if origin returns status 304, check cached response instead
-  int response_status;
   if (is_cache_txn == false) {
-    response_status = TSHttpHdrStatusGet(bufp, hdr_loc);
-    if (response_status == TS_HTTP_STATUS_NOT_MODIFIED) {
+    int const response_status = TSHttpHdrStatusGet(bufp, hdr_loc);
+    Dbg(dbg_ctl_local, "Checking status: %d", response_status);
+    if (response_status >= 500 && response_status < 600) { // 5xx errors
+      Dbg(dbg_ctl_local, "Not transforming response of status: %d", response_status);
+      TSHandleMLocRelease(bufp, TS_NULL_MLOC, hdr_loc);
+      return false;
+    } else if (response_status == TS_HTTP_STATUS_NOT_MODIFIED) {
+      // if origin returns status 304, check cached response instead
       TSHandleMLocRelease(bufp, TS_NULL_MLOC, hdr_loc);
       header_obtained = TSHttpTxnCachedRespGet(txnp, &bufp, &hdr_loc);
       if (header_obtained != TS_SUCCESS) {
