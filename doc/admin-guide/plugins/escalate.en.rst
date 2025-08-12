@@ -51,6 +51,14 @@ when the origin server in the remap rule returns a 401,
   The header is only added if it doesn't already exist in the request.
   Use --no-redirect-header to disable adding the X-Escalate-Redirect header.
 
+@pparam=--escalate-non-get-methods
+  In general, the escalate plugin is used with a failover origin that serves a
+  cached backup of the original content.  As a result, the default behavior is
+  to only escalate GET requests since POST, PUT, etc., are not idempotent and
+  may require side effects that are not supported by a failover origin. This
+  option overrides the default behavior and enables escalation for non-GET
+  requests in addition to GET.
+
 Installation
 ------------
 
@@ -75,3 +83,9 @@ To disable adding the X-Escalate-Redirect header, use::
 
     map cdn.example.com origin.example.com \
       @plugin=escalate.so @pparam=401,404,410,502:second-origin.example.com @pparam=--no-redirect-header
+
+By default, only GET requests are escalated. To escalate non-GET requests as
+well, you can use::
+
+    map cdn.example.com origin.example.com \
+      @plugin=escalate.so @pparam=401,404,410,502:second-origin.example.com @pparam=--escalate-non-get-methods
