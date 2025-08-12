@@ -35,7 +35,8 @@
 
 // Constants and some declarations
 
-const char PLUGIN_NAME[] = "escalate";
+const char PLUGIN_NAME[]     = "escalate";
+const char REDIRECT_HEADER[] = "X-Escalate-Redirect";
 
 static DbgCtl dbg_ctl{PLUGIN_NAME};
 
@@ -67,7 +68,8 @@ struct EscalationState {
   ~EscalationState() { TSContDestroy(cont); }
   TSCont        cont;
   StatusMapType status_map;
-  bool          use_pristine = false;
+  bool          use_pristine        = false;
+  bool          add_redirect_header = true;
 };
 
 // Little helper function, to update the Host portion of a URL, and stringify the result.
@@ -173,6 +175,30 @@ EscalateResponse(TSCont cont, TSEvent event, void *edata)
   // Now update the Redirect URL, if set
   if (url_str) {
     TSHttpTxnRedirectUrlSet(txn, url_str, url_len); // Transfers ownership
+
+    // Add our X-Escalate-Redirect header marker if it doesn't already exist and the option is enabled.
+    if (es->add_redirect_header) {
+      TSMBuffer bufp;
+      TSMLoc    hdr_loc, field_loc;
+
+      if (TS_SUCCESS == TSHttpTxnClientReqGet(txn, &bufp, &hdr_loc)) {
+        field_loc = TSMimeHdrFieldFind(bufp, hdr_loc, REDIRECT_HEADER, sizeof(REDIRECT_HEADER) - 1);
+        if (field_loc == nullptr) {
+          if (TSMimeHdrFieldCreateNamed(bufp, hdr_loc, REDIRECT_HEADER, sizeof(REDIRECT_HEADER) - 1, &field_loc) == TS_SUCCESS) {
+            if (TSMimeHdrFieldValueStringInsert(bufp, hdr_loc, field_loc, -1, "1", 1) == TS_SUCCESS) {
+              TSMimeHdrFieldAppend(bufp, hdr_loc, field_loc);
+            }
+            TSHandleMLocRelease(bufp, hdr_loc, field_loc);
+            Dbg(dbg_ctl, "Added X-Escalate-Redirect header to the client request.");
+          }
+        } else {
+          Dbg(dbg_ctl, "X-Escalate-Redirect header already exists, not adding.");
+        }
+        TSHandleMLocRelease(bufp, TS_NULL_MLOC, hdr_loc);
+      } else {
+        TSError("[%s] Failed to get client request header to add X-Escalate-Redirect header", PLUGIN_NAME);
+      }
+    }
   }
 
   // Set the transaction free ...
@@ -199,6 +225,8 @@ TSRemapNewInstance(int argc, char *argv[], void **instance, char *errbuf, int er
     // Ugly, but we set the precedence before with non-command line parsing of args
     if (0 == strncasecmp(argv[i], "--pristine", 10)) {
       es->use_pristine = true;
+    } else if (0 == strncasecmp(argv[i], "--no-redirect-header", 20)) {
+      es->add_redirect_header = false;
     } else {
       // Each token should be a status code then a URL, separated by ':'.
       sep = strchr(argv[i], ':');
