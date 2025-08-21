@@ -33,6 +33,8 @@
 #include "iocore/net/TLSBasicSupport.h"
 #include "iocore/net/TLSSessionResumptionSupport.h"
 
+#include <string>
+
 struct ClientTransactionInfo {
   int id{-1};
   int priority_weight{-1};
@@ -49,7 +51,7 @@ struct ClientConnectionInfo {
   char const *sec_protocol{"-"};
   char const *cipher_suite{"-"};
   char const *curve{"-"};
-  char const *security_group{"-"};
+  std::string security_group{"-"};
 
   int alpn_id{SessionProtocolNameRegistry::INVALID};
 };
@@ -173,7 +175,7 @@ HttpUserAgent::set_txn(ProxyTransaction *txn, TransactionMilestones &milestones)
     }
 
     if (auto group{tbs->get_tls_group()}; !group.empty()) {
-      m_conn_info.security_group = group.data();
+      m_conn_info.security_group = group;
     } else {
       m_conn_info.security_group = "-";
     }
@@ -283,7 +285,7 @@ HttpUserAgent::get_client_curve() const
 inline char const *
 HttpUserAgent::get_client_security_group() const
 {
-  return m_conn_info.security_group;
+  return m_conn_info.security_group.c_str();
 }
 
 inline int
