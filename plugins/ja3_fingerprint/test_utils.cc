@@ -24,7 +24,7 @@
 
 #include "ja3_utils.h"
 
-#include <catch.hpp>
+#include <catch2/catch_test_macros.hpp>
 
 TEST_CASE("ja3 byte buffer encoding")
 {

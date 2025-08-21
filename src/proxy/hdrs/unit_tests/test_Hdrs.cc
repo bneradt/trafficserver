@@ -34,7 +34,7 @@
 #include "tscore/Random.h"
 #include "tsutil/PostScript.h"
 
-#include "catch.hpp"
+#include <catch2/catch_test_macros.hpp>
 
 #include "proxy/hdrs/HTTP.h"
 #include "proxy/hdrs/HttpCompat.h"
