@@ -20,11 +20,11 @@
 #include "xdebug_types.h"
 #include "xdebug_headers.h"
 
+#include <array>
 #include <unistd.h>
 #include <sstream>
 #include <cinttypes>
 #include <string>
-#include <vector>
 
 #include "ts/ts.h"
 
@@ -84,6 +84,34 @@ getPostBodyFullJson(TSHttpTxn txn)
   return output.str();
 }
 
+static inline int64_t
+write_hex(TSIOBuffer output_buffer, const char *src, int64_t len)
+{
+  int64_t written = 0;
+  // Convert each byte to two hex characters
+  static const char hex_chars[] = "0123456789abcdef";
+
+  // Process in chunks to keep stack usage reasonable
+  constexpr int64_t CHUNK = 1024; // 1KB of raw -> 2KB hex
+  int64_t           idx   = 0;
+
+  while (idx < len) {
+    std::array<char, CHUNK * 2> hex_output;
+    int64_t const               num_to_take  = std::min(len - idx, CHUNK);
+    int64_t const               num_to_write = num_to_take * 2;
+    TSReleaseAssert(static_cast<size_t>(num_to_write) <= hex_output.size());
+    for (int64_t i = 0; i < num_to_take; ++i) {
+      unsigned char src_byte = static_cast<unsigned char>(src[idx + i]);
+      hex_output[i * 2]      = hex_chars[(src_byte >> 4) & 0x0F];
+      hex_output[i * 2 + 1]  = hex_chars[src_byte & 0x0F];
+    }
+    TSIOBufferWrite(output_buffer, hex_output.data(), num_to_write);
+    written += num_to_write;
+    idx     += num_to_take;
+  }
+  return written;
+}
+
 /** JSON-escape the given input stream. */
 static inline void
 write_json_escaped(TSIOBuffer output_buffer, const char *data, int64_t len, int64_t &written)
@@ -135,47 +163,13 @@ write_json_escaped(TSIOBuffer output_buffer, const char *data, int64_t len, int6
     }
     default:
       if (c < 0x20) {
-        char esc[6];
-        esc[0]                  = '\\';
-        esc[1]                  = 'u';
-        esc[2]                  = '0';
-        esc[3]                  = '0';
-        static const char hex[] = "0123456789abcdef";
-        esc[4]                  = hex[(c >> 4) & 0x0F];
-        esc[5]                  = hex[c & 0x0F];
-        TSIOBufferWrite(output_buffer, esc, 6);
-        written += 6;
+        written += write_hex(output_buffer, reinterpret_cast<const char *>(&c), 1);
+        break;
       } else {
-        TSIOBufferWrite(output_buffer, reinterpret_cast<const char *>(&data[i]), 1);
+        TSIOBufferWrite(output_buffer, reinterpret_cast<const char *>(&c), 1);
         written += 1;
       }
     }
-  }
-}
-
-static inline void
-write_hex(TSIOBuffer output_buffer, const char *src, int64_t len, int64_t &written)
-{
-  // Convert each byte to two hex characters
-  static const char hex_chars[] = "0123456789abcdef";
-
-  // Process in chunks to keep stack usage reasonable
-  const int64_t CHUNK = 1024; // 1KB of raw -> 2KB hex
-  int64_t       idx   = 0;
-
-  while (idx < len) {
-    int64_t           take = (len - idx > CHUNK) ? CHUNK : (len - idx);
-    std::vector<char> hex_output(static_cast<size_t>(take * 2));
-
-    for (int64_t i = 0; i < take; ++i) {
-      unsigned char byte    = static_cast<unsigned char>(src[idx + i]);
-      hex_output[i * 2]     = hex_chars[(byte >> 4) & 0x0F];
-      hex_output[i * 2 + 1] = hex_chars[byte & 0x0F];
-    }
-
-    TSIOBufferWrite(output_buffer, hex_output.data(), static_cast<int64_t>(hex_output.size()));
-    written += static_cast<int64_t>(hex_output.size());
-    idx     += take;
   }
 }
 
@@ -289,7 +283,7 @@ body_transform(TSCont contp, TSEvent event, void * /* edata ATS_UNUSED */)
             break;
           case BodyEncoding_t::HEX:
           case BodyEncoding_t::AUTO: // AUTO should have been resolved in header phase, fallback to HEX.
-            write_hex(data->output_buffer.get(), src_block_start, take, wrote_now);
+            wrote_now += write_hex(data->output_buffer.get(), src_block_start, take);
             break;
           }
           data->nbytes += wrote_now;
