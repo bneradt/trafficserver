@@ -30,7 +30,7 @@ Synopsis
 
 .. function:: TSReturnCode TSHttpHdrStatusSet(TSMBuffer bufp, TSMLoc offset, TSHttpStatus status)
 
-.. function:: TSReturnCode TSHttpHdrStatusSet(TSMBuffer bufp, TSMLoc offset, TSHttpStatus status, TSHttpTxn txnp, std::string_view setter)
+.. function:: TSReturnCode TSHttpHdrStatusSet(TSMBuffer bufp, TSMLoc offset, TSHttpStatus status, std::string_view setter)
 
 Description
 ===========
@@ -45,5 +45,4 @@ Parameters
 - bufp: Marshal buffer containing the HTTP header.
 - offset: Location of the HTTP header within bufp.
 - status: The HTTP status code to set.
-- txnp: Optional transaction handle on which to record the setter label.
 - setter: Optional label identifying the component setting the status; pass empty to leave unchanged.

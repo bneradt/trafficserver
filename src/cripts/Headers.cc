@@ -52,7 +52,7 @@ Header::Status::operator=(int status)
   case TS_HTTP_SEND_RESPONSE_HDR_HOOK:
   case TS_HTTP_READ_RESPONSE_HDR_HOOK:
   case TS_HTTP_TXN_CLOSE_HOOK:
-    TSHttpHdrStatusSet(_owner->_bufp, _owner->_hdr_loc, _status, _owner->_state->txnp, "cripts");
+    TSHttpHdrStatusSet(_owner->_bufp, _owner->_hdr_loc, _status, "cripts");
     break;
   default:
     TSHttpTxnStatusSet(_owner->_state->txnp, _status, "cripts");

@@ -1145,7 +1145,7 @@ TSReturnCode TSHttpHdrUrlSet(TSMBuffer bufp, TSMLoc offset, TSMLoc url);
 TSHttpStatus TSHttpHdrStatusGet(TSMBuffer bufp, TSMLoc offset);
 /** This is a candidate for deprecation in v10.0.0 in favor of the version that takes the setter. */
 TSReturnCode TSHttpHdrStatusSet(TSMBuffer bufp, TSMLoc offset, TSHttpStatus status);
-TSReturnCode TSHttpHdrStatusSet(TSMBuffer bufp, TSMLoc offset, TSHttpStatus status, TSHttpTxn txnp, std::string_view setter);
+TSReturnCode TSHttpHdrStatusSet(TSMBuffer bufp, TSMLoc offset, TSHttpStatus status, std::string_view setter);
 const char  *TSHttpHdrReasonGet(TSMBuffer bufp, TSMLoc offset, int *length);
 TSReturnCode TSHttpHdrReasonSet(TSMBuffer bufp, TSMLoc offset, const char *value, int length);
 const char  *TSHttpHdrReasonLookup(TSHttpStatus status);

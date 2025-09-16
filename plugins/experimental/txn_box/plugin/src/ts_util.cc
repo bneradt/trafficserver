@@ -660,7 +660,7 @@ ts::HttpHeader::field_remove(swoc::TextView name)
 bool
 ts::HttpResponse::status_set(TSHttpStatus status) const
 {
-  return TS_SUCCESS == TSHttpHdrStatusSet(_buff, _loc, status, nullptr, "");
+  return TS_SUCCESS == TSHttpHdrStatusSet(_buff, _loc, status, "");
 }
 
 TextView
