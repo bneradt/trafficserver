@@ -32,6 +32,7 @@
 #include "records/RecHttp.h"
 #include "iocore/net/TLSBasicSupport.h"
 #include "iocore/net/TLSSessionResumptionSupport.h"
+#include "tscore/ink_assert.h"
 
 #include <string>
 
@@ -194,10 +195,16 @@ HttpUserAgent::set_txn(ProxyTransaction *txn, TransactionMilestones &milestones)
   if (auto tsrs = netvc->get_service<TLSSessionResumptionSupport>()) {
     m_conn_info.ssl_reused = tsrs->getIsResumedSSLSession();
 
-    if (tsrs->getIsResumedFromSessionCache()) {
-      m_conn_info.ssl_resumption_type = 1;
-    } else if (tsrs->getIsResumedFromSessionTicket()) {
-      m_conn_info.ssl_resumption_type = 2;
+    if (m_conn_info.ssl_reused) {
+      if (tsrs->getIsResumedFromSessionCache()) {
+        m_conn_info.ssl_resumption_type = 1;
+      } else if (tsrs->getIsResumedFromSessionTicket()) {
+        m_conn_info.ssl_resumption_type = 2;
+      } else {
+        // This should not happen if ssl_reused is true.
+        ink_release_assert(!"ssl_resumption_type should be set for an SSL reused session");
+        m_conn_info.ssl_resumption_type = 0;
+      }
     } else {
       m_conn_info.ssl_resumption_type = 0;
     }
