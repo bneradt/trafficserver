@@ -47,7 +47,7 @@ static std::string
 getPreBody(TSHttpTxn txn)
 {
   std::stringstream output;
-  output << "{'xDebugProbeAt' : '" << Hostname << "'\n   'captured':[";
+  output << "{'xDebugProbeAt' : '" << Hostname << "',\n   'captured':[";
   print_request_headers(txn, output);
   output << "\n   ]\n}";
   output << MultipartBoundary;
@@ -68,7 +68,7 @@ getPostBody(TSHttpTxn txn)
 {
   std::stringstream output;
   output << MultipartBoundary;
-  output << "{'xDebugProbeAt' : '" << Hostname << "'\n   'captured':[";
+  output << "{'xDebugProbeAt' : '" << Hostname << "',\n   'captured':[";
   print_response_headers(txn, output);
   output << "\n   ]\n}";
   return output.str();
