@@ -216,12 +216,13 @@ UnixNetVConnection::do_io_read(Continuation *c, int64_t nbytes, MIOBuffer *buf)
     Error("do_io_read invoked on closed vc %p, cont %p, nbytes %" PRId64 ", buf %p", this, c, nbytes, buf);
     return nullptr;
   }
-  read.vio.op        = VIO::READ;
-  read.vio.mutex     = c ? c->mutex : this->mutex;
-  read.vio.cont      = c;
-  read.vio.nbytes    = nbytes;
-  read.vio.ndone     = 0;
-  read.vio.vc_server = this;
+  read.vio.op                = VIO::READ;
+  read.vio.mutex             = c ? c->mutex : this->mutex;
+  read.vio.cont              = c;
+  read.vio.cont_handler_name = c ? c->handler_name : nullptr;
+  read.vio.nbytes            = nbytes;
+  read.vio.ndone             = 0;
+  read.vio.vc_server         = this;
   if (buf) {
     read.vio.set_writer(buf);
     if (!read.enabled) {
@@ -241,12 +242,13 @@ UnixNetVConnection::do_io_write(Continuation *c, int64_t nbytes, IOBufferReader 
     Error("do_io_write invoked on closed vc %p, cont %p, nbytes %" PRId64 ", reader %p", this, c, nbytes, reader);
     return nullptr;
   }
-  write.vio.op        = VIO::WRITE;
-  write.vio.mutex     = c ? c->mutex : this->mutex;
-  write.vio.cont      = c;
-  write.vio.nbytes    = nbytes;
-  write.vio.ndone     = 0;
-  write.vio.vc_server = this;
+  write.vio.op                = VIO::WRITE;
+  write.vio.mutex             = c ? c->mutex : this->mutex;
+  write.vio.cont              = c;
+  write.vio.cont_handler_name = c ? c->handler_name : nullptr;
+  write.vio.nbytes            = nbytes;
+  write.vio.ndone             = 0;
+  write.vio.vc_server         = this;
   if (reader) {
     ink_assert(!owner);
     write.vio.set_reader(reader);
@@ -314,17 +316,19 @@ UnixNetVConnection::do_io_shutdown(ShutdownHowTo_t howto)
     this->con.sock.shutdown(0);
     read.enabled = 0;
     read.vio.buffer.clear();
-    read.vio.nbytes  = 0;
-    read.vio.cont    = nullptr;
-    f.shutdown      |= NetEvent::SHUTDOWN_READ;
+    read.vio.nbytes             = 0;
+    read.vio.cont               = nullptr;
+    read.vio.cont_handler_name  = nullptr;
+    f.shutdown                 |= NetEvent::SHUTDOWN_READ;
     break;
   case IO_SHUTDOWN_WRITE:
     this->con.sock.shutdown(1);
     write.enabled = 0;
     write.vio.buffer.clear();
-    write.vio.nbytes  = 0;
-    write.vio.cont    = nullptr;
-    f.shutdown       |= NetEvent::SHUTDOWN_WRITE;
+    write.vio.nbytes             = 0;
+    write.vio.cont               = nullptr;
+    write.vio.cont_handler_name  = nullptr;
+    f.shutdown                  |= NetEvent::SHUTDOWN_WRITE;
     break;
   case IO_SHUTDOWN_READWRITE:
     this->con.sock.shutdown(2);
@@ -333,10 +337,12 @@ UnixNetVConnection::do_io_shutdown(ShutdownHowTo_t howto)
     read.vio.buffer.clear();
     read.vio.nbytes = 0;
     write.vio.buffer.clear();
-    write.vio.nbytes = 0;
-    read.vio.cont    = nullptr;
-    write.vio.cont   = nullptr;
-    f.shutdown       = NetEvent::SHUTDOWN_READ | NetEvent::SHUTDOWN_WRITE;
+    write.vio.nbytes            = 0;
+    read.vio.cont               = nullptr;
+    read.vio.cont_handler_name  = nullptr;
+    write.vio.cont              = nullptr;
+    write.vio.cont_handler_name = nullptr;
+    f.shutdown                  = NetEvent::SHUTDOWN_READ | NetEvent::SHUTDOWN_WRITE;
     break;
   default:
     ink_assert(!"not reached");
@@ -1257,16 +1263,18 @@ UnixNetVConnection::clear()
   attributes      = 0;
   read.vio.mutex.clear();
   write.vio.mutex.clear();
-  flags               = 0;
-  nh                  = nullptr;
-  read.triggered      = 0;
-  write.triggered     = 0;
-  read.enabled        = 0;
-  write.enabled       = 0;
-  read.vio.cont       = nullptr;
-  write.vio.cont      = nullptr;
-  read.vio.vc_server  = nullptr;
-  write.vio.vc_server = nullptr;
+  flags                       = 0;
+  nh                          = nullptr;
+  read.triggered              = 0;
+  write.triggered             = 0;
+  read.enabled                = 0;
+  write.enabled               = 0;
+  read.vio.cont               = nullptr;
+  read.vio.cont_handler_name  = nullptr;
+  write.vio.cont              = nullptr;
+  write.vio.cont_handler_name = nullptr;
+  read.vio.vc_server          = nullptr;
+  write.vio.vc_server         = nullptr;
   options.reset();
   if (netvc_context == NET_VCONNECTION_OUT) {
     read.vio.buffer.clear();

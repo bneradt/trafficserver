@@ -83,11 +83,13 @@ VIO::set_continuation(Continuation *acont)
     vc_server->set_continuation(this, acont);
   }
   if (acont) {
-    mutex = acont->mutex;
-    cont  = acont;
+    mutex             = acont->mutex;
+    cont              = acont;
+    cont_handler_name = acont->handler_name;
   } else {
-    mutex = nullptr;
-    cont  = nullptr;
+    mutex             = nullptr;
+    cont              = nullptr;
+    cont_handler_name = nullptr;
   }
   return;
 }

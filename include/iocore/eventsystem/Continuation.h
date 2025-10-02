@@ -146,9 +146,7 @@ public:
   */
   ContinuationHandler handler = nullptr;
 
-#ifdef DEBUG
   const char *handler_name = nullptr;
-#endif
 
   /**
     The Continuation's lock.
@@ -247,11 +245,7 @@ protected:
   @param _h Pointer to the function used to callback with events.
 
 */
-#ifdef DEBUG
 #define SET_HANDLER(_h) (handler = continuation_handler_void_ptr(_h), handler_name = #_h)
-#else
-#define SET_HANDLER(_h) (handler = continuation_handler_void_ptr(_h))
-#endif
 
 /**
   Sets a Continuation's handler.
@@ -262,11 +256,7 @@ protected:
   @param _h Pointer to the function used to callback with events.
 
 */
-#ifdef DEBUG
 #define SET_CONTINUATION_HANDLER(_c, _h) (_c->handler = continuation_handler_void_ptr(_h), _c->handler_name = #_h)
-#else
-#define SET_CONTINUATION_HANDLER(_c, _h) (_c->handler = continuation_handler_void_ptr(_h))
-#endif
 
 inline Continuation::Continuation(Ptr<ProxyMutex> &amutex) : mutex(amutex)
 {

@@ -143,6 +143,8 @@ public:
   */
   Continuation *cont = nullptr;
 
+  char const *cont_handler_name = nullptr;
+
   /**
     Number of bytes to be done for this operation.
 

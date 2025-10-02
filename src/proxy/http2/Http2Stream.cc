@@ -515,12 +515,13 @@ Http2Stream::do_io_read(Continuation *c, int64_t nbytes, MIOBuffer *buf)
     read_vio.buffer.clear();
   }
 
-  read_vio.mutex     = c ? c->mutex : this->mutex;
-  read_vio.cont      = c;
-  read_vio.nbytes    = nbytes;
-  read_vio.ndone     = 0;
-  read_vio.vc_server = this;
-  read_vio.op        = VIO::READ;
+  read_vio.mutex             = c ? c->mutex : this->mutex;
+  read_vio.cont              = c;
+  read_vio.cont_handler_name = c ? c->handler_name : nullptr;
+  read_vio.nbytes            = nbytes;
+  read_vio.ndone             = 0;
+  read_vio.vc_server         = this;
+  read_vio.op                = VIO::READ;
 
   // TODO: re-enable read_vio
 
@@ -535,13 +536,14 @@ Http2Stream::do_io_write(Continuation *c, int64_t nbytes, IOBufferReader *abuffe
   } else {
     write_vio.buffer.clear();
   }
-  write_vio.mutex     = c ? c->mutex : this->mutex;
-  write_vio.cont      = c;
-  write_vio.nbytes    = nbytes;
-  write_vio.ndone     = 0;
-  write_vio.vc_server = this;
-  write_vio.op        = VIO::WRITE;
-  _send_reader        = abuffer;
+  write_vio.mutex             = c ? c->mutex : this->mutex;
+  write_vio.cont              = c;
+  write_vio.cont_handler_name = c ? c->handler_name : nullptr;
+  write_vio.nbytes            = nbytes;
+  write_vio.ndone             = 0;
+  write_vio.vc_server         = this;
+  write_vio.op                = VIO::WRITE;
+  _send_reader                = abuffer;
 
   if (c != nullptr && nbytes > 0 && this->is_state_writeable()) {
     update_write_request(false);

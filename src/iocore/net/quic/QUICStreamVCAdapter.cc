@@ -301,16 +301,18 @@ QUICStreamVCAdapter::do_io_close(int /* lerrno ATS_UNUSED */)
   SET_HANDLER(&QUICStreamVCAdapter::state_stream_closed);
 
   this->_read_vio.buffer.clear();
-  this->_read_vio.nbytes    = 0;
-  this->_read_vio.op        = VIO::NONE;
-  this->_read_vio.cont      = nullptr;
-  this->_read_vio.vc_server = nullptr;
+  this->_read_vio.nbytes            = 0;
+  this->_read_vio.op                = VIO::NONE;
+  this->_read_vio.cont              = nullptr;
+  this->_read_vio.cont_handler_name = nullptr;
+  this->_read_vio.vc_server         = nullptr;
 
   this->_write_vio.buffer.clear();
-  this->_write_vio.nbytes    = 0;
-  this->_write_vio.op        = VIO::NONE;
-  this->_write_vio.cont      = nullptr;
-  this->_write_vio.vc_server = nullptr;
+  this->_write_vio.nbytes            = 0;
+  this->_write_vio.op                = VIO::NONE;
+  this->_write_vio.cont              = nullptr;
+  this->_write_vio.cont_handler_name = nullptr;
+  this->_write_vio.vc_server         = nullptr;
 }
 
 void
