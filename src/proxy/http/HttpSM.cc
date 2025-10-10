@@ -69,9 +69,9 @@
 
 using namespace std::literals;
 
-#define DEFAULT_RESPONSE_BUFFER_SIZE_INDEX 6 // 8K
-#define DEFAULT_REQUEST_BUFFER_SIZE_INDEX  6 // 8K
-#define MIN_CONFIG_BUFFER_SIZE_INDEX       5 // 4K
+static constexpr int DEFAULT_RESPONSE_BUFFER_SIZE_INDEX = 6; // 8K
+static constexpr int DEFAULT_REQUEST_BUFFER_SIZE_INDEX  = 6; // 8K
+static constexpr int MIN_CONFIG_BUFFER_SIZE_INDEX       = 5; // 4K
 
 #define hsm_release_assert(EX)              \
   {                                         \
@@ -122,11 +122,11 @@ static DbgCtl dbg_ctl_ssl_early_data{"ssl_early_data"};
 static DbgCtl dbg_ctl_ssl_sni{"ssl_sni"};
 static DbgCtl dbg_ctl_url_rewrite{"url_rewrite"};
 
-static const int sub_header_size = sizeof("Content-type: ") - 1 + 2 + sizeof("Content-range: bytes ") - 1 + 4;
-static const int boundary_size   = 2 + sizeof("RANGE_SEPARATOR") - 1 + 2;
+static constexpr int sub_header_size = sizeof("Content-type: ") - 1 + 2 + sizeof("Content-range: bytes ") - 1 + 4;
+static constexpr int boundary_size   = 2 + sizeof("RANGE_SEPARATOR") - 1 + 2;
 
-static const char *str_100_continue_response = "HTTP/1.1 100 Continue\r\n\r\n";
-static const int   len_100_continue_response = strlen(str_100_continue_response);
+static const char   *str_100_continue_response = "HTTP/1.1 100 Continue\r\n\r\n";
+static constexpr int len_100_continue_response = sizeof("HTTP/1.1 100 Continue\r\n\r\n") - 1;
 
 // Handy alias for short (single line) message generation.
 using lbw = swoc::LocalBufferWriter<256>;
@@ -868,15 +868,24 @@ HttpSM::state_watch_for_client_abort(int event, void *data)
    * client.
    */
   case VC_EVENT_EOS: {
-    // We got an early EOS. To trigger background fill, do NOT kill HttpSM.
+    // We got an early EOS.
     if (!terminate_sm) { // Not done already
       NetVConnection *netvc = _ua.get_txn()->get_netvc();
-      if (netvc) {
-        if (_ua.get_txn()->allow_half_open()) {
+      if (_ua.get_txn()->allow_half_open() || tunnel.has_consumer_besides_client()) {
+        if (netvc) {
           netvc->do_io_shutdown(IO_SHUTDOWN_READ);
-        } else {
-          netvc->do_io_shutdown(IO_SHUTDOWN_READWRITE);
         }
+      } else if (t_state.txn_conf->cache_http &&
+                 (server_entry != nullptr && server_entry->vc_read_handler == &HttpSM::state_read_server_response_header)) {
+        // if HttpSM is waiting response header from origin server, keep it for a while to run background fetch
+        _ua.get_txn()->do_io_shutdown(IO_SHUTDOWN_READWRITE);
+      } else {
+        _ua.get_txn()->do_io_close();
+        vc_table.cleanup_entry(_ua.get_entry());
+        _ua.set_entry(nullptr);
+        tunnel.kill_tunnel();
+        terminate_sm = true; // Just die already, the requester is gone
+        set_ua_abort(HttpTransact::ABORTED, event);
       }
       if (_ua.get_entry()) {
         _ua.get_entry()->eos = true;
