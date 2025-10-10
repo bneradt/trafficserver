@@ -915,19 +915,17 @@ SSLNetVConnection::do_io_shutdown(ShutdownHowTo_t howto)
     //   The read direction will be closed by the peer.
     read.enabled = 0;
     read.vio.buffer.clear();
-    read.vio.nbytes             = 0;
-    read.vio.cont               = nullptr;
-    read.vio.cont_handler_name  = nullptr;
-    f.shutdown                 |= NetEvent::SHUTDOWN_READ;
+    read.vio.nbytes  = 0;
+    read.vio.cont    = nullptr;
+    f.shutdown      |= NetEvent::SHUTDOWN_READ;
     break;
   case IO_SHUTDOWN_WRITE:
     SSL_shutdown(ssl);
     write.enabled = 0;
     write.vio.buffer.clear();
-    write.vio.nbytes             = 0;
-    write.vio.cont               = nullptr;
-    write.vio.cont_handler_name  = nullptr;
-    f.shutdown                  |= NetEvent::SHUTDOWN_WRITE;
+    write.vio.nbytes  = 0;
+    write.vio.cont    = nullptr;
+    f.shutdown       |= NetEvent::SHUTDOWN_WRITE;
     break;
   case IO_SHUTDOWN_READWRITE:
     SSL_shutdown(ssl);
@@ -936,12 +934,10 @@ SSLNetVConnection::do_io_shutdown(ShutdownHowTo_t howto)
     read.vio.buffer.clear();
     read.vio.nbytes = 0;
     write.vio.buffer.clear();
-    write.vio.nbytes            = 0;
-    read.vio.cont               = nullptr;
-    read.vio.cont_handler_name  = nullptr;
-    write.vio.cont              = nullptr;
-    write.vio.cont_handler_name = nullptr;
-    f.shutdown                  = NetEvent::SHUTDOWN_READ | NetEvent::SHUTDOWN_WRITE;
+    write.vio.nbytes = 0;
+    read.vio.cont    = nullptr;
+    write.vio.cont   = nullptr;
+    f.shutdown       = NetEvent::SHUTDOWN_READ | NetEvent::SHUTDOWN_WRITE;
     break;
   default:
     ink_assert(!"not reached");
@@ -1976,11 +1972,11 @@ SSLNetVConnection::_propagateHandShakeBuffer(UnixNetVConnection *target, EThread
   NetState *s              = &target->read;
   s->vio.set_writer(this->handShakeBuffer);
   s->vio.set_reader(this->handShakeHolder);
-  this->handShakeHolder    = nullptr;
-  this->handShakeBuffer    = nullptr;
-  s->vio.vc_server         = target;
-  s->vio.cont              = this->read.vio.cont;
-  s->vio.cont_handler_name = this->read.vio.cont ? this->read.vio.cont->handler_name : nullptr;
+  this->handShakeHolder = nullptr;
+  this->handShakeBuffer = nullptr;
+  s->vio.vc_server      = target;
+  s->vio.cont           = this->read.vio.cont;
+  s->vio.set_continuation_handler_name(this->read.vio.cont ? this->read.vio.cont->handler_name : nullptr);
   if (this->read.vio.cont) {
     s->vio.mutex = this->read.vio.cont->mutex;
   }

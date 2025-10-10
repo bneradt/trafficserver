@@ -65,6 +65,16 @@ public:
   void          set_continuation(Continuation *cont);
 
   /**
+    Set the continuation handler name if the provided name is non-null.
+
+    This preserves the last known handler name for debugging purposes,
+    never overwriting a set name with nullptr.
+
+    @param name The handler name to set, or nullptr to leave unchanged.
+  */
+  void set_continuation_handler_name(const char *name);
+
+  /**
     Set nbytes to be what is current available.
 
     Interface to set nbytes to be ndone + buffer.reader()->read_avail()

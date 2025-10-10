@@ -272,6 +272,7 @@ QUICStreamVCAdapter::do_io_read(Continuation *c, int64_t nbytes, MIOBuffer *buf)
   this->_read_vio.ndone     = 0;
   this->_read_vio.vc_server = this;
   this->_read_vio.op        = VIO::READ;
+  this->_read_vio.set_continuation_handler_name(c ? c->handler_name : nullptr);
 
   return &this->_read_vio;
 }
@@ -291,6 +292,7 @@ QUICStreamVCAdapter::do_io_write(Continuation *c, int64_t nbytes, IOBufferReader
   this->_write_vio.ndone     = 0;
   this->_write_vio.vc_server = this;
   this->_write_vio.op        = VIO::WRITE;
+  this->_write_vio.set_continuation_handler_name(c ? c->handler_name : nullptr);
 
   return &this->_write_vio;
 }
@@ -301,18 +303,16 @@ QUICStreamVCAdapter::do_io_close(int /* lerrno ATS_UNUSED */)
   SET_HANDLER(&QUICStreamVCAdapter::state_stream_closed);
 
   this->_read_vio.buffer.clear();
-  this->_read_vio.nbytes            = 0;
-  this->_read_vio.op                = VIO::NONE;
-  this->_read_vio.cont              = nullptr;
-  this->_read_vio.cont_handler_name = nullptr;
-  this->_read_vio.vc_server         = nullptr;
+  this->_read_vio.nbytes    = 0;
+  this->_read_vio.op        = VIO::NONE;
+  this->_read_vio.cont      = nullptr;
+  this->_read_vio.vc_server = nullptr;
 
   this->_write_vio.buffer.clear();
-  this->_write_vio.nbytes            = 0;
-  this->_write_vio.op                = VIO::NONE;
-  this->_write_vio.cont              = nullptr;
-  this->_write_vio.cont_handler_name = nullptr;
-  this->_write_vio.vc_server         = nullptr;
+  this->_write_vio.nbytes    = 0;
+  this->_write_vio.op        = VIO::NONE;
+  this->_write_vio.cont      = nullptr;
+  this->_write_vio.vc_server = nullptr;
 }
 
 void
