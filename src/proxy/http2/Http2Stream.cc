@@ -521,7 +521,6 @@ Http2Stream::do_io_read(Continuation *c, int64_t nbytes, MIOBuffer *buf)
   read_vio.ndone     = 0;
   read_vio.vc_server = this;
   read_vio.op        = VIO::READ;
-  read_vio.set_continuation_handler_name(c ? c->handler_name : nullptr);
 
   // TODO: re-enable read_vio
 
@@ -542,8 +541,7 @@ Http2Stream::do_io_write(Continuation *c, int64_t nbytes, IOBufferReader *abuffe
   write_vio.ndone     = 0;
   write_vio.vc_server = this;
   write_vio.op        = VIO::WRITE;
-  write_vio.set_continuation_handler_name(c ? c->handler_name : nullptr);
-  _send_reader = abuffer;
+  _send_reader        = abuffer;
 
   if (c != nullptr && nbytes > 0 && this->is_state_writeable()) {
     update_write_request(false);

@@ -77,15 +77,6 @@ VIO::done()
 }
 
 TS_INLINE void
-VIO::set_continuation_handler_name(const char *name)
-{
-  // Only update if the new name is non-null, preserving the last known handler name.
-  if (name != nullptr) {
-    cont_handler_name = name;
-  }
-}
-
-TS_INLINE void
 VIO::set_continuation(Continuation *acont)
 {
   if (vc_server) {
@@ -94,7 +85,6 @@ VIO::set_continuation(Continuation *acont)
   if (acont) {
     mutex = acont->mutex;
     cont  = acont;
-    set_continuation_handler_name(acont->handler_name);
   } else {
     mutex = nullptr;
     cont  = nullptr;

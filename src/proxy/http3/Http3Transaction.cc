@@ -129,7 +129,6 @@ HQTransaction::do_io_read(Continuation *c, int64_t nbytes, MIOBuffer *buf)
   this->_read_vio.ndone     = 0;
   this->_read_vio.vc_server = this;
   this->_read_vio.op        = VIO::READ;
-  this->_read_vio.set_continuation_handler_name(c ? c->handler_name : nullptr);
 
   if (buf) {
     this->_process_read_vio();
@@ -154,7 +153,6 @@ HQTransaction::do_io_write(Continuation *c, int64_t nbytes, IOBufferReader *buf,
   this->_write_vio.ndone     = 0;
   this->_write_vio.vc_server = this;
   this->_write_vio.op        = VIO::WRITE;
-  this->_write_vio.set_continuation_handler_name(c ? c->handler_name : nullptr);
 
   if (c != nullptr && nbytes > 0) {
     // TODO Return nullptr if the stream is not on writable state

@@ -1976,10 +1976,7 @@ SSLNetVConnection::_propagateHandShakeBuffer(UnixNetVConnection *target, EThread
   this->handShakeBuffer = nullptr;
   s->vio.vc_server      = target;
   s->vio.cont           = this->read.vio.cont;
-  s->vio.set_continuation_handler_name(this->read.vio.cont ? this->read.vio.cont->handler_name : nullptr);
-  if (this->read.vio.cont) {
-    s->vio.mutex = this->read.vio.cont->mutex;
-  }
+  s->vio.mutex          = this->read.vio.cont->mutex;
   // Passing along the buffer, don't keep a reading holding early in the buffer
   this->handShakeReader->dealloc();
   this->handShakeReader = nullptr;

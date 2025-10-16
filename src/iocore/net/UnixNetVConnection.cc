@@ -216,11 +216,10 @@ UnixNetVConnection::do_io_read(Continuation *c, int64_t nbytes, MIOBuffer *buf)
     Error("do_io_read invoked on closed vc %p, cont %p, nbytes %" PRId64 ", buf %p", this, c, nbytes, buf);
     return nullptr;
   }
-  read.vio.op     = VIO::READ;
-  read.vio.mutex  = c ? c->mutex : this->mutex;
-  read.vio.cont   = c;
-  read.vio.nbytes = nbytes;
-  read.vio.set_continuation_handler_name(c ? c->handler_name : nullptr);
+  read.vio.op        = VIO::READ;
+  read.vio.mutex     = c ? c->mutex : this->mutex;
+  read.vio.cont      = c;
+  read.vio.nbytes    = nbytes;
   read.vio.ndone     = 0;
   read.vio.vc_server = this;
   if (buf) {
@@ -242,11 +241,10 @@ UnixNetVConnection::do_io_write(Continuation *c, int64_t nbytes, IOBufferReader 
     Error("do_io_write invoked on closed vc %p, cont %p, nbytes %" PRId64 ", reader %p", this, c, nbytes, reader);
     return nullptr;
   }
-  write.vio.op     = VIO::WRITE;
-  write.vio.mutex  = c ? c->mutex : this->mutex;
-  write.vio.cont   = c;
-  write.vio.nbytes = nbytes;
-  write.vio.set_continuation_handler_name(c ? c->handler_name : nullptr);
+  write.vio.op        = VIO::WRITE;
+  write.vio.mutex     = c ? c->mutex : this->mutex;
+  write.vio.cont      = c;
+  write.vio.nbytes    = nbytes;
   write.vio.ndone     = 0;
   write.vio.vc_server = this;
   if (reader) {

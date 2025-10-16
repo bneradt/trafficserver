@@ -271,7 +271,6 @@ PluginVC::do_io_read(Continuation *c, int64_t nbytes, MIOBuffer *buf)
   read_state.vio.ndone     = 0;
   read_state.vio.vc_server = (VConnection *)this;
   read_state.vio.op        = VIO::READ;
-  read_state.vio.set_continuation_handler_name(c ? c->handler_name : nullptr);
 
   Dbg(dbg_ctl_pvc, "[%u] %s: do_io_read for %" PRId64 " bytes", core_obj->id, PVC_TYPE, nbytes);
 
@@ -304,7 +303,6 @@ PluginVC::do_io_write(Continuation *c, int64_t nbytes, IOBufferReader *abuffer, 
   write_state.vio.ndone     = 0;
   write_state.vio.vc_server = (VConnection *)this;
   write_state.vio.op        = VIO::WRITE;
-  write_state.vio.set_continuation_handler_name(c ? c->handler_name : nullptr);
 
   Dbg(dbg_ctl_pvc, "[%u] %s: do_io_write for %" PRId64 " bytes", core_obj->id, PVC_TYPE, nbytes);
 
