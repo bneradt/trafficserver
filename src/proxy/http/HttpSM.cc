@@ -5315,6 +5315,7 @@ HttpSM::ip_allow_deny_request(const IpAllow::ACL &acl)
     SMDbg(dbg_ctl_ip_allow, "Line %d denial for '%.*s' from %s", acl.source_line(), method_str_len, method_str, ntop_formatted);
   }
 
+  t_state.http_return_code_setter_name = "ip_allow";
   t_state.current.retry_attempts.maximize(
     t_state.configured_connect_attempts_max_retries()); // prevent any more retries with this IP
   call_transact_and_set_next_state(HttpTransact::Forbidden);
