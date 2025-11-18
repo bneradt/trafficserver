@@ -3039,7 +3039,16 @@ HttpSM::tunnel_handler(int event, void * /* data ATS_UNUSED */)
     return 0;
   }
 
-  ink_assert(event == HTTP_TUNNEL_EVENT_DONE || event == VC_EVENT_INACTIVITY_TIMEOUT);
+  if (event != HTTP_TUNNEL_EVENT_DONE && event != VC_EVENT_INACTIVITY_TIMEOUT && event != VC_EVENT_ACTIVE_TIMEOUT &&
+      event != VC_EVENT_EOS && event != VC_EVENT_ERROR && event != VC_EVENT_READ_COMPLETE && event != VC_EVENT_WRITE_COMPLETE &&
+      event != HTTP_TUNNEL_EVENT_CONSUMER_DETACH && event != HTTP_TUNNEL_EVENT_PARSE_ERROR) {
+    Error("[%" PRId64 "] tunnel_handler received unexpected event %d (%s)", sm_id, event, HttpDebugNames::get_event_name(event));
+  }
+
+  ink_assert(event == HTTP_TUNNEL_EVENT_DONE || event == VC_EVENT_INACTIVITY_TIMEOUT || event == VC_EVENT_ACTIVE_TIMEOUT ||
+             event == VC_EVENT_EOS || event == VC_EVENT_ERROR || event == VC_EVENT_READ_COMPLETE ||
+             event == VC_EVENT_WRITE_COMPLETE || event == HTTP_TUNNEL_EVENT_CONSUMER_DETACH ||
+             event == HTTP_TUNNEL_EVENT_PARSE_ERROR);
   // The tunnel calls this when it is done
   terminate_sm = true;
 
