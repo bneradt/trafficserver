@@ -41,7 +41,7 @@
 
 // Generate an array of enum values from the X-macro in definition order.
 static constexpr TSOverridableConfigKey xmacro_enum_order[] = {
-#define X_ENUM_ORDER(CONFIG_KEY, MEMBER, RECORD_NAME, DATA_TYPE, CONV) TS_CONFIG_##CONFIG_KEY,
+#define X_ENUM_ORDER(CONFIG_KEY, MEMBER, RECORD_NAME, DATA_TYPE, CONV_TYPE, CONV_PTR) TS_CONFIG_##CONFIG_KEY,
   OVERRIDABLE_CONFIGS(X_ENUM_ORDER)
 #undef X_ENUM_ORDER
 };
@@ -74,7 +74,7 @@ static_assert(check_xmacro_order(xmacro_enum_order),
 // clang-format off
 const std::unordered_map<std::string_view, std::tuple<const TSOverridableConfigKey, const TSRecordDataType>>
   ts::Overridable_Txn_Vars({
-#define X_TXN_VAR(CONFIG_KEY, MEMBER, RECORD_NAME, DATA_TYPE, CONV) \
+#define X_TXN_VAR(CONFIG_KEY, MEMBER, RECORD_NAME, DATA_TYPE, CONV_TYPE, CONV_PTR) \
     {RECORD_NAME, {TS_CONFIG_##CONFIG_KEY, TS_RECORDDATATYPE_##DATA_TYPE}},
     OVERRIDABLE_CONFIGS(X_TXN_VAR)
 #undef X_TXN_VAR

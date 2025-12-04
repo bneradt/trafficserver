@@ -8694,7 +8694,7 @@ EXCLUSIVE_REGRESSION_TEST(SDK_API_TSHttpConnectServerIntercept)(RegressionTest *
 // Generate the SDK_Overridable_Configs array from the X-macro.
 // The order MUST match TSOverridableConfigKey enum order (enforced by static_assert).
 // clang-format off
-#define X_SDK_CONFIG(CONFIG_KEY, MEMBER, RECORD_NAME, DATA_TYPE, CONV) RECORD_NAME,
+#define X_SDK_CONFIG(CONFIG_KEY, MEMBER, RECORD_NAME, DATA_TYPE, CONV_TYPE, CONV_PTR) RECORD_NAME,
 std::array<std::string_view, TS_CONFIG_LAST_ENTRY> SDK_Overridable_Configs = {{
   OVERRIDABLE_CONFIGS(X_SDK_CONFIG)
 }};

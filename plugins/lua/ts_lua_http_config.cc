@@ -23,7 +23,8 @@
 // Generate the Lua config enum from the X-macro.
 // Each entry maps TS_LUA_CONFIG_<KEY> = TS_CONFIG_<KEY>.
 typedef enum {
-#define X_LUA_ENUM(CONFIG_KEY, MEMBER, RECORD_NAME, DATA_TYPE, CONV) TS_LUA_CONFIG_##CONFIG_KEY = TS_CONFIG_##CONFIG_KEY,
+#define X_LUA_ENUM(CONFIG_KEY, MEMBER, RECORD_NAME, DATA_TYPE, CONV_TYPE, CONV_PTR) \
+  TS_LUA_CONFIG_##CONFIG_KEY = TS_CONFIG_##CONFIG_KEY,
   OVERRIDABLE_CONFIGS(X_LUA_ENUM)
 #undef X_LUA_ENUM
 
@@ -38,9 +39,8 @@ typedef enum {
 } TSLuaTimeoutKey;
 
 // Generate the Lua config variable array from the X-macro.
-// The 5th parameter (CONV) is ignored here.
 ts_lua_var_item ts_lua_http_config_vars[] = {
-#define X_LUA_VAR(CONFIG_KEY, MEMBER, RECORD_NAME, DATA_TYPE, CONV) TS_LUA_MAKE_VAR_ITEM(TS_LUA_CONFIG_##CONFIG_KEY),
+#define X_LUA_VAR(CONFIG_KEY, MEMBER, RECORD_NAME, DATA_TYPE, CONV_TYPE, CONV_PTR) TS_LUA_MAKE_VAR_ITEM(TS_LUA_CONFIG_##CONFIG_KEY),
   OVERRIDABLE_CONFIGS(X_LUA_VAR)
 #undef X_LUA_VAR
 

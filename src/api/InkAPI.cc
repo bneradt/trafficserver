@@ -7203,53 +7203,56 @@ _memberp_to_generic(MgmtFloat *ptr, MgmtConverter const *&conv) -> typename std:
   return ptr;
 }
 
-// Converter dispatch macros for the X-macro expansion.
+// Type alias for config accessor functions.
+using ConfAccessor = void *(*)(OverridableHttpConfigParams *, MgmtConverter const *&);
+
+// Accessor generation macros - only 3 patterns needed.
+// GENERIC: Use type-deduced converter via _memberp_to_generic.
+// CUSTOM: Use the provided converter pointer.
+// NONE: No-op (SSL strings handled elsewhere).
 // clang-format off
-#define _CONF_CASE_GENERIC(KEY, MEMBER)                                         \
-  case TS_CONFIG_##KEY: ret = _memberp_to_generic(&overridableHttpConfig->MEMBER, conv); break;
-#define _CONF_CASE_NONE(KEY, MEMBER)                                            \
-  case TS_CONFIG_##KEY: break;
-#define _CONF_CASE_HttpDownServerCacheTimeConv(KEY, MEMBER)                     \
-  case TS_CONFIG_##KEY: conv = &HttpDownServerCacheTimeConv; ret = &overridableHttpConfig->MEMBER; break;
-#define _CONF_CASE_HttpStatusCodeList_Conv(KEY, MEMBER)                         \
-  case TS_CONFIG_##KEY: ret = &overridableHttpConfig->MEMBER; conv = &HttpStatusCodeList::Conv; break;
-#define _CONF_CASE_ConnectionTracker_MIN_SERVER_CONV(KEY, MEMBER)               \
-  case TS_CONFIG_##KEY: ret = &overridableHttpConfig->MEMBER; conv = &ConnectionTracker::MIN_SERVER_CONV; break;
-#define _CONF_CASE_ConnectionTracker_MAX_SERVER_CONV(KEY, MEMBER)               \
-  case TS_CONFIG_##KEY: ret = &overridableHttpConfig->MEMBER; conv = &ConnectionTracker::MAX_SERVER_CONV; break;
-#define _CONF_CASE_ConnectionTracker_SERVER_MATCH_CONV(KEY, MEMBER)             \
-  case TS_CONFIG_##KEY: ret = &overridableHttpConfig->MEMBER; conv = &ConnectionTracker::SERVER_MATCH_CONV; break;
-#define _CONF_CASE_HttpTransact_HOST_RES_CONV(KEY, MEMBER)                      \
-  case TS_CONFIG_##KEY: ret = &overridableHttpConfig->MEMBER; conv = &HttpTransact::HOST_RES_CONV; break;
-#define _CONF_CASE_DISPATCH(KEY, MEMBER, RECORD_NAME, DATA_TYPE, CONV) _CONF_CASE_##CONV(KEY, MEMBER)
+#define _MAKE_ACCESSOR_GENERIC(MEMBER, CONV_PTR)                                          \
+  +[](OverridableHttpConfigParams *cfg, MgmtConverter const *&conv) -> void * {           \
+    return _memberp_to_generic(&cfg->MEMBER, conv);                                       \
+  }
+
+#define _MAKE_ACCESSOR_CUSTOM(MEMBER, CONV_PTR)                                           \
+  +[](OverridableHttpConfigParams *cfg, MgmtConverter const *&conv) -> void * {           \
+    conv = CONV_PTR;                                                                      \
+    return &cfg->MEMBER;                                                                  \
+  }
+
+#define _MAKE_ACCESSOR_NONE(MEMBER, CONV_PTR)                                             \
+  +[](OverridableHttpConfigParams *, MgmtConverter const *&) -> void * {                  \
+    return nullptr;                                                                       \
+  }
+
+#define _MAKE_ACCESSOR(CONV_TYPE, MEMBER, CONV_PTR) _MAKE_ACCESSOR_##CONV_TYPE(MEMBER, CONV_PTR)
+#define X_CONF_ACCESSOR(KEY, MEMBER, RECORD, DATA_TYPE, CONV_TYPE, CONV_PTR) \
+  _MAKE_ACCESSOR(CONV_TYPE, MEMBER, CONV_PTR),
+
+// Generate the accessor table - each entry handles its specific member and converter.
+static const ConfAccessor conf_accessors[TS_CONFIG_LAST_ENTRY] = {
+  OVERRIDABLE_CONFIGS(X_CONF_ACCESSOR)
+};
+
+#undef X_CONF_ACCESSOR
+#undef _MAKE_ACCESSOR
+#undef _MAKE_ACCESSOR_GENERIC
+#undef _MAKE_ACCESSOR_CUSTOM
+#undef _MAKE_ACCESSOR_NONE
 // clang-format on
 
-// Little helper function to find the struct member
+// Helper function to find the struct member via table lookup.
 static void *
 _conf_to_memberp(TSOverridableConfigKey conf, OverridableHttpConfigParams *overridableHttpConfig, MgmtConverter const *&conv)
 {
-  void *ret = nullptr;
-  conv      = nullptr;
-
-  switch (conf) {
-    OVERRIDABLE_CONFIGS(_CONF_CASE_DISPATCH)
-  case TS_CONFIG_NULL:
-  case TS_CONFIG_LAST_ENTRY:
-    break;
+  conv = nullptr;
+  if (conf < 0 || conf >= TS_CONFIG_LAST_ENTRY) {
+    return nullptr;
   }
-
-  return ret;
+  return conf_accessors[conf](overridableHttpConfig, conv);
 }
-
-#undef _CONF_CASE_GENERIC
-#undef _CONF_CASE_NONE
-#undef _CONF_CASE_HttpDownServerCacheTimeConv
-#undef _CONF_CASE_HttpStatusCodeList_Conv
-#undef _CONF_CASE_ConnectionTracker_MIN_SERVER_CONV
-#undef _CONF_CASE_ConnectionTracker_MAX_SERVER_CONV
-#undef _CONF_CASE_ConnectionTracker_SERVER_MATCH_CONV
-#undef _CONF_CASE_HttpTransact_HOST_RES_CONV
-#undef _CONF_CASE_DISPATCH
 
 // 2nd little helper function to find the struct member for getting.
 static const void *
