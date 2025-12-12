@@ -21,8 +21,11 @@
 
 #include "iocore/net/YamlSSLMultiCertConfig.h"
 
-#include <set>
+#include <algorithm>
+#include <array>
+#include <cstring>
 #include <string>
+#include <string_view>
 #include <exception>
 
 #include <yaml-cpp/yaml.h>
@@ -43,10 +46,17 @@ constexpr char YAML_SSL_TICKET_ENABLED[] = "ssl_ticket_enabled";
 constexpr char YAML_SSL_TICKET_NUMBER[]  = "ssl_ticket_number";
 constexpr char YAML_ACTION[]             = "action";
 
-const std::set<std::string> valid_ssl_multicert_keys = {
+constexpr std::array<std::string_view, 10> valid_ssl_multicert_keys = {
   YAML_SSL_CERT_NAME,  YAML_DEST_IP,   YAML_SSL_KEY_NAME,       YAML_SSL_CA_NAME,       YAML_SSL_OCSP_NAME,
   YAML_SSL_KEY_DIALOG, YAML_DEST_FQDN, YAML_SSL_TICKET_ENABLED, YAML_SSL_TICKET_NUMBER, YAML_ACTION,
 };
+
+/// Check if a key is a valid ssl_multicert key.
+bool
+is_valid_key(std::string_view key)
+{
+  return std::find(valid_ssl_multicert_keys.begin(), valid_ssl_multicert_keys.end(), key) != valid_ssl_multicert_keys.end();
+}
 
 } // namespace
 
@@ -58,7 +68,7 @@ template <> struct convert<YamlSSLMultiCertConfig::Item> {
   {
     for (const auto &elem : node) {
       std::string key = elem.first.as<std::string>();
-      if (valid_ssl_multicert_keys.find(key) == valid_ssl_multicert_keys.end()) {
+      if (!is_valid_key(key)) {
         Warning("unsupported key '%s' in ssl_multicert config", key.c_str());
       }
     }
