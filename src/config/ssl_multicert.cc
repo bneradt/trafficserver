@@ -27,7 +27,6 @@
 #include <cctype>
 #include <exception>
 #include <fstream>
-#include <set>
 #include <sstream>
 
 #include <yaml-cpp/yaml.h>
@@ -47,11 +46,6 @@ constexpr char KEY_SSL_TICKET_ENABLED[] = "ssl_ticket_enabled";
 constexpr char KEY_SSL_TICKET_NUMBER[]  = "ssl_ticket_number";
 constexpr char KEY_ACTION[]             = "action";
 constexpr char KEY_SSL_MULTICERT[]      = "ssl_multicert";
-
-std::set<std::string> const valid_keys = {
-  KEY_SSL_CERT_NAME,  KEY_DEST_IP,   KEY_SSL_KEY_NAME,       KEY_SSL_CA_NAME,       KEY_SSL_OCSP_NAME,
-  KEY_SSL_KEY_DIALOG, KEY_DEST_FQDN, KEY_SSL_TICKET_ENABLED, KEY_SSL_TICKET_NUMBER, KEY_ACTION,
-};
 
 /// Trim whitespace from both ends of a string.
 std::string
@@ -214,13 +208,6 @@ template <> struct convert<config::SSLMultiCertEntry> {
   static bool
   decode(Node const &node, config::SSLMultiCertEntry &entry)
   {
-    for (auto const &elem : node) {
-      std::string key = elem.first.as<std::string>();
-      if (valid_keys.find(key) == valid_keys.end()) {
-        // Unknown key - we could warn here, but for now we skip silently.
-      }
-    }
-
     if (node[KEY_SSL_CERT_NAME]) {
       entry.ssl_cert_name = node[KEY_SSL_CERT_NAME].as<std::string>();
     }
