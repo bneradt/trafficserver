@@ -1703,6 +1703,8 @@ HTTPHdr::_fill_target_cache() const
   m_target_in_url  = false;
   m_port_in_header = false;
   m_host_mime      = nullptr;
+  m_host_ptr       = nullptr;
+  m_host_value_len = 0;
   // Check in the URL first, then the HOST field.
   if (nullptr != url->host_get(&m_host_length)) {
     m_target_in_url  = true;
@@ -1711,7 +1713,10 @@ HTTPHdr::_fill_target_cache() const
     m_host_mime      = nullptr;
   } else if (nullptr !=
              (m_host_mime = const_cast<HTTPHdr *>(this)->get_host_port_values(nullptr, &m_host_length, &port_ptr, &port_len))) {
-    m_port = 0;
+    // Cache pointer and length for staleness detection - if either changes, the value was modified.
+    m_host_ptr       = m_host_mime->m_ptr_value;
+    m_host_value_len = m_host_mime->m_len_value;
+    m_port           = 0;
     if (port_ptr) {
       for (; port_len > 0 && isdigit(*port_ptr); ++port_ptr, --port_len) {
         m_port = m_port * 10 + *port_ptr - '0';
