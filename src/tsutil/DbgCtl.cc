@@ -28,6 +28,7 @@
 #include <atomic>
 #include <cstdarg>
 #include <cinttypes>
+#include <cstdlib>
 
 #include "tsutil/SourceLocation.h"
 
@@ -39,6 +40,28 @@
 #include "tscore/ink_config.h"
 
 using namespace swoc::literals;
+
+namespace
+{
+// Track whether we're in static destruction phase. We skip registry cleanup during
+// static destruction to avoid use-after-free crashes due to undefined destruction
+// order across compilation units.
+std::atomic<bool> in_static_destruction{false};
+
+// This function is called once to register an atexit handler that will set
+// in_static_destruction to true. The atexit handler runs just before static
+// destructors, so any DbgCtl destructor that runs after will skip cleanup.
+bool
+register_destruction_detector()
+{
+  std::atexit([]() { in_static_destruction.store(true, std::memory_order_relaxed); });
+  return true;
+}
+
+// Force registration at program startup.
+[[maybe_unused]] bool const destruction_detector_registered = register_destruction_detector();
+
+} // anonymous namespace
 
 DbgCtl::DbgCtl(DbgCtl &&src)
 {
@@ -204,6 +227,14 @@ DbgCtl::_new_reference(char const *tag)
 void
 DbgCtl::_rm_reference()
 {
+  // During static destruction, skip cleanup to avoid use-after-free crashes.
+  // The destruction order of global DbgCtl objects across compilation units is
+  // undefined, and some code may still access DbgCtl objects after the registry
+  // is deleted. The OS will clean up all memory when the process terminates.
+  if (in_static_destruction.load(std::memory_order_relaxed)) {
+    return;
+  }
+
   _RegistryAccessor ra;
 
   debug_assert(ra.registry_reference_count != 0);
