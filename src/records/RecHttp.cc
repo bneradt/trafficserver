@@ -91,6 +91,16 @@ SessionProtocolSet DEFAULT_QUIC_SESSION_PROTOCOL_SET;
 namespace
 {
 
+// Track when RecHttp.cc static objects are destroyed.
+struct RecHttpDestructionTracker {
+  ~RecHttpDestructionTracker()
+  {
+    fprintf(stderr, "DEBUG: RecHttpDestructionTracker destroyed (RecHttp.cc statics)\n");
+    fflush(stderr);
+  }
+};
+static RecHttpDestructionTracker rechttp_destruction_tracker;
+
 DbgCtl dbg_ctl_config{"config"};
 DbgCtl dbg_ctl_ssl_alpn{"ssl_alpn"};
 

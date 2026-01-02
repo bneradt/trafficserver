@@ -67,6 +67,16 @@ DiagsConfigState::enabled(DiagsTagType dtt, int new_value)
   }
 }
 
+// Track when Diags.cc static objects are destroyed.
+struct DiagsDestructionTracker {
+  ~DiagsDestructionTracker()
+  {
+    fprintf(stderr, "DEBUG: DiagsDestructionTracker destroyed (Diags.cc statics)\n");
+    fflush(stderr);
+  }
+};
+static DiagsDestructionTracker diags_destruction_tracker;
+
 // Global, used for all diagnostics
 Diags *DiagsPtr::_diags_ptr = nullptr;
 
@@ -177,6 +187,9 @@ Diags::Diags(std::string_view prefix_string, const char *bdt, const char *bat, B
 
 Diags::~Diags()
 {
+  fprintf(stderr, "DEBUG: ~Diags() enter, this=%p\n", (void *)this);
+  fflush(stderr);
+
   if (diags_log) {
     delete diags_log;
     diags_log = nullptr;
@@ -195,8 +208,14 @@ Diags::~Diags()
   ats_free((void *)base_debug_tags);
   ats_free((void *)base_action_tags);
 
+  fprintf(stderr, "DEBUG: ~Diags() calling deactivate_all(Debug)\n");
+  fflush(stderr);
   deactivate_all(DiagsTagType_Debug);
+  fprintf(stderr, "DEBUG: ~Diags() calling deactivate_all(Action)\n");
+  fflush(stderr);
   deactivate_all(DiagsTagType_Action);
+  fprintf(stderr, "DEBUG: ~Diags() exit\n");
+  fflush(stderr);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -384,6 +403,8 @@ Diags::activate_taglist(const char *taglist, DiagsTagType mode)
 void
 Diags::deactivate_all(DiagsTagType mode)
 {
+  fprintf(stderr, "DEBUG: deactivate_all() enter, mode=%d, this=%p, diags()=%p\n", mode, (void *)this, (void *)diags());
+  fflush(stderr);
   lock();
   if (activated_tags[mode]) {
     delete activated_tags[mode];
@@ -391,8 +412,14 @@ Diags::deactivate_all(DiagsTagType mode)
   }
   unlock();
   if ((DiagsTagType_Debug == mode) && (this == diags())) {
+    fprintf(stderr, "DEBUG: deactivate_all() calling DbgCtl::update()\n");
+    fflush(stderr);
     DbgCtl::update([&](const char *tag) -> bool { return tag_activated(tag, DiagsTagType_Debug); });
+    fprintf(stderr, "DEBUG: deactivate_all() DbgCtl::update() returned\n");
+    fflush(stderr);
   }
+  fprintf(stderr, "DEBUG: deactivate_all() exit\n");
+  fflush(stderr);
 }
 
 //////////////////////////////////////////////////////////////////////////////

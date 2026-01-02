@@ -1025,6 +1025,8 @@ asn1_strdup(ASN1_STRING *s)
 static void
 ssl_callback_info(const SSL *ssl, int where, int ret)
 {
+  fprintf(stderr, "DEBUG: ssl_callback_info() called, ssl=%p, where=%d, ret=%d\n", (void *)ssl, where, ret);
+  fflush(stderr);
   Dbg(dbg_ctl_ssl_load, "ssl_callback_info ssl: %p, where: %d, ret: %d, State: %s", ssl, where, ret, SSL_state_string_long(ssl));
 
   SSLNetVConnection *netvc = SSLNetVCAccess(ssl);

@@ -40,6 +40,16 @@
 
 using namespace swoc::literals;
 
+// Track when DbgCtl.cc static objects are destroyed.
+struct DbgCtlDestructionTracker {
+  ~DbgCtlDestructionTracker()
+  {
+    fprintf(stderr, "DEBUG: DbgCtlDestructionTracker destroyed (DbgCtl.cc statics)\n");
+    fflush(stderr);
+  }
+};
+static DbgCtlDestructionTracker dbgctl_destruction_tracker;
+
 DbgCtl::DbgCtl(DbgCtl &&src)
 {
   _ptr     = src._ptr;
@@ -86,23 +96,45 @@ public:
 
   _RegistryAccessor()
   {
+    fprintf(stderr, "DEBUG: _RegistryAccessor() enter, _registry_instance=%p\n", (void *)_registry_instance.load());
+    fflush(stderr);
     if (!_registry_instance) {
+      fprintf(stderr, "DEBUG: _RegistryAccessor() creating new Registry\n");
+      fflush(stderr);
       Registry *expected{nullptr};
       Registry *r{new Registry};
+      fprintf(stderr, "DEBUG: _RegistryAccessor() new Registry=%p\n", (void *)r);
+      fflush(stderr);
       if (!_registry_instance.compare_exchange_strong(expected, r)) {
+        fprintf(stderr, "DEBUG: _RegistryAccessor() CAS failed, deleting r=%p\n", (void *)r);
+        fflush(stderr);
         r->_mtx.lock();
         delete r;
       }
+      fprintf(stderr, "DEBUG: _RegistryAccessor() after CAS, _registry_instance=%p\n", (void *)_registry_instance.load());
+      fflush(stderr);
     }
+    fprintf(stderr, "DEBUG: _RegistryAccessor() locking mutex on %p\n", (void *)_registry_instance.load());
+    fflush(stderr);
     _registry_instance.load()->_mtx.lock();
+    fprintf(stderr, "DEBUG: _RegistryAccessor() mutex locked\n");
+    fflush(stderr);
     _mtx_is_locked = true;
   }
 
   ~_RegistryAccessor()
   {
+    fprintf(stderr, "DEBUG: ~_RegistryAccessor() enter, _mtx_is_locked=%d\n", _mtx_is_locked);
+    fflush(stderr);
     if (_mtx_is_locked) {
+      fprintf(stderr, "DEBUG: ~_RegistryAccessor() unlocking mutex\n");
+      fflush(stderr);
       _registry_instance.load()->_mtx.unlock();
+      fprintf(stderr, "DEBUG: ~_RegistryAccessor() mutex unlocked\n");
+      fflush(stderr);
     }
+    fprintf(stderr, "DEBUG: ~_RegistryAccessor() exit\n");
+    fflush(stderr);
   }
 
   // This is not static so it can't be called with the registry mutex unlocked.
@@ -123,6 +155,8 @@ private:
 DbgCtl::_TagData const *
 DbgCtl::_new_reference(char const *tag)
 {
+  fprintf(stderr, "DEBUG: _new_reference() enter, tag=%s\n", tag ? tag : "(null)");
+  fflush(stderr);
   DebugInterface *p = DebugInterface::get_instance();
   debug_assert(tag != nullptr);
 
@@ -134,9 +168,13 @@ DbgCtl::_new_reference(char const *tag)
     auto &d{ra.data()};
 
     if (auto it = d.map.find(tag); it != d.map.end()) {
+      fprintf(stderr, "DEBUG: _new_reference() found existing tag, returning\n");
+      fflush(stderr);
       return &*it;
     }
 
+    fprintf(stderr, "DEBUG: _new_reference() creating new tag entry\n");
+    fflush(stderr);
     auto sz = std::strlen(tag);
 
     debug_assert(sz > 0);
@@ -150,8 +188,14 @@ DbgCtl::_new_reference(char const *tag)
     debug_assert(res.second);
 
     new_tag_data = &*res.first;
+    fprintf(stderr, "DEBUG: _new_reference() new tag inserted\n");
+    fflush(stderr);
   }
+  fprintf(stderr, "DEBUG: _new_reference() calling debug_tag_activated\n");
+  fflush(stderr);
   new_tag_data->second = p && p->debug_tag_activated(tag);
+  fprintf(stderr, "DEBUG: _new_reference() exit\n");
+  fflush(stderr);
 
   // It is important that debug_tag_activated() is NOT called while the ra object exists, and the registry mutex is
   // locked.  There is a mutex in the C/C++ runtime that both dlopen() and _cxa_thread_atexit() lock while running.
@@ -173,12 +217,22 @@ DbgCtl::_new_reference(char const *tag)
 void
 DbgCtl::update(const std::function<bool(const char *)> &f)
 {
+  fprintf(stderr, "DEBUG: DbgCtl::update() enter\n");
+  fflush(stderr);
   _RegistryAccessor ra;
-  auto             &d{ra.data()};
+  fprintf(stderr, "DEBUG: DbgCtl::update() got registry accessor\n");
+  fflush(stderr);
+  auto &d{ra.data()};
+  fprintf(stderr, "DEBUG: DbgCtl::update() map size=%zu\n", d.map.size());
+  fflush(stderr);
 
   for (auto &i : d.map) {
+    fprintf(stderr, "DEBUG: DbgCtl::update() calling f for tag=%s\n", i.first);
+    fflush(stderr);
     i.second = f(i.first);
   }
+  fprintf(stderr, "DEBUG: DbgCtl::update() exit\n");
+  fflush(stderr);
 }
 
 void
@@ -255,8 +309,17 @@ DebugInterface::get_instance()
 void
 DebugInterface::set_instance(DebugInterface *i)
 {
+  fprintf(stderr, "DEBUG: set_instance() enter, i=%p\n", (void *)i);
+  fflush(stderr);
   di_inst = i;
-  DbgCtl::update([&](const char *t) { return i->debug_tag_activated(t); });
+  if (i) {
+    DbgCtl::update([&](const char *t) { return i->debug_tag_activated(t); });
+  } else {
+    fprintf(stderr, "DEBUG: set_instance() skipping update, i is null\n");
+    fflush(stderr);
+  }
+  fprintf(stderr, "DEBUG: set_instance() exit\n");
+  fflush(stderr);
 }
 
 const char *

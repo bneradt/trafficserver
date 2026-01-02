@@ -78,6 +78,16 @@ ClassAllocator<SSLNetVConnection, false> sslNetVCAllocator("sslNetVCAllocator");
 
 namespace
 {
+// Track when SSLNetVConnection.cc static objects are destroyed.
+struct SSLNetVCDestructionTracker {
+  ~SSLNetVCDestructionTracker()
+  {
+    fprintf(stderr, "DEBUG: SSLNetVCDestructionTracker destroyed (SSLNetVConnection.cc statics)\n");
+    fflush(stderr);
+  }
+};
+static SSLNetVCDestructionTracker sslnetvc_destruction_tracker;
+
 DbgCtl dbg_ctl_ssl_early_data{"ssl_early_data"};
 DbgCtl dbg_ctl_ssl_early_data_show_received{"ssl_early_data_show_received"};
 DbgCtl dbg_ctl_ssl{"ssl"};

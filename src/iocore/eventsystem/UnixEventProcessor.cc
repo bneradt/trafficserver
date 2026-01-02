@@ -42,6 +42,16 @@
 namespace
 {
 
+// Track when UnixEventProcessor.cc static objects are destroyed.
+struct EventProcessorDestructionTracker {
+  ~EventProcessorDestructionTracker()
+  {
+    fprintf(stderr, "DEBUG: EventProcessorDestructionTracker destroyed (UnixEventProcessor.cc statics)\n");
+    fflush(stderr);
+  }
+};
+static EventProcessorDestructionTracker event_processor_destruction_tracker;
+
 DbgCtl dbg_ctl_iocore_thread{"iocore_thread"};
 DbgCtl dbg_ctl_iocore_thread_start{"iocore_thread_start"};
 

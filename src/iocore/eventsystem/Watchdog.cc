@@ -50,8 +50,14 @@ Monitor::Monitor(EThread *threads[], size_t n_threads, std::chrono::milliseconds
 
 Monitor::~Monitor()
 {
+  fprintf(stderr, "DEBUG: ~Monitor() enter - signaling shutdown\n");
+  fflush(stderr);
   _shutdown.store(true, std::memory_order_release);
+  fprintf(stderr, "DEBUG: ~Monitor() waiting for watchdog thread to join\n");
+  fflush(stderr);
   _watchdog_thread.join();
+  fprintf(stderr, "DEBUG: ~Monitor() watchdog thread joined, exiting destructor\n");
+  fflush(stderr);
 }
 
 void
@@ -104,6 +110,10 @@ Monitor::monitor_loop() const
 
     std::this_thread::sleep_for(sleep_time);
   }
+  fprintf(stderr, "DEBUG: monitor_loop() shutdown detected, about to call Dbg()\n");
+  fflush(stderr);
   Dbg(dbg_ctl_watchdog, "Stopping watchdog");
+  fprintf(stderr, "DEBUG: monitor_loop() Dbg() returned, exiting loop\n");
+  fflush(stderr);
 }
 } // namespace Watchdog

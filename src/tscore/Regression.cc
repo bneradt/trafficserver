@@ -77,16 +77,24 @@ RegressionTest::RegressionTest(const char *_n, const SourceLocation &_l, TestFun
 static inline int
 start_test(RegressionTest *t, int regression_level)
 {
+  fprintf(stderr, "DEBUG: start_test() enter, test=%s\n", t->name);
+  fflush(stderr);
   ink_assert(t->status == REGRESSION_TEST_NOT_RUN);
   t->status = REGRESSION_TEST_INPROGRESS;
   fprintf(stderr, "REGRESSION TEST %s started\n", t->name);
+  fprintf(stderr, "DEBUG: start_test() calling test function for %s\n", t->name);
+  fflush(stderr);
   (*t->function)(t, regression_level, &t->status);
+  fprintf(stderr, "DEBUG: start_test() test function returned for %s, status=%d\n", t->name, t->status);
+  fflush(stderr);
   int tresult = t->status;
   if (tresult != REGRESSION_TEST_INPROGRESS) {
     fprintf(stderr, "    REGRESSION_RESULT %s:%*s %s\n", t->name, 40 - static_cast<int>(strlen(t->name)), " ",
             regression_status_string(tresult));
     t->printed = true;
   }
+  fprintf(stderr, "DEBUG: start_test() exit, test=%s, result=%d\n", t->name, tresult);
+  fflush(stderr);
   return tresult;
 }
 
@@ -137,8 +145,12 @@ RegressionTest::list()
 int
 RegressionTest::run_some(int regression_level)
 {
+  fprintf(stderr, "DEBUG: run_some() enter, current=%s\n", current ? current->name : "(null)");
+  fflush(stderr);
   if (current) {
     if (current->status == REGRESSION_TEST_INPROGRESS) {
+      fprintf(stderr, "DEBUG: run_some() current in progress, returning\n");
+      fflush(stderr);
       return REGRESSION_TEST_INPROGRESS;
     }
 
@@ -148,13 +160,21 @@ RegressionTest::run_some(int regression_level)
         fprintf(stderr, "    REGRESSION_RESULT %s:%*s %s\n", current->name, 40 - static_cast<int>(strlen(current->name)), " ",
                 regression_status_string(current->status));
       }
+      fprintf(stderr, "DEBUG: run_some() advancing to next test\n");
+      fflush(stderr);
       current = current->next;
     }
   }
 
   for (; current; current = current->next) {
+    fprintf(stderr, "DEBUG: run_some() considering test=%s\n", current->name);
+    fflush(stderr);
     if (regex.exec(current->name, RE_ANCHORED)) {
+      fprintf(stderr, "DEBUG: run_some() starting test=%s\n", current->name);
+      fflush(stderr);
       int res = start_test(current, regression_level);
+      fprintf(stderr, "DEBUG: run_some() test=%s returned %d\n", current->name, res);
+      fflush(stderr);
       if (res == REGRESSION_TEST_INPROGRESS) {
         return res;
       }
@@ -163,16 +183,26 @@ RegressionTest::run_some(int regression_level)
       }
     }
   }
+  fprintf(stderr, "DEBUG: run_some() exit, no more tests\n");
+  fflush(stderr);
   return REGRESSION_TEST_INPROGRESS;
 }
 
 int
 RegressionTest::check_status(int regression_level)
 {
+  fprintf(stderr, "DEBUG: check_status() enter\n");
+  fflush(stderr);
   int status = REGRESSION_TEST_PASSED;
   if (current) {
+    fprintf(stderr, "DEBUG: check_status() calling run_some, current=%s\n", current ? current->name : "(null)");
+    fflush(stderr);
     status = run_some(regression_level);
+    fprintf(stderr, "DEBUG: check_status() run_some returned %d\n", status);
+    fflush(stderr);
     if (!current) {
+      fprintf(stderr, "DEBUG: check_status() current is null, returning %d\n", status);
+      fflush(stderr);
       return status;
     }
   }
@@ -181,7 +211,11 @@ RegressionTest::check_status(int regression_level)
   int             exclusive = 0;
 
 check_test_list:
+  fprintf(stderr, "DEBUG: check_status() iterating test list, exclusive=%d\n", exclusive);
+  fflush(stderr);
   while (t) {
+    fprintf(stderr, "DEBUG: check_status() checking test=%s, status=%d\n", t->name, t->status);
+    fflush(stderr);
     if ((t->status == REGRESSION_TEST_PASSED || t->status == REGRESSION_TEST_FAILED) && !t->printed) {
       t->printed = true;
       fprintf(stderr, "    REGRESSION_RESULT %s:%*s %s\n", t->name, 40 - static_cast<int>(strlen(t->name)), " ",
@@ -207,6 +241,9 @@ check_test_list:
     goto check_test_list;
   }
 
+  fprintf(stderr, "DEBUG: check_status() exit, returning %d\n",
+          (status == REGRESSION_TEST_INPROGRESS) ? REGRESSION_TEST_INPROGRESS : final_status);
+  fflush(stderr);
   return (status == REGRESSION_TEST_INPROGRESS) ? REGRESSION_TEST_INPROGRESS : final_status;
 }
 

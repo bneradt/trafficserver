@@ -86,6 +86,16 @@ namespace
 {
 std::unique_ptr<ConfigUpdateHandler<SSLTicketKeyConfig>> sslTicketKey;
 
+// Track when SSLConfig.cc static objects are destroyed.
+struct SSLConfigDestructionTracker {
+  ~SSLConfigDestructionTracker()
+  {
+    fprintf(stderr, "DEBUG: SSLConfigDestructionTracker destroyed (SSLConfig.cc statics)\n");
+    fflush(stderr);
+  }
+};
+static SSLConfigDestructionTracker sslconfig_destruction_tracker;
+
 DbgCtl dbg_ctl_ssl_load{"ssl_load"};
 DbgCtl dbg_ctl_ssl_config_updateCTX{"ssl_config_updateCTX"};
 DbgCtl dbg_ctl_ssl_client_ctx{"ssl_client_ctx"};

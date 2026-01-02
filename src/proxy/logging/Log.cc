@@ -90,6 +90,16 @@ LogConfig *Log::config = nullptr;
 
 namespace
 {
+// Track when Log.cc static objects are destroyed.
+struct LogDestructionTracker {
+  ~LogDestructionTracker()
+  {
+    fprintf(stderr, "DEBUG: LogDestructionTracker destroyed (Log.cc statics)\n");
+    fflush(stderr);
+  }
+};
+static LogDestructionTracker log_destruction_tracker;
+
 DbgCtl dbg_ctl_log_config{"log-config"};
 DbgCtl dbg_ctl_log_api_mutex{"log-api-mutex"};
 DbgCtl dbg_ctl_log_periodic{"log-periodic"};

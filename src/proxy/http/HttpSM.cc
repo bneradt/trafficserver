@@ -134,6 +134,16 @@ using lbw = swoc::LocalBufferWriter<256>;
 
 namespace
 {
+// Track when HttpSM.cc static objects are destroyed.
+struct HttpSMDestructionTracker {
+  ~HttpSMDestructionTracker()
+  {
+    fprintf(stderr, "DEBUG: HttpSMDestructionTracker destroyed (HttpSM.cc statics)\n");
+    fflush(stderr);
+  }
+};
+static HttpSMDestructionTracker httpsm_destruction_tracker;
+
 DbgCtl dbg_ctl_proxyprotocol{"proxyprotocol"};
 
 // Unique state machine identifier

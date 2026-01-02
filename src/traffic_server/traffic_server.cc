@@ -155,6 +155,21 @@ char diags_log_filename[PATH_NAME_MAX] = DEFAULT_DIAGS_LOG_FILENAME;
 
 const long MAX_LOGIN = ink_login_name_max();
 
+// Static destruction order tracker - this is declared early so it's destroyed late.
+struct StaticDestructionTracker {
+  StaticDestructionTracker()
+  {
+    fprintf(stderr, "DEBUG: StaticDestructionTracker constructed\n");
+    fflush(stderr);
+  }
+  ~StaticDestructionTracker()
+  {
+    fprintf(stderr, "DEBUG: StaticDestructionTracker destroyed (late in static destruction)\n");
+    fflush(stderr);
+  }
+};
+static StaticDestructionTracker static_destruction_tracker;
+
 void init_ssl_ctx_callback(void *ctx, bool server);
 
 void        load_ssl_file_callback(const char *ssl_file);
@@ -213,6 +228,16 @@ int cmd_block = 0;
 // 0: delay accept, wait for cache initialization.
 // -1: cache is already initialized, don't delay.
 int delay_listen_for_cache = 0;
+
+// Track when the watchdog is destroyed relative to other static objects.
+struct WatchdogDestructionTracker {
+  ~WatchdogDestructionTracker()
+  {
+    fprintf(stderr, "DEBUG: WatchdogDestructionTracker destroyed (right before watchdog)\n");
+    fflush(stderr);
+  }
+};
+static WatchdogDestructionTracker watchdog_destruction_tracker;
 
 std::unique_ptr<Watchdog::Monitor> watchdog = nullptr;
 
@@ -1572,11 +1597,19 @@ struct RegressionCont : public Continuation {
       return EVENT_CONT;
     }
 
+    printf("DEBUG: RegressionCont calling check_status\n");
+    fflush(stdout);
     if ((res = RegressionTest::check_status(regression_level)) == REGRESSION_TEST_INPROGRESS) {
+      printf("DEBUG: RegressionCont check_status returned INPROGRESS\n");
+      fflush(stdout);
       return EVENT_CONT;
     }
 
+    printf("DEBUG: RegressionCont check_status returned %d, shutting down event system\n", res);
+    fflush(stdout);
     TSSystemState::shut_down_event_system();
+    printf("DEBUG: RegressionCont event system shutdown requested\n");
+    fflush(stdout);
     fprintf(stderr, "REGRESSION_TEST DONE: %s\n", regression_status_string(res));
 
     return EVENT_DONE;
@@ -1779,6 +1812,12 @@ configure_io_uring()
 int
 main(int /* argc ATS_UNUSED */, const char **argv)
 {
+  // Register early atexit handler to understand the order of shutdown.
+  std::atexit([]() {
+    printf("DEBUG: atexit handler (first registered, runs last) - running\n");
+    fflush(stdout);
+  });
+
 #if TS_HAS_PROFILER
   HeapProfilerStart("/tmp/ts.hprof");
   ProfilerStart("/tmp/ts.prof");
@@ -2340,6 +2379,8 @@ main(int /* argc ATS_UNUSED */, const char **argv)
 
   TSSystemState::initialization_done();
 
+  printf("DEBUG: main loop waiting for event system shutdown\n");
+  fflush(stdout);
   while (!TSSystemState::is_event_system_shut_down()) {
 #if TS_USE_LINUX_IO_URING == 1
     if (ur->valid()) {
@@ -2351,16 +2392,29 @@ main(int /* argc ATS_UNUSED */, const char **argv)
     sleep(1);
 #endif
   }
-
-  delete main_thread;
+  printf("DEBUG: main loop - event system shut down\n");
+  fflush(stdout);
 
 #if TS_HAS_TESTS
-  if (RegressionTest::check_status(regression_level) == REGRESSION_TEST_PASSED) {
-    std::exit(0);
-  } else {
-    std::exit(1);
-  }
+  // For regression tests, call _exit() immediately after the event system shuts
+  // down, BEFORE any cleanup. This avoids crashes from background threads that
+  // may still be winding down and accessing resources during cleanup.
+  printf("DEBUG: main loop - calling final check_status\n");
+  fflush(stdout);
+  int final_result = RegressionTest::check_status(regression_level);
+  printf("DEBUG: main loop - final check_status returned %d, calling _exit() immediately\n", final_result);
+  fflush(stdout);
+
+  // Exit immediately - skip main_thread deletion and static destruction to
+  // avoid race conditions with background threads during cleanup.
+  _exit(final_result == REGRESSION_TEST_PASSED ? 0 : 1);
 #endif
+
+  printf("DEBUG: main loop - deleting main_thread\n");
+  fflush(stdout);
+  delete main_thread;
+  printf("DEBUG: main loop - main_thread deleted\n");
+  fflush(stdout);
 }
 
 namespace

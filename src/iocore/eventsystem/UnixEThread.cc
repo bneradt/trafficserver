@@ -128,6 +128,8 @@ EThread::EThread(ThreadType att, Event *e) : tt(att), start_event(e)
 // threads won't have to deal with EThread memory deallocation.
 EThread::~EThread()
 {
+  fprintf(stderr, "DEBUG: ~EThread() enter, this=%p, mutex=%p\n", (void *)this, (void *)mutex.get());
+  fflush(stderr);
   ink_release_assert(mutex->thread_holding == this);
   if (this_ethread_ptr == this) {
     this_ethread_ptr = nullptr;
@@ -135,6 +137,8 @@ EThread::~EThread()
 
   mutex->nthread_holding -= THREAD_MUTEX_THREAD_HOLDING;
   MUTEX_UNTAKE_LOCK(mutex, this);
+  fprintf(stderr, "DEBUG: ~EThread() exit\n");
+  fflush(stderr);
 }
 
 bool

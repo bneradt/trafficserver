@@ -155,6 +155,16 @@ TSReturnCode sdk_sanity_check_mbuffer(TSMBuffer bufp);
 namespace
 {
 
+// Track when InkAPI.cc static objects are destroyed.
+struct InkAPIDestructionTracker {
+  ~InkAPIDestructionTracker()
+  {
+    fprintf(stderr, "DEBUG: InkAPIDestructionTracker destroyed (InkAPI.cc statics)\n");
+    fflush(stderr);
+  }
+};
+static InkAPIDestructionTracker inkapi_destruction_tracker;
+
 DbgCtl dbg_ctl_plugin{"plugin"};
 DbgCtl dbg_ctl_parent_select{"parent_select"};
 DbgCtl dbg_ctl_iocore_net{"iocore_net"};
@@ -165,6 +175,23 @@ DbgCtl dbg_ctl_ssl_session_cache_insert{"ssl.session_cache.insert"};
 DbgCtl dbg_ctl_rpc_api{"rpc.api"};
 
 } // end anonymous namespace
+
+// Use destructor attribute to run at the very end of static destruction.
+// Priority 65535 is the lowest (runs last).
+__attribute__((destructor(65535))) static void
+inkapi_very_late_destructor()
+{
+  fprintf(stderr, "DEBUG: inkapi_very_late_destructor() running (priority 65535)\n");
+  fflush(stderr);
+}
+
+// Priority 101 runs relatively early in destructor order.
+__attribute__((destructor(101))) static void
+inkapi_early_destructor()
+{
+  fprintf(stderr, "DEBUG: inkapi_early_destructor() running (priority 101)\n");
+  fflush(stderr);
+}
 
 /******************************************************/
 /* Allocators for field handles and standalone fields */
