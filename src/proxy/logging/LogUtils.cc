@@ -116,8 +116,12 @@ LogUtils::timestamp_to_netscape_str(long timestamp)
     // taking daylight savings into account.
     //
     struct tm  res;
-    struct tm *tms  = ink_localtime_r((const time_t *)&timestamp, &res);
-    long       zone = -tms->tm_gmtoff; // double negative!
+    struct tm *tms = ink_localtime_r((const time_t *)&timestamp, &res);
+    if (tms == nullptr) {
+      static char bad_time[] = "Bad timestamp";
+      return bad_time;
+    }
+    long zone = -tms->tm_gmtoff; // double negative!
     int        offset;
     char       sign;
 
