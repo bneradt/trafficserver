@@ -43,6 +43,7 @@
 #include "iocore/net/NetAcceptEventIO.h"
 #include "Server.h"
 
+#include <atomic>
 #include <vector>
 
 struct NetAccept;
@@ -60,15 +61,20 @@ AcceptFunction net_accept;
 
 class UnixNetVConnection;
 
-// TODO fix race between cancel accept and call back
 struct NetAcceptAction : public Action, public RefCountObjInHeap {
-  Server *server;
+  std::atomic<Server *> server{nullptr};
 
   void
   cancel(Continuation *cont = nullptr) override
   {
+    // Close the server before setting the cancelled flag. This ensures that
+    // when acceptEvent() sees cancelled == true, the server close is already
+    // complete, preventing use-after-free races.
+    Server *s = server.exchange(nullptr, std::memory_order_acq_rel);
+    if (s != nullptr) {
+      s->close();
+    }
     Action::cancel(cont);
-    server->close();
   }
 
   Continuation *
