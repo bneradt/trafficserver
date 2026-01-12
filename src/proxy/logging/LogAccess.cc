@@ -988,11 +988,12 @@ LogAccess::unmarshal_http_version(char **buf, char *dest, int len)
   }
   p        += res1;
   *p++      = '.';
-  int res2  = unmarshal_int_to_str(buf, p, vb_left());
+  int res2 = unmarshal_int_to_str(buf, p, vb_left());
   if (res2 < 0) {
     DBG_UNMARSHAL_DEST_OVERRUN
     return -1;
   }
+  p += res2;
 
   int val_len = p - val_buf;
   if (val_len < len) {
