@@ -95,6 +95,7 @@ public:
     std::optional<uint32_t>         http2_buffer_water_mark;
     std::optional<uint32_t>         server_max_early_data;
     std::optional<uint32_t>         http2_initial_window_size_in;
+    std::optional<uint32_t>         http2_max_concurrent_streams_in;
     std::optional<int32_t>          http2_max_settings_frames_per_minute;
     std::optional<int32_t>          http2_max_ping_frames_per_minute;
     std::optional<int32_t>          http2_max_priority_frames_per_minute;

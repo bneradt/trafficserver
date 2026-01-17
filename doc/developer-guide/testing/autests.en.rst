@@ -185,6 +185,15 @@ YAML node). Here is an example:
        name: 'client'
        # Other AddVerifierClientProcess parameters can be set, see verifier_client.test.ext
 
+       # Optional: Client stdout validation
+       stdout_validation:
+         contains:
+           - expression: "Expected output"
+             description: "Verify client receives this output"
+         excludes:
+           - expression: "Unexpected output"
+             description: "Verify client does NOT receive this output"
+
      # Required: ATS configuration.
      ats:
        name: 'ts'
@@ -224,6 +233,11 @@ YAML node). Here is an example:
        copy_to_config_dir:
          - "my-plugin-config.txt"
          - "cert-directory/"
+
+       # Optional: sni.yaml configuration
+       sni_yaml:
+         - fqdn: 'example.com'
+           http2_max_concurrent_streams_in: 100
 
        # Optional: Log (traffic.out or diags.log) validation
        log_validation:

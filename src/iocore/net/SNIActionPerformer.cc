@@ -108,6 +108,15 @@ HTTP2InitialWindowSizeIn::SNIAction(SSL &ssl, const Context & /* ctx ATS_UNUSED 
 }
 
 int
+HTTP2MaxConcurrentStreamsIn::SNIAction(SSL &ssl, const Context & /* ctx ATS_UNUSED */) const
+{
+  if (auto snis = TLSSNISupport::getInstance(&ssl)) {
+    snis->hints_from_sni.http2_max_concurrent_streams_in = value;
+  }
+  return SSL_TLSEXT_ERR_OK;
+}
+
+int
 HTTP2MaxSettingsFramesPerMinute::SNIAction(SSL &ssl, const Context & /* ctx ATS_UNUSED */) const
 {
   if (auto snis = TLSSNISupport::getInstance(&ssl)) {

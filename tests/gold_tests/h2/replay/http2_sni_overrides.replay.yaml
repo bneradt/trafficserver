@@ -1,0 +1,164 @@
+#  Licensed to the Apache Software Foundation (ASF) under one
+#  or more contributor license agreements.  See the NOTICE file
+#  distributed with this work for additional information
+#  regarding copyright ownership.  The ASF licenses this file
+#  to you under the Apache License, Version 2.0 (the
+#  "License"); you may not use this file except in compliance
+#  with the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+
+# This replay file tests various HTTP/2 SNI overrides via sni.yaml:
+# - http2_max_concurrent_streams_in: Override the max concurrent streams
+# - http2: off: Disable HTTP/2 for a specific SNI (forces HTTP/1.1)
+
+meta:
+  version: "1.0"
+
+autest:
+  description: 'Verify HTTP/2 SNI overrides in sni.yaml'
+
+  dns:
+    name: 'dns'
+
+  server:
+    name: 'server'
+
+  client:
+    name: 'client'
+    # Provy Verifier crashes when ATS refuses to negotiate HTTP/2.
+    return_code: -11
+    # Verify the client receives the correct MAX_CONCURRENT_STREAMS for each SNI.
+    stdout_validation:
+      contains:
+        - expression: 'MAX_CONCURRENT_STREAMS:50'
+          description: 'Client should receive MAX_CONCURRENT_STREAMS:50 for SNI sni-a.example.com'
+        - expression: 'MAX_CONCURRENT_STREAMS:200'
+          description: 'Client should receive MAX_CONCURRENT_STREAMS:200 for SNI sni-b.example.com'
+        - expression: 'h2 is not negotiated. Assuming HTTP/1'
+          description: 'Client should see HTTP/2 disabled for http2-off SNI'
+
+  ats:
+    name: 'ts'
+    enable_tls: true
+
+    records_config:
+      proxy.config.diags.debug.enabled: 1
+      proxy.config.diags.debug.tags: 'http2|ssl_sni'
+      # Set a default value different from our SNI overrides.
+      proxy.config.http2.max_concurrent_streams_in: 100
+
+
+    remap_config:
+      - from: 'https://sni-a.example.com/'
+        to: 'http://backend.sni-a.example.com:{SERVER_HTTP_PORT}/'
+      - from: 'https://sni-b.example.com/'
+        to: 'http://backend.sni-b.example.com:{SERVER_HTTP_PORT}/'
+      - from: 'https://sni-no-h2.example.com/'
+        to: 'http://backend.sni-no-h2.example.com:{SERVER_HTTP_PORT}/'
+
+    sni_yaml:
+      - fqdn: 'sni-a.example.com'
+        http2_max_concurrent_streams_in: 50
+      - fqdn: 'sni-b.example.com'
+        http2_max_concurrent_streams_in: 200
+      - fqdn: 'sni-no-h2.example.com'
+        http2: off
+
+sessions:
+
+# Session for sni-a.example.com (should get MAX_CONCURRENT_STREAMS:50)
+- protocol:
+  - name: http
+    version: 2
+  - name: tls
+    sni: sni-a.example.com
+  - name: tcp
+  - name: ip
+
+  transactions:
+
+  - client-request:
+      headers:
+        fields:
+        - [ ":method", GET ]
+        - [ ":scheme", https ]
+        - [ ":authority", sni-a.example.com ]
+        - [ ":path", /test ]
+        - [ uuid, sni-a-request ]
+
+    server-response:
+      status: 200
+      reason: OK
+      headers:
+        fields:
+        - [ Content-Length, 0 ]
+
+    proxy-response:
+      status: 200
+
+# Session for sni-b.example.com (should get MAX_CONCURRENT_STREAMS:200)
+- protocol:
+  - name: http
+    version: 2
+  - name: tls
+    sni: sni-b.example.com
+  - name: tcp
+  - name: ip
+
+  transactions:
+
+  - client-request:
+      headers:
+        fields:
+        - [ ":method", GET ]
+        - [ ":scheme", https ]
+        - [ ":authority", sni-b.example.com ]
+        - [ ":path", /test ]
+        - [ uuid, sni-b-request ]
+
+    server-response:
+      status: 200
+      reason: OK
+      headers:
+        fields:
+        - [ Content-Length, 0 ]
+
+    proxy-response:
+      status: 200
+
+# Session for sni-no-h2.example.com (HTTP/2 disabled, must use HTTP/1.1)
+- protocol:
+  - name: http
+    version: 2
+  - name: tls
+    sni: sni-no-h2.example.com
+  - name: tcp
+  - name: ip
+
+  transactions:
+
+  - client-request:
+      method: GET
+      version: "1.1"
+      url: /test
+      headers:
+        fields:
+        - [ Host, sni-no-h2.example.com ]
+        - [ uuid, sni-no-h2-request ]
+
+    server-response:
+      status: 200
+      reason: OK
+      headers:
+        fields:
+        - [ Content-Length, 0 ]
+
+    proxy-response:
+      status: 200

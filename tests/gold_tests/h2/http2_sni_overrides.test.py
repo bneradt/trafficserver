@@ -1,3 +1,5 @@
+"""Verify HTTP/2 SNI override behavior."""
+
 #  Licensed to the Apache Software Foundation (ASF) under one
 #  or more contributor license agreements.  See the NOTICE file
 #  distributed with this work for additional information
@@ -14,40 +16,10 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-sni:
-- fqdn: allports.com
-- fqdn: someport.com
-  inbound_port_ranges:
-  - 1-433
-  - 480-488
-  http2: true
-- fqdn: someport.com
-  inbound_port_ranges: 8080-65535
-- fqdn: oneport.com
-  inbound_port_ranges: 433
+Test.Summary = '''
+Verify HTTP/2 SNI overrides in sni.yaml including:
+- http2_max_concurrent_streams_in: Override max concurrent streams per SNI
+- http2: off: Disable HTTP/2 for specific SNIs (forces HTTP/1.1)
+'''
 
-# order check
-- fqdn: foo.bar.com
-  http2: true
-  http2_buffer_water_mark: 256
-  http2_initial_window_size_in: 256
-  http2_max_concurrent_streams_in: 50
-- fqdn: "*.bar.com"
-  http2: true
-  http2_buffer_water_mark: 256
-  http2_max_concurrent_streams_in: 200
-- fqdn: foo.bar.com
-  http2: false
-
-# test with mixed-case
-- fqdn: "MiXeDcAsE.foo.com"
-  http2: true
-  http2_buffer_water_mark: 256
-  inbound_port_ranges: 31337
-
-# test with mixed-case glob
-- fqdn: "*.MiXeDcAsE.com"
-  http2: false
-
-# test glob in the middle, this will be an exact match
-- fqdn: "cat.*.com"
+Test.ATSReplayTest(replay_file="replay/http2_sni_overrides.replay.yaml")
