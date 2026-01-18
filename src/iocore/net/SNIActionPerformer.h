@@ -89,6 +89,18 @@ private:
   int value = -1;
 };
 
+class HTTP2MaxConcurrentStreamsIn : public ActionItem
+{
+public:
+  HTTP2MaxConcurrentStreamsIn(int value) : value(value) {}
+  ~HTTP2MaxConcurrentStreamsIn() override {}
+
+  int SNIAction(SSL &ssl, const Context &ctx) const override;
+
+private:
+  int value = -1;
+};
+
 class HTTP2MaxSettingsFramesPerMinute : public ActionItem
 {
 public:

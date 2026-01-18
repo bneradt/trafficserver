@@ -1147,7 +1147,15 @@ Http2ConnectionState::_get_configured_max_concurrent_streams() const
   if (this->session->is_outbound()) {
     return Http2::max_concurrent_streams_out;
   } else {
-    return Http2::max_concurrent_streams_in;
+    uint32_t max_concurrent_streams_in = Http2::max_concurrent_streams_in;
+    if (this->session) {
+      if (auto snis = session->get_netvc()->get_service<TLSSNISupport>();
+          snis && snis->hints_from_sni.http2_max_concurrent_streams_in.has_value()) {
+        max_concurrent_streams_in = snis->hints_from_sni.http2_max_concurrent_streams_in.value();
+      }
+    }
+
+    return max_concurrent_streams_in;
   }
 }
 
@@ -1308,8 +1316,7 @@ Http2ConnectionState::init(Http2CommonSession *ssn)
   // acknowledged settings.
   Http2ConnectionSettings configured_settings;
   configured_settings.settings_from_configs(session->is_outbound());
-  acknowledged_local_settings.set(HTTP2_SETTINGS_MAX_CONCURRENT_STREAMS,
-                                  configured_settings.get(HTTP2_SETTINGS_MAX_CONCURRENT_STREAMS));
+  acknowledged_local_settings.set(HTTP2_SETTINGS_MAX_CONCURRENT_STREAMS, this->_get_configured_max_concurrent_streams());
   acknowledged_local_settings.set(HTTP2_SETTINGS_MAX_HEADER_LIST_SIZE,
                                   configured_settings.get(HTTP2_SETTINGS_MAX_HEADER_LIST_SIZE));
 

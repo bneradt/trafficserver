@@ -244,6 +244,11 @@ http2_initial_window_size_in             Inbound   Specifies the initial HTTP/2 
                                                    By default this is :ts:cv:`proxy.config.http2.initial_window_size_in`.
                                                    NOTE: Connection coalescing may prevent this from taking effect.
 
+http2_max_concurrent_streams_in          Inbound   Specifies the maximum number of concurrent streams per inbound connection
+                                                   that |TS| advertises to the peer via the SETTINGS frame.
+                                                   By default this is :ts:cv:`proxy.config.http2.max_concurrent_streams_in`.
+                                                   NOTE: Connection coalescing may prevent this from taking effect.
+
 http2_max_settings_frames_per_minute     Inbound   Specifies how many SETTINGS frames |TS| receives per minute at maximum.
                                                    By default this is :ts:cv:`proxy.config.http2.max_settings_frames_per_minute`.
                                                    NOTE: Connection coalescing may prevent this from taking effect.

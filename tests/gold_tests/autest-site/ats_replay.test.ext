@@ -22,20 +22,31 @@ import os
 import yaml
 
 
-def configure_ats(obj: 'TestRun', server: 'Process', ats_config: dict, dns: Optional['Process'] = None):
+def configure_ats(obj: 'TestRun', server: 'Process', ats_config: dict, dns: Optional['Process'] = None, enable_tls: bool = False):
     '''Configure ATS per the configuration in the replay file.
 
     :param obj: The Test object to configure ATS for.
     :param server: The Proxy Verifier Server process to use.
     :param ats_config: The ATS configuration from the replay file.
     :param dns: The DNS process to use. Optional.
+    :param enable_tls: Whether to enable TLS support. Optional.
     :returns: The ATS process object.
     '''
     name = ats_config.get('name', 'ts')
     process_config = ats_config.get('process_config', {})
-    ts = obj.MakeATSProcess(name, **process_config)
+    ts = obj.MakeATSProcess(name, enable_tls=enable_tls, **process_config)
     records_config = ats_config.get('records_config', {})
     ts.Disk.records_config.update(records_config)
+
+    # Set up TLS configuration.
+    if enable_tls:
+        ts.addDefaultSSLFiles()
+        ts.Disk.ssl_multicert_config.AddLine('dest_ip=* ssl_cert_name=server.pem ssl_key_name=server.key')
+        ts.Disk.records_config.update(
+            {
+                'proxy.config.ssl.server.cert.path': f'{ts.Variables.SSLDir}',
+                'proxy.config.ssl.server.private_key.path': f'{ts.Variables.SSLDir}',
+            })
 
     # Configure plugin_config if specified.
     plugin_config = ats_config.get('plugin_config', [])
@@ -81,6 +92,17 @@ def configure_ats(obj: 'TestRun', server: 'Process', ats_config: dict, dns: Opti
             ts.Setup.Copy(src_dir, dst_dir)
         else:
             ts.Setup.CopyAs(item, ts.Variables.CONFIGDIR)
+
+    # Configure sni.yaml if specified.
+    sni_yaml = ats_config.get('sni_yaml', [])
+    if sni_yaml:
+        ts.Disk.sni_yaml.AddLine('sni:')
+        for entry in sni_yaml:
+            fqdn = entry.get('fqdn', '')
+            ts.Disk.sni_yaml.AddLine(f'- fqdn: "{fqdn}"')
+            for key, value in entry.items():
+                if key != 'fqdn':
+                    ts.Disk.sni_yaml.AddLine(f'  {key}: {value}')
 
     # Configure log validation if specified.
     log_validation = ats_config.get('log_validation', {})
@@ -173,7 +195,7 @@ def ATSReplayTest(obj, replay_file: str):
         raise ValueError(f"Replay file {replay_file} does not contain 'autest.ats' section")
     ats_config = autest_config['ats']
     enable_tls = ats_config.get('enable_tls', False)
-    ts = configure_ats(tr, server=server, ats_config=ats_config, dns=dns)
+    ts = configure_ats(tr, server=server, ats_config=ats_config, dns=dns, enable_tls=enable_tls)
 
     # Proxy Verifier Client configuration.
     if not 'client' in autest_config:
@@ -188,6 +210,18 @@ def ATSReplayTest(obj, replay_file: str):
     # Set expected return code if specified.
     if 'return_code' in client_config:
         client.ReturnCode = client_config['return_code']
+
+    # Configure client stdout validation if specified.
+    stdout_validation = client_config.get('stdout_validation', {})
+    if stdout_validation:
+        for contains_entry in stdout_validation.get('contains', []):
+            expression = contains_entry['expression']
+            description = contains_entry.get('description', f'Verify client stdout contains: {expression}')
+            client.Streams.stdout += Testers.ContainsExpression(expression, description)
+        for excludes_entry in stdout_validation.get('excludes', []):
+            expression = excludes_entry['expression']
+            description = excludes_entry.get('description', f'Verify client stdout excludes: {expression}')
+            client.Streams.stdout += Testers.ExcludesExpression(expression, description)
 
     if dns:
         ts.StartBefore(dns)
