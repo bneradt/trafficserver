@@ -30,8 +30,6 @@
  ****************************************************************************/
 #include "tscore/ink_config.h"
 
-#include <sys/types.h>
-
 #if TS_USE_REMOTE_UNWINDING
 #include "tscore/Diags.h"
 
@@ -40,6 +38,7 @@
 #include <libunwind.h>
 #include <libunwind-ptrace.h>
 #if defined(__FreeBSD__)
+#include <sys/types.h>
 #define __WALL        P_ALL
 #define PTRACE_ATTACH PT_ATTACH
 #define PTRACE_DETACH PT_DETACH
@@ -57,7 +56,6 @@ using threadlist = std::vector<pid_t>;
 
 DbgCtl dbg_ctl_backtrace{"backtrace"};
 
-/** Enumerate all threads for a given process by reading /proc/<pid>/task. */
 static threadlist
 threads_for_process(pid_t proc)
 {
@@ -106,73 +104,58 @@ backtrace_for_thread(pid_t threadid, TextBuffer &text)
   unw_cursor_t     cursor;
   void            *ap     = nullptr;
   pid_t            target = -1;
-  bool             attached{false};
-  unsigned         level = 0;
-  int              step_result;
+  unsigned         level  = 0;
 
   // First, attach to the child, causing it to stop.
   status = ptrace(PTRACE_ATTACH, threadid, 0, 0);
   if (status < 0) {
-    text.format("  [ptrace ATTACH failed: %s (%d)]\n", strerror(errno), errno);
     Dbg(dbg_ctl_backtrace, "ptrace(ATTACH, %ld) -> %s (%d)\n", (long)threadid, strerror(errno), errno);
     return;
   }
-  attached = true;
 
-  // Wait for it to stop. The caller uses alarm() to enforce a timeout.
+  // Wait for it to stop (XXX should be a timed wait ...)
   target = waitpid(threadid, &status, __WALL | WUNTRACED);
   Dbg(dbg_ctl_backtrace, "waited for target %ld, found PID %ld, %s\n", (long)threadid, (long)target,
       WIFSTOPPED(status) ? "STOPPED" : "???");
   if (target < 0) {
-    text.format("  [waitpid failed: %s (%d)]\n", strerror(errno), errno);
     goto done;
   }
 
   ap = _UPT_create(threadid);
   Dbg(dbg_ctl_backtrace, "created UPT %p", ap);
   if (ap == nullptr) {
-    text.format("  [_UPT_create failed]\n");
     goto done;
   }
 
   addr_space = unw_create_addr_space(&_UPT_accessors, 0 /* byteorder */);
   Dbg(dbg_ctl_backtrace, "created address space %p\n", addr_space);
   if (addr_space == nullptr) {
-    text.format("  [unw_create_addr_space failed]\n");
     goto done;
   }
 
   status = unw_init_remote(&cursor, addr_space, ap);
   Dbg(dbg_ctl_backtrace, "unw_init_remote(...) -> %d\n", status);
   if (status != 0) {
-    text.format("  [unw_init_remote failed: %d]\n", status);
     goto done;
   }
 
-  step_result = unw_step(&cursor);
-  if (step_result <= 0) {
-    text.format("  [unw_step returned %d on first call]\n", step_result);
-  }
-
-  while (step_result > 0) {
+  while (unw_step(&cursor) > 0) {
     unw_word_t ip;
-    unw_word_t offset = 0;
+    unw_word_t offset;
     char       buf[256];
 
     unw_get_reg(&cursor, UNW_REG_IP, &ip);
 
     if (unw_get_proc_name(&cursor, buf, sizeof(buf), &offset) == 0) {
-      int   demangle_status;
-      char *name = abi::__cxa_demangle(buf, nullptr, nullptr, &demangle_status);
-      text.format("%-4u 0x%016llx %s + 0x%lx\n", level, static_cast<unsigned long long>(ip), name ? name : buf,
-                  static_cast<unsigned long>(offset));
+      int   status;
+      char *name = abi::__cxa_demangle(buf, nullptr, nullptr, &status);
+      text.format("%-4u 0x%016llx %s + %p\n", level, static_cast<unsigned long long>(ip), name ? name : buf, (void *)offset);
       free(name);
     } else {
-      text.format("%-4u 0x%016llx <unknown>\n", level, static_cast<unsigned long long>(ip));
+      text.format("%-4u 0x%016llx 0x0 + %p\n", level, static_cast<unsigned long long>(ip), (void *)offset);
     }
 
     ++level;
-    step_result = unw_step(&cursor);
   }
 
 done:
@@ -184,65 +167,38 @@ done:
     _UPT_destroy(ap);
   }
 
-  if (attached) {
-    status = ptrace(PTRACE_DETACH, threadid, nullptr, DATA_NULL);
-    Dbg(dbg_ctl_backtrace, "ptrace(DETACH, %ld) -> %d (errno %d)\n", (long)threadid, status, errno);
-  }
-}
-
-/** Format a thread header with the thread name from /proc. */
-static void
-format_thread_header(pid_t threadid, const char *prefix, TextBuffer &text)
-{
-  ats_scoped_fd fd;
-  char          path[128];
-
-  snprintf(path, sizeof(path), "/proc/%ld/comm", static_cast<long>(threadid));
-  fd = open(path, O_RDONLY);
-  if (fd >= 0) {
-    text.format("%s (TID %ld, ", prefix, static_cast<long>(threadid));
-    text.readFromFD(fd);
-    text.chomp();
-    text.format("):\n");
-  } else {
-    text.format("%s (TID %ld):\n", prefix, static_cast<long>(threadid));
-  }
+  status = ptrace(PTRACE_DETACH, target, NULL, DATA_NULL);
+  Dbg(dbg_ctl_backtrace, "ptrace(DETACH, %ld) -> %d (errno %d)\n", (long)target, status, errno);
 }
 } // namespace
-
 int
-ServerBacktrace(unsigned /* options */, pid_t pid, pid_t crashing_tid, char **trace)
+ServerBacktrace(unsigned /* options */, int pid, char **trace)
 {
   *trace = nullptr;
 
   threadlist threads(threads_for_process(pid));
   TextBuffer text(0);
 
-  Dbg(dbg_ctl_backtrace, "tracing %zd threads for traffic_server PID %ld, crashing TID %ld\n", threads.size(),
-      static_cast<long>(pid), static_cast<long>(crashing_tid));
+  Dbg(dbg_ctl_backtrace, "tracing %zd threads for traffic_server PID %ld\n", threads.size(), (long)pid);
 
-  // First, trace the crashing thread.
-  if (crashing_tid > 0) {
-    Dbg(dbg_ctl_backtrace, "tracing crashing thread %ld\n", static_cast<long>(crashing_tid));
-    format_thread_header(crashing_tid, "Crashing Thread", text);
-    backtrace_for_thread(crashing_tid, text);
-    text.format("\n");
-  }
-
-  // Then trace all other threads.
-  bool printed_header = false;
   for (auto threadid : threads) {
-    if (threadid == crashing_tid) {
-      continue;
+    Dbg(dbg_ctl_backtrace, "tracing thread %ld\n", (long)threadid);
+    // Get the thread name using /proc/PID/comm
+    ats_scoped_fd fd;
+    char          threadname[128];
+
+    snprintf(threadname, sizeof(threadname), "/proc/%ld/comm", static_cast<long>(threadid));
+    fd = open(threadname, O_RDONLY);
+    if (fd >= 0) {
+      text.format("Thread %ld, ", static_cast<long>(threadid));
+      text.readFromFD(fd);
+      text.chomp();
+    } else {
+      text.format("Thread %ld", static_cast<long>(threadid));
     }
 
-    if (!printed_header) {
-      text.format("Other Non-Crashing Threads:\n\n");
-      printed_header = true;
-    }
+    text.format(":\n");
 
-    Dbg(dbg_ctl_backtrace, "tracing thread %ld\n", static_cast<long>(threadid));
-    format_thread_header(threadid, "Thread", text);
     backtrace_for_thread(threadid, text);
     text.format("\n");
   }
@@ -254,7 +210,7 @@ ServerBacktrace(unsigned /* options */, pid_t pid, pid_t crashing_tid, char **tr
 #else /* TS_USE_REMOTE_UNWINDING */
 
 int
-ServerBacktrace([[maybe_unused]] unsigned options, [[maybe_unused]] pid_t pid, [[maybe_unused]] pid_t crashing_tid, char **trace)
+ServerBacktrace([[maybe_unused]] unsigned options, [[maybe_unused]] int pid, char **trace)
 {
   *trace = nullptr;
   return -1;

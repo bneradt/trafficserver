@@ -28,8 +28,6 @@
 #include "tscore/Diags.h"
 #include "tscore/TextBuffer.h"
 
-#include <string>
-
 // ucontext.h is deprecated on Darwin, and we really only need it on Linux, so only
 // include it if we are planning to use it.
 #if defined(__linux__)
@@ -51,23 +49,17 @@
 #endif
 
 #define CRASHLOG_HAVE_THREADINFO 0x1u
-#define CRASHLOG_HAVE_BACKTRACE  0x2u
 
 struct crashlog_target {
-  pid_t     pid{0};
-  pid_t     crashing_tid{0};
-  siginfo_t siginfo{};
+  pid_t     pid;
+  siginfo_t siginfo;
 #if defined(__linux__)
-  ucontext_t ucontext{};
+  ucontext_t ucontext;
 #else
-  char ucontext{}; // just a placeholder ...
+  char ucontext; // just a placeholder ...
 #endif
-  struct tm timestamp {
-  };
-  unsigned flags{0};
-
-  // In-process backtrace from the crashing thread.
-  std::string backtrace;
+  struct tm timestamp;
+  unsigned  flags;
 };
 
 bool crashlog_write_backtrace(FILE *, const crashlog_target &);
@@ -77,6 +69,7 @@ bool crashlog_write_proclimits(FILE *, const crashlog_target &);
 bool crashlog_write_procname(FILE *, const crashlog_target &);
 bool crashlog_write_procstatus(FILE *, const crashlog_target &);
 bool crashlog_write_records(FILE *, const crashlog_target &);
+bool crashlog_write_regions(FILE *, const crashlog_target &);
 bool crashlog_write_registers(FILE *, const crashlog_target &);
 bool crashlog_write_siginfo(FILE *, const crashlog_target &);
 bool crashlog_write_uname(FILE *, const crashlog_target &);
