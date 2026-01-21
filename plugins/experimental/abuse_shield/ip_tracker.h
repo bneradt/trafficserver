@@ -23,12 +23,10 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
-#include <shared_mutex>
-#include <unordered_map>
-#include <vector>
+#include <memory>
 
 #include "swoc/swoc_ip.h"
-#include "tsutil/TsSharedMutex.h"
+#include "tsutil/UdiTable.h"
 
 namespace abuse_shield
 {
@@ -99,6 +97,8 @@ struct IPSlot {
 /**
  * IPTracker - Tracks IP addresses using the Udi "King of the Hill" algorithm.
  *
+ * This is a thin wrapper around ts::UdiTable providing IP-specific functionality.
+ *
  * Uses partitioned locking to minimize contention:
  * - Hash table is divided into N partitions, each with its own lock
  * - Slot updates use atomic operations (lock-free)
@@ -109,13 +109,15 @@ struct IPSlot {
 class IPTracker
 {
 public:
+  // UdiTable type for IP tracking
+  using Table = ts::UdiTable<swoc::IPAddr, IPSlot, std::hash<swoc::IPAddr>, DEFAULT_NUM_PARTITIONS>;
+
   /**
    * Construct an IPTracker with the specified number of slots.
    *
    * @param num_slots Total number of IP slots to allocate
-   * @param num_partitions Number of hash table partitions (default 64)
    */
-  explicit IPTracker(size_t num_slots, size_t num_partitions = DEFAULT_NUM_PARTITIONS);
+  explicit IPTracker(size_t num_slots);
 
   // No copying
   IPTracker(const IPTracker &)            = delete;
@@ -129,7 +131,7 @@ public:
    *
    * Thread-safe: Uses shared lock on the relevant partition.
    */
-  IPSlot *find(const swoc::IPAddr &ip);
+  IPSlot       *find(const swoc::IPAddr &ip);
   const IPSlot *find(const swoc::IPAddr &ip) const;
 
   /**
@@ -160,9 +162,35 @@ public:
   /**
    * Get statistics about the tracker.
    */
-  size_t num_slots() const { return slots_.size(); }
-  size_t num_partitions() const { return partitions_.size(); }
-  size_t slots_used() const;
+  size_t
+  num_slots() const
+  {
+    return table_->num_slots();
+  }
+
+  size_t
+  slots_used() const
+  {
+    return table_->slots_used();
+  }
+
+  uint64_t
+  contests() const
+  {
+    return table_->contests();
+  }
+
+  uint64_t
+  contests_won() const
+  {
+    return table_->contests_won();
+  }
+
+  uint64_t
+  evictions() const
+  {
+    return table_->evictions();
+  }
 
   /**
    * Dump all tracked IPs to a string (for debugging).
@@ -170,37 +198,7 @@ public:
   std::string dump() const;
 
 private:
-  /**
-   * Partition - Contains a portion of the hash table with its own lock.
-   */
-  struct Partition {
-    std::unordered_map<swoc::IPAddr, size_t> lookup;  ///< IP -> slot index
-    mutable ts::shared_mutex mutex;                   ///< Partition lock
-    std::atomic<size_t> contest_ptr{0};               ///< Contest pointer for this partition
-  };
-
-  /**
-   * Get the partition for an IP address.
-   */
-  size_t
-  partition_for(const swoc::IPAddr &ip) const
-  {
-    return std::hash<swoc::IPAddr>{}(ip) % partitions_.size();
-  }
-
-  /**
-   * Perform the Udi contest algorithm.
-   *
-   * @param part The partition (must hold exclusive lock)
-   * @param ip The IP address trying to enter
-   * @param incoming_score The score of the incoming IP
-   * @return Slot index if contest won, or existing slot if IP already tracked
-   */
-  size_t contest(Partition &part, const swoc::IPAddr &ip, int incoming_score);
-
-  std::vector<Partition> partitions_;  ///< Partitioned hash table
-  std::vector<IPSlot> slots_;          ///< Fixed-size slot array
-  size_t slots_per_partition_;         ///< Number of slots per partition
+  std::unique_ptr<Table> table_;
 };
 
 }  // namespace abuse_shield

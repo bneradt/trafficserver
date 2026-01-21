@@ -615,9 +615,9 @@ TSPluginInit(int argc, const char *argv[])
     return;
   }
 
-  // Create the IP tracker
-  g_tracker = std::make_unique<abuse_shield::IPTracker>(g_config->slots, g_config->partitions);
-  Dbg(dbg_ctl, "Created IP tracker with %zu slots and %zu partitions", g_config->slots, g_config->partitions);
+  // Create the IP tracker (uses fixed 64 partitions from UdiTable template)
+  g_tracker = std::make_unique<abuse_shield::IPTracker>(g_config->slots);
+  Dbg(dbg_ctl, "Created IP tracker with %zu slots", g_config->slots);
 
   // Register hooks
   TSCont vconn_cont = TSContCreate(handle_vconn_start, nullptr);

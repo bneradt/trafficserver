@@ -20,7 +20,6 @@
 
 #include "ip_tracker.h"
 
-#include <algorithm>
 #include <chrono>
 #include <sstream>
 
@@ -127,178 +126,79 @@ IPSlot::block_until(uint64_t until_ms)
 // IPTracker implementation
 // ============================================================================
 
-IPTracker::IPTracker(size_t num_slots, size_t num_partitions)
-  : partitions_(num_partitions), slots_(num_slots), slots_per_partition_(num_slots / num_partitions)
+IPTracker::IPTracker(size_t num_slots)
 {
-  // Initialize contest pointers for each partition
-  for (size_t i = 0; i < num_partitions; ++i) {
-    // Each partition contests within its range of slots
-    partitions_[i].contest_ptr.store(i * slots_per_partition_, std::memory_order_relaxed);
-  }
+  // Define accessor functions for UdiTable
+  auto get_key = [](const IPSlot &slot) -> const swoc::IPAddr & { return slot.addr; };
+
+  auto set_key = [](IPSlot &slot, const swoc::IPAddr &ip) { slot.addr = ip; };
+
+  auto get_score = [](const IPSlot &slot) -> uint32_t { return slot.score.load(std::memory_order_relaxed); };
+
+  auto set_score = [](IPSlot &slot, uint32_t value) { slot.score.store(value, std::memory_order_relaxed); };
+
+  auto is_empty = [](const IPSlot &slot) -> bool { return slot.empty(); };
+
+  auto clear_slot = [](IPSlot &slot) { slot.clear(); };
+
+  table_ = std::make_unique<Table>(num_slots, get_key, set_key, get_score, set_score, is_empty, clear_slot);
 }
 
 IPSlot *
 IPTracker::find(const swoc::IPAddr &ip)
 {
-  size_t part_idx = partition_for(ip);
-  Partition &part = partitions_[part_idx];
-
-  std::shared_lock lock(part.mutex);
-  auto it = part.lookup.find(ip);
-  if (it != part.lookup.end()) {
-    return &slots_[it->second];
-  }
-  return nullptr;
+  return table_->find(ip);
 }
 
 const IPSlot *
 IPTracker::find(const swoc::IPAddr &ip) const
 {
-  return const_cast<IPTracker *>(this)->find(ip);
+  return table_->find(ip);
 }
 
 IPSlot *
 IPTracker::record_event(const swoc::IPAddr &ip, int score_delta)
 {
-  size_t part_idx = partition_for(ip);
-  Partition &part = partitions_[part_idx];
-
-  // First try with a shared lock to see if IP is already tracked
-  {
-    std::shared_lock lock(part.mutex);
-    auto it = part.lookup.find(ip);
-    if (it != part.lookup.end()) {
-      IPSlot *slot = &slots_[it->second];
-      slot->score.fetch_add(score_delta, std::memory_order_relaxed);
-      slot->last_seen.store(now_ms(), std::memory_order_relaxed);
-      return slot;
-    }
-  }
-
-  // Not found - need exclusive lock to contest
-  std::unique_lock lock(part.mutex);
-
-  // Double-check after acquiring exclusive lock
-  auto it = part.lookup.find(ip);
-  if (it != part.lookup.end()) {
-    IPSlot *slot = &slots_[it->second];
-    slot->score.fetch_add(score_delta, std::memory_order_relaxed);
+  IPSlot *slot = table_->record(ip, static_cast<uint32_t>(score_delta));
+  if (slot) {
     slot->last_seen.store(now_ms(), std::memory_order_relaxed);
-    return slot;
   }
-
-  // Contest for a slot
-  size_t slot_idx = contest(part, ip, score_delta);
-  if (slot_idx < slots_.size()) {
-    return &slots_[slot_idx];
-  }
-
-  return nullptr;
+  return slot;
 }
 
 void
 IPTracker::record_success(const swoc::IPAddr &ip)
 {
-  size_t part_idx = partition_for(ip);
-  Partition &part = partitions_[part_idx];
-
-  std::unique_lock lock(part.mutex);
-  auto it = part.lookup.find(ip);
-  if (it != part.lookup.end()) {
-    IPSlot &slot = slots_[it->second];
-    slot.record_success();
-
-    // If score reached 0, evict the IP
-    if (slot.score.load(std::memory_order_relaxed) == 0) {
-      part.lookup.erase(it);
-      slot.clear();
-    }
-  }
-}
-
-size_t
-IPTracker::contest(Partition &part, const swoc::IPAddr &ip, int incoming_score)
-{
-  // Calculate the range of slots this partition can contest
-  size_t part_idx   = &part - partitions_.data();
-  size_t slot_start = part_idx * slots_per_partition_;
-
-  // Get current contest pointer and advance it
-  size_t contest_idx = part.contest_ptr.fetch_add(1, std::memory_order_relaxed);
-  contest_idx        = slot_start + ((contest_idx - slot_start) % slots_per_partition_);
-
-  IPSlot &slot      = slots_[contest_idx];
-  uint32_t slot_score = slot.score.load(std::memory_order_relaxed);
-
-  if (static_cast<uint32_t>(incoming_score) > slot_score) {
-    // Incoming IP wins - take the slot
-    if (slot.addr.is_valid()) {
-      // Remove old IP from lookup
-      part.lookup.erase(slot.addr);
-    }
-
-    // Initialize slot with new IP
-    slot.clear();
-    slot.addr = ip;
-    slot.score.store(incoming_score, std::memory_order_relaxed);
-    slot.last_seen.store(now_ms(), std::memory_order_relaxed);
-
-    // Add new IP to lookup
-    part.lookup[ip] = contest_idx;
-
-    return contest_idx;
-  } else {
-    // Existing slot survives but is weakened
-    if (slot_score > 0) {
-      slot.score.fetch_sub(1, std::memory_order_relaxed);
-    }
-    return slots_.size();  // Invalid index indicates contest lost
-  }
-}
-
-size_t
-IPTracker::slots_used() const
-{
-  size_t count = 0;
-  for (const auto &slot : slots_) {
-    if (!slot.empty()) {
-      ++count;
-    }
-  }
-  return count;
+  // Use decrement which will evict if score reaches 0
+  table_->decrement(ip, 1);
 }
 
 std::string
 IPTracker::dump() const
 {
-  std::ostringstream oss;
-
-  oss << "# abuse_shield dump\n";
-  oss << "# slots_used: " << slots_used() << " / " << slots_.size() << "\n";
-  oss << "# IP\tCLIENT_ERR\tSERVER_ERR\tSUCCESS\tSCORE\tBLOCKED_UNTIL\n";
-
-  // Collect all non-empty slots
-  std::vector<const IPSlot *> active_slots;
-  for (const auto &slot : slots_) {
-    if (!slot.empty()) {
-      active_slots.push_back(&slot);
+  auto format_slot = [](const IPSlot &slot) -> std::string {
+    if (slot.empty()) {
+      return "";
     }
-  }
 
-  // Sort by score (highest first)
-  std::sort(active_slots.begin(), active_slots.end(), [](const IPSlot *a, const IPSlot *b) {
-    return a->score.load(std::memory_order_relaxed) > b->score.load(std::memory_order_relaxed);
-  });
-
-  for (const auto *slot : active_slots) {
     swoc::LocalBufferWriter<64> ip_str;
-    ip_str.print("{}", slot->addr);
-    oss << ip_str.view() << "\t" << slot->client_errors.load(std::memory_order_relaxed) << "\t"
-        << slot->server_errors.load(std::memory_order_relaxed) << "\t" << slot->successes.load(std::memory_order_relaxed) << "\t"
-        << slot->score.load(std::memory_order_relaxed) << "\t" << slot->blocked_until.load(std::memory_order_relaxed) << "\n";
-  }
+    ip_str.print("{}", slot.addr);
 
-  return oss.str();
+    std::ostringstream oss;
+    oss << ip_str.view() << "\t" << slot.client_errors.load(std::memory_order_relaxed) << "\t"
+        << slot.server_errors.load(std::memory_order_relaxed) << "\t" << slot.successes.load(std::memory_order_relaxed) << "\t"
+        << slot.score.load(std::memory_order_relaxed) << "\t" << slot.blocked_until.load(std::memory_order_relaxed) << "\n";
+    return oss.str();
+  };
+
+  std::ostringstream header;
+  header << "# abuse_shield dump\n";
+  header << "# slots_used: " << slots_used() << " / " << num_slots() << "\n";
+  header << "# contests: " << contests() << " (won: " << contests_won() << ")\n";
+  header << "# evictions: " << evictions() << "\n";
+  header << "# IP\tCLIENT_ERR\tSERVER_ERR\tSUCCESS\tSCORE\tBLOCKED_UNTIL\n";
+
+  return header.str() + table_->dump(format_slot);
 }
 
 }  // namespace abuse_shield
