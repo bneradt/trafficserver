@@ -49,6 +49,7 @@ add_library(
   SourceLocation.cc
   ts_diags.cc
   ts_ip.cc
+  UdiTable.cc
   YamlCfg.cc
   ts_unit_parser.cc
   Regex.cc
