@@ -3,9 +3,9 @@
 # This plugin uses the Udi "King of the Hill" algorithm to track abusive IPs
 # with bounded memory. It detects HTTP/2 protocol attacks and rate-based abuse.
 
-tracker:
+ip_reputation:
   slots: 50000              # Number of IP tracking slots (~8.4 MB)
-  partitions: 64            # Hash table partitions (for concurrency)
+  window_seconds: 60        # Time window for rate calculations
 
 blocking:
   duration_seconds: 300     # Block duration (5 minutes)

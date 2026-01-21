@@ -120,9 +120,11 @@ public:
   {
   }
 
-  // No copying
+  // No copying or moving
   UdiTable(UdiTable const &)            = delete;
   UdiTable &operator=(UdiTable const &) = delete;
+  UdiTable(UdiTable &&)                 = delete;
+  UdiTable &operator=(UdiTable &&)      = delete;
 
   /**
    * Find a key in the table.
@@ -214,7 +216,7 @@ public:
       // Evict - score reached 0
       clear_slot_(slot);
       part.lookup.erase(it);
-      evictions_.fetch_add(1, std::memory_order_relaxed);
+      metric_evictions_.fetch_add(1, std::memory_order_relaxed);
     } else {
       set_score_(slot, score - amount);
     }
@@ -272,19 +274,19 @@ public:
   uint64_t
   contests() const
   {
-    return contests_.load(std::memory_order_relaxed);
+    return metric_contests_.load(std::memory_order_relaxed);
   }
 
   uint64_t
   contests_won() const
   {
-    return contests_won_.load(std::memory_order_relaxed);
+    return metric_contests_won_.load(std::memory_order_relaxed);
   }
 
   uint64_t
   evictions() const
   {
-    return evictions_.load(std::memory_order_relaxed);
+    return metric_evictions_.load(std::memory_order_relaxed);
   }
 
   /**
@@ -360,7 +362,7 @@ private:
   Slot *
   contest(Partition &part, size_t part_idx, Key const &key, uint32_t incoming_score)
   {
-    contests_.fetch_add(1, std::memory_order_relaxed);
+    metric_contests_.fetch_add(1, std::memory_order_relaxed);
 
     auto [slot_start, slot_end] = slot_range_for_partition(part_idx);
     if (slot_start >= slot_end) {
@@ -390,7 +392,7 @@ private:
       set_score_(slot, incoming_score);
       part.lookup[key] = slot_idx;
 
-      contests_won_.fetch_add(1, std::memory_order_relaxed);
+      metric_contests_won_.fetch_add(1, std::memory_order_relaxed);
       return &slot;
     } else {
       // New key loses - existing slot survives but is weakened
@@ -413,10 +415,10 @@ private:
   slot_empty_fn is_empty_;
   slot_clear_fn clear_slot_;
 
-  // Statistics
-  std::atomic<uint64_t> contests_{0};
-  std::atomic<uint64_t> contests_won_{0};
-  std::atomic<uint64_t> evictions_{0};
+  // Metrics
+  std::atomic<uint64_t> metric_contests_{0};
+  std::atomic<uint64_t> metric_contests_won_{0};
+  std::atomic<uint64_t> metric_evictions_{0};
 };
 
 }  // namespace ts

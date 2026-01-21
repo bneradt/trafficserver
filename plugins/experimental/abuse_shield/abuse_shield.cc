@@ -89,13 +89,13 @@ add_action(ActionSet set, Action action)
 // Rule configuration
 // ============================================================================
 struct RuleFilter {
-  int h2_error{-1};          // Specific H2 error code (-1 = any)
-  int min_count{0};          // Minimum count of h2_error
-  int min_client_errors{0};  // Minimum total client errors
-  int min_server_errors{0};  // Minimum total server errors
-  int max_successes{-1};     // Maximum successes (-1 = unlimited)
-  int max_conn_rate{0};      // Max connections per window
-  int max_req_rate{0};       // Max requests per window
+  int h2_error_code{-1};        // Specific H2 error code (-1 = any)
+  int h2_min_count{0};          // Minimum count of h2_error_code
+  int h2_min_client_errors{0};  // Minimum total client errors
+  int h2_min_server_errors{0};  // Minimum total server errors
+  int max_successes{-1};        // Maximum successes (-1 = unlimited)
+  int max_conn_rate{0};         // Max connections per window
+  int max_req_rate{0};          // Max requests per window
 };
 
 struct Rule {
@@ -111,19 +111,21 @@ struct Config {
   size_t slots{DEFAULT_SLOTS};
   size_t partitions{DEFAULT_PARTITIONS};
   int block_duration_sec{DEFAULT_BLOCK_DURATION_SEC};
-  int window_seconds{1};
+  int window_seconds{60};  // Default window period: 60 seconds
 
   std::vector<Rule> rules;
   swoc::IPSpace<bool> trusted_ips;
 
   bool enabled{true};
+
+  // Config file path
+  std::string config_path;
 };
 
 // Global state
 std::unique_ptr<abuse_shield::IPTracker> g_tracker;
 std::shared_ptr<Config> g_config;
-std::shared_mutex g_config_mutex;
-std::string g_config_path;
+std::shared_mutex g_config_mutex;  // Protects g_config pointer swaps
 
 // ============================================================================
 // Configuration parsing
@@ -153,6 +155,8 @@ actions_from_strings(const std::vector<std::string> &strings)
       set = add_action(set, Action::CLOSE);
     } else if (s == "downgrade") {
       set = add_action(set, Action::DOWNGRADE);
+    } else {
+      TSError("[%s] Unknown action '%s' - ignoring", PLUGIN_NAME, s.c_str());
     }
   }
   return set;
@@ -204,11 +208,11 @@ parse_config(const std::string &path)
   try {
     YAML::Node root = YAML::LoadFile(path);
 
-    // Tracker settings
-    if (root["tracker"]) {
-      auto tracker       = root["tracker"];
-      config->slots      = tracker["slots"].as<size_t>(DEFAULT_SLOTS);
-      config->partitions = tracker["partitions"].as<size_t>(DEFAULT_PARTITIONS);
+    // IP reputation table settings
+    if (root["ip_reputation"]) {
+      auto ip_rep             = root["ip_reputation"];
+      config->slots           = ip_rep["slots"].as<size_t>(DEFAULT_SLOTS);
+      config->window_seconds  = ip_rep["window_seconds"].as<int>(60);
     }
 
     // Blocking settings
@@ -230,14 +234,14 @@ parse_config(const std::string &path)
         rule.name = rule_node["name"].as<std::string>("");
 
         if (rule_node["filter"]) {
-          auto filter              = rule_node["filter"];
-          rule.filter.h2_error     = filter["h2_error"].as<int>(-1);
-          rule.filter.min_count    = filter["min_count"].as<int>(0);
-          rule.filter.min_client_errors = filter["min_client_errors"].as<int>(0);
-          rule.filter.min_server_errors = filter["min_server_errors"].as<int>(0);
-          rule.filter.max_successes     = filter["max_successes"].as<int>(-1);
-          rule.filter.max_conn_rate     = filter["max_conn_rate"].as<int>(0);
-          rule.filter.max_req_rate      = filter["max_req_rate"].as<int>(0);
+          auto filter_node                = rule_node["filter"];
+          rule.filter.h2_error_code       = filter_node["h2_error"].as<int>(-1);
+          rule.filter.h2_min_count        = filter_node["min_count"].as<int>(0);
+          rule.filter.h2_min_client_errors = filter_node["min_client_errors"].as<int>(0);
+          rule.filter.h2_min_server_errors = filter_node["min_server_errors"].as<int>(0);
+          rule.filter.max_successes       = filter_node["max_successes"].as<int>(-1);
+          rule.filter.max_conn_rate       = filter_node["max_conn_rate"].as<int>(0);
+          rule.filter.max_req_rate        = filter_node["max_req_rate"].as<int>(0);
         }
 
         if (rule_node["action"]) {
@@ -253,7 +257,8 @@ parse_config(const std::string &path)
     config->enabled = root["enabled"].as<bool>(true);
 
   } catch (const YAML::Exception &e) {
-    TSError("[%s] YAML parse error: %s", PLUGIN_NAME, e.what());
+    TSError("[%s] YAML parse error in %s at line %d, column %d: %s",
+            PLUGIN_NAME, path.c_str(), e.mark.line + 1, e.mark.column + 1, e.what());
     return nullptr;
   }
 
@@ -266,48 +271,48 @@ parse_config(const std::string &path)
 bool
 rule_matches(const Rule &rule, const abuse_shield::IPSlot &slot)
 {
-  const auto &f = rule.filter;
+  const auto &filter = rule.filter;
 
   // Check specific H2 error count
-  if (f.h2_error >= 0 && f.min_count > 0) {
-    if (f.h2_error < static_cast<int>(abuse_shield::NUM_H2_ERROR_CODES)) {
-      if (slot.h2_error_counts[f.h2_error].load(std::memory_order_relaxed) < static_cast<uint16_t>(f.min_count)) {
+  if (filter.h2_error_code >= 0 && filter.h2_min_count > 0) {
+    if (filter.h2_error_code < static_cast<int>(abuse_shield::NUM_H2_ERROR_CODES)) {
+      if (slot.h2_error_counts[filter.h2_error_code].load(std::memory_order_relaxed) < static_cast<uint16_t>(filter.h2_min_count)) {
         return false;
       }
     }
   }
 
   // Check total client errors
-  if (f.min_client_errors > 0) {
-    if (slot.client_errors.load(std::memory_order_relaxed) < static_cast<uint32_t>(f.min_client_errors)) {
+  if (filter.h2_min_client_errors > 0) {
+    if (slot.client_errors.load(std::memory_order_relaxed) < static_cast<uint32_t>(filter.h2_min_client_errors)) {
       return false;
     }
   }
 
   // Check total server errors
-  if (f.min_server_errors > 0) {
-    if (slot.server_errors.load(std::memory_order_relaxed) < static_cast<uint32_t>(f.min_server_errors)) {
+  if (filter.h2_min_server_errors > 0) {
+    if (slot.server_errors.load(std::memory_order_relaxed) < static_cast<uint32_t>(filter.h2_min_server_errors)) {
       return false;
     }
   }
 
   // Check max successes (for "pure attack" detection)
-  if (f.max_successes >= 0) {
-    if (slot.successes.load(std::memory_order_relaxed) > static_cast<uint32_t>(f.max_successes)) {
+  if (filter.max_successes >= 0) {
+    if (slot.successes.load(std::memory_order_relaxed) > static_cast<uint32_t>(filter.max_successes)) {
       return false;
     }
   }
 
   // Check connection rate
-  if (f.max_conn_rate > 0) {
-    if (slot.conn_count.load(std::memory_order_relaxed) < static_cast<uint32_t>(f.max_conn_rate)) {
+  if (filter.max_conn_rate > 0) {
+    if (slot.conn_count.load(std::memory_order_relaxed) < static_cast<uint32_t>(filter.max_conn_rate)) {
       return false;  // Under limit, rule doesn't match
     }
   }
 
   // Check request rate
-  if (f.max_req_rate > 0) {
-    if (slot.req_count.load(std::memory_order_relaxed) < static_cast<uint32_t>(f.max_req_rate)) {
+  if (filter.max_req_rate > 0) {
+    if (slot.req_count.load(std::memory_order_relaxed) < static_cast<uint32_t>(filter.max_req_rate)) {
       return false;  // Under limit, rule doesn't match
     }
   }
@@ -380,8 +385,9 @@ handle_vconn_start(TSCont /* contp */, TSEvent /* event */, void *edata)
 
   swoc::IPAddr ip(client_addr);
 
-  // Check if trusted
+  // Check if trusted - skip all abuse checking for trusted IPs
   if (config->trusted_ips.find(ip) != config->trusted_ips.end()) {
+    Dbg(dbg_ctl, "Skipping trusted IP: %s", ip_to_string(ip).c_str());
     TSVConnReenable(vconn);
     return TS_SUCCESS;
   }
@@ -389,16 +395,20 @@ handle_vconn_start(TSCont /* contp */, TSEvent /* event */, void *edata)
   // Check if IP is currently blocked
   abuse_shield::IPSlot *slot = g_tracker->find(ip);
   if (slot && slot->is_blocked()) {
-    // IP is blocked - shutdown or downgrade the connection
+    // IP is blocked - shutdown the connection
     Dbg(dbg_ctl, "Blocking connection from %s (blocked IP)", ip_to_string(ip).c_str());
 
     int fd = TSVConnFdGet(vconn);
     if (fd >= 0) {
+      // Use shutdown() instead of close() because:
+      // 1. close() would free the fd, but ATS still owns it
+      // 2. shutdown() signals EOF to the peer, allowing graceful termination
+      // 3. ATS will handle the actual close when the vconn is destroyed
       shutdown(fd, SHUT_RDWR);
-      // Drain the connection
+      // Drain any pending data to ensure clean shutdown
       char buffer[4096];
       while (read(fd, buffer, sizeof(buffer)) > 0) {
-        // drain
+        // drain pending data
       }
     }
   }
@@ -436,8 +446,9 @@ handle_txn_close(TSCont /* contp */, TSEvent /* event */, void *edata)
 
   swoc::IPAddr ip(client_addr);
 
-  // Check if trusted
+  // Check if trusted - skip all abuse checking for trusted IPs
   if (config->trusted_ips.find(ip) != config->trusted_ips.end()) {
+    Dbg(dbg_ctl, "Skipping trusted IP in txn_close: %s", ip_to_string(ip).c_str());
     TSHttpTxnReenable(txnp, TS_EVENT_HTTP_CONTINUE);
     return TS_SUCCESS;
   }
@@ -547,10 +558,18 @@ handle_lifecycle_msg(TSCont /* contp */, TSEvent /* event */, void *edata)
   std::string_view tag(msg->tag, strlen(msg->tag));
 
   if (tag == "abuse_shield.reload") {
-    Dbg(dbg_ctl, "Reloading configuration from %s", g_config_path.c_str());
+    std::string config_path;
+    {
+      std::shared_lock lock(g_config_mutex);
+      if (g_config) {
+        config_path = g_config->config_path;
+      }
+    }
+    Dbg(dbg_ctl, "Reloading configuration from %s", config_path.c_str());
 
-    auto new_config = parse_config(g_config_path);
+    auto new_config = parse_config(config_path);
     if (new_config) {
+      new_config->config_path = config_path;  // Preserve config path for future reloads
       std::unique_lock lock(g_config_mutex);
       g_config = new_config;
       TSError("[%s] Configuration reloaded successfully", PLUGIN_NAME);
@@ -601,19 +620,22 @@ TSPluginInit(int argc, const char *argv[])
     return;
   }
 
-  g_config_path = argv[1];
+  std::string config_path = argv[1];
 
   // If path is relative, make it relative to config dir
-  if (g_config_path[0] != '/') {
-    g_config_path = std::string(TSConfigDirGet()) + "/" + g_config_path;
+  if (config_path[0] != '/') {
+    config_path = std::string(TSConfigDirGet()) + "/" + config_path;
   }
 
   // Load configuration
-  g_config = parse_config(g_config_path);
+  g_config = parse_config(config_path);
   if (!g_config) {
-    TSError("[%s] Failed to load configuration from %s", PLUGIN_NAME, g_config_path.c_str());
+    TSError("[%s] Failed to load configuration from %s", PLUGIN_NAME, config_path.c_str());
     return;
   }
+
+  // Store config path for reload
+  g_config->config_path = config_path;
 
   // Create the IP tracker (uses fixed 64 partitions from UdiTable template)
   g_tracker = std::make_unique<abuse_shield::IPTracker>(g_config->slots);
