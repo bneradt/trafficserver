@@ -35,6 +35,8 @@ Key features:
 * Tracks all 16 HTTP/2 error codes per IP
 * Distinguishes between client-caused and server-caused errors
 * Detects "pure attacks" (many errors with zero successful requests)
+* **Per-IP request rate limiting** - Block IPs exceeding request thresholds
+* **Per-IP connection rate limiting** - Block IPs opening too many connections
 * Bounded memory usage via the Udi algorithm
 * Dynamic configuration reload via ``traffic_ctl``
 * YAML-based configuration with flexible rules
@@ -161,6 +163,40 @@ Code         Name                   Typical Cause CVEs
 0x0c         INADEQUATE_SECURITY    Either
 0x0d         HTTP_1_1_REQUIRED      Server
 ============ ====================== ============ ==================================
+
+Rate Limiting
+-------------
+
+The plugin supports per-IP rate limiting for both connections and requests.
+Rates are measured within a sliding time window configured by ``window_seconds``
+(default: 60 seconds).
+
+**Connection Rate Limiting** (``max_conn_rate``):
+
+Tracks new connections per IP within the time window. Useful for detecting
+connection floods or slowloris-style attacks.
+
+**Request Rate Limiting** (``max_req_rate``):
+
+Tracks HTTP requests per IP within the time window. Useful for detecting
+aggressive scrapers, API abuse, or application-layer DDoS.
+
+Example rate limiting rules:
+
+.. code-block:: yaml
+
+    rules:
+      # Block IPs making more than 500 requests per minute
+      - name: "high_request_rate"
+        filter:
+          max_req_rate: 500
+        action: [log, block]
+
+      # Block IPs opening more than 50 connections per minute
+      - name: "high_connection_rate"
+        filter:
+          max_conn_rate: 50
+        action: [log, block, close]
 
 Trusted IPs
 -----------
@@ -295,6 +331,18 @@ Basic protection against HTTP/2 attacks:
           max_successes: 0
         action: [log, block, close]
 
+      # Rate limit: block IPs with too many requests per window
+      - name: "request_rate_flood"
+        filter:
+          max_req_rate: 1000        # More than 1000 requests per window
+        action: [log, block]
+
+      # Rate limit: block IPs opening too many connections
+      - name: "connection_rate_flood"
+        filter:
+          max_conn_rate: 100        # More than 100 connections per window
+        action: [log, block]
+
     enabled: true
 
 Memory Usage
@@ -312,22 +360,39 @@ Slots   Memory
 
 Each slot is approximately 128 bytes and includes all tracking counters.
 
-Comparison with block_errors
-============================
+Comparison with Other Plugins
+=============================
 
-The ``abuse_shield`` plugin is designed as a more comprehensive replacement
-for the ``block_errors`` plugin:
+The ``abuse_shield`` plugin combines features from both ``block_errors`` and
+``rate_limit`` plugins, providing a unified abuse protection solution:
 
-========================= ============== ==============
-Feature                   abuse_shield   block_errors
-========================= ============== ==============
-HTTP/2 error codes        All 16         Only 2
-Client vs server errors   Yes            No
-Memory bounded            Yes (Udi)      No
-YAML configuration        Yes            No
-Dynamic reload            Yes            Partial
-Pure attack detection     Yes            No
-========================= ============== ==============
+================================ ============== ============== ==============
+Feature                          abuse_shield   block_errors   rate_limit
+================================ ============== ============== ==============
+**Error Tracking**
+HTTP/2 error codes               All 16         Only 2         No
+Client vs server errors          Yes            No             No
+Pure attack detection            Yes            No             No
+**Rate Limiting**
+Per-IP request rate              Yes            No             No
+Per-IP connection rate           Yes            No             No
+Per-remap/SNI limits             No             No             Yes
+Request queuing                  No             No             Yes
+**IP Management**
+Per-IP tracking                  Yes            Yes            Yes (IP rep)
+IP blocking with duration        Yes            Yes            Yes
+Trusted IP bypass                Yes            No             Yes
+**Configuration**
+YAML configuration               Yes            No             Yes
+Dynamic reload                   Yes            Partial        Yes
+Memory bounded                   Yes (Udi)      No             Yes (LRU)
+================================ ============== ============== ==============
+
+**When to use which plugin:**
+
+* Use ``abuse_shield`` for HTTP/2 attack protection and per-IP abuse detection
+* Use ``rate_limit`` for per-service (remap/SNI) rate limiting with queuing
+* Use ``block_errors`` for simple HTTP/2 error blocking (legacy)
 
 See Also
 ========
