@@ -193,7 +193,7 @@ private:
     bool
     is_empty() const
     {
-      return score == 0;
+      return !data;
     }
 
     void

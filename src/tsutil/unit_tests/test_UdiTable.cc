@@ -441,3 +441,36 @@ TEST_CASE("UdiTable thread safety with IPs", "[UdiTable][threading][ip]")
     REQUIRE(found_count.load() > 0);
   }
 }
+
+TEST_CASE("UdiTable slots_used never exceeds num_slots", "[UdiTable]")
+{
+  // This test verifies that the lookup map size never exceeds the slot vector size.
+  // A bug existed where is_empty() checked score==0 instead of !data, causing
+  // stale keys to remain in lookup_ when scores were decremented to 0.
+
+  constexpr size_t NUM_SLOTS  = 10;
+  constexpr size_t NUM_KEYS   = 1000; // Many more keys than slots
+  constexpr size_t ITERATIONS = 100;
+
+  StringTable table(NUM_SLOTS);
+
+  // Generate many unique keys
+  std::vector<std::string> keys;
+  for (size_t i = 0; i < NUM_KEYS; ++i) {
+    keys.push_back("key_" + std::to_string(i));
+  }
+
+  // Process many events - this will cause contests and score decrements
+  for (size_t iter = 0; iter < ITERATIONS; ++iter) {
+    for (auto const &key : keys) {
+      table.process_event(key, 1);
+
+      // Critical check: slots_used() must never exceed num_slots()
+      REQUIRE(table.slots_used() <= table.num_slots());
+    }
+  }
+
+  // Final verification
+  REQUIRE(table.slots_used() <= NUM_SLOTS);
+  INFO("Final slots_used: " << table.slots_used() << ", num_slots: " << table.num_slots());
+}
