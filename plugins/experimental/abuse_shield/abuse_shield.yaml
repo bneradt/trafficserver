@@ -1,5 +1,5 @@
 # Abuse Shield Plugin Configuration
-# 
+#
 # This plugin uses the Udi "King of the Hill" algorithm to track abusive IPs
 # with bounded memory. It detects HTTP/2 protocol attacks and rate-based abuse.
 

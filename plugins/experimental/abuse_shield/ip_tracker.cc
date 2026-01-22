@@ -21,6 +21,8 @@
 #include "ip_tracker.h"
 
 #include <chrono>
+#include <ctime>
+#include <iomanip>
 #include <sstream>
 
 #include "swoc/BufferWriter.h"
@@ -36,7 +38,7 @@ namespace
   {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
   }
-}  // namespace
+} // namespace
 
 // ============================================================================
 // IPSlot implementation
@@ -173,6 +175,45 @@ IPTracker::record_success(const swoc::IPAddr &ip)
   table_->decrement(ip, 1);
 }
 
+namespace
+{
+  // Format duration as human-readable string (e.g., "2h 15m 30s" or "45s")
+  std::string
+  format_duration(uint64_t total_seconds)
+  {
+    if (total_seconds == 0) {
+      return "0s";
+    }
+
+    uint64_t hours   = total_seconds / 3600;
+    uint64_t minutes = (total_seconds % 3600) / 60;
+    uint64_t seconds = total_seconds % 60;
+
+    std::ostringstream oss;
+    if (hours > 0) {
+      oss << hours << "h ";
+    }
+    if (minutes > 0 || hours > 0) {
+      oss << minutes << "m ";
+    }
+    oss << seconds << "s";
+    return oss.str();
+  }
+
+  // Format time_point as ISO-like timestamp string
+  std::string
+  format_timestamp(std::chrono::system_clock::time_point tp)
+  {
+    auto    time_t_val = std::chrono::system_clock::to_time_t(tp);
+    std::tm tm_val;
+    localtime_r(&time_t_val, &tm_val);
+
+    std::ostringstream oss;
+    oss << std::put_time(&tm_val, "%Y-%m-%d %H:%M:%S");
+    return oss.str();
+  }
+} // namespace
+
 std::string
 IPTracker::dump() const
 {
@@ -191,8 +232,14 @@ IPTracker::dump() const
     return oss.str();
   };
 
+  uint64_t    age_seconds    = seconds_since_reset();
+  auto        reset_time     = last_reset_time();
+  std::string reset_time_str = format_timestamp(reset_time);
+  std::string age_str        = format_duration(age_seconds);
+
   std::ostringstream header;
   header << "# abuse_shield dump\n";
+  header << "# last_reset: " << reset_time_str << " (" << age_str << " ago)\n";
   header << "# slots_used: " << slots_used() << " / " << num_slots() << "\n";
   header << "# contests: " << contests() << " (won: " << contests_won() << ")\n";
   header << "# evictions: " << evictions() << "\n";
@@ -201,4 +248,4 @@ IPTracker::dump() const
   return header.str() + table_->dump(format_slot);
 }
 
-}  // namespace abuse_shield
+} // namespace abuse_shield

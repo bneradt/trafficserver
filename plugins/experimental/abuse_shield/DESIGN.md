@@ -93,6 +93,8 @@ When `log` action is triggered, all tracked attributes are logged:
 
 | **Data Dump** | `traffic_ctl plugin msg abuse_shield.dump` |
 
+| **Reset Metrics** | `traffic_ctl plugin msg abuse_shield.reset` |
+
 | **Trusted IP Bypass** | Never block IPs in trusted list |
 
 ---
@@ -204,18 +206,18 @@ struct IPSlot {
     uint8_t  addr_family;
     uint8_t  blocked;
     uint8_t  padding[2];
-    
+
     // Use atomics for counters updated from multiple threads
     std::atomic<uint32_t> client_errors;    // Client-caused HTTP/2 errors
     std::atomic<uint32_t> server_errors;    // Server-caused HTTP/2 errors
     std::atomic<uint32_t> successes;        // Successful requests (2xx)
     std::atomic<uint32_t> score;            // Udi algorithm score
-    
+
     std::atomic<uint16_t> h2_error_counts[16];  // Per error code (0x00-0x0f)
-    
+
     std::atomic<uint32_t> conn_count;       // Connections in window
     std::atomic<uint32_t> req_count;        // Requests in window
-    
+
     std::atomic<uint64_t> window_start;
     std::atomic<uint64_t> last_seen;
     std::atomic<uint64_t> blocked_until;
@@ -237,10 +239,10 @@ class UdiTable {
         mutable std::shared_mutex mutex;
         std::atomic<size_t> contest_ptr{0};  // Per-partition contest pointer
     };
-    
+
     std::array<Partition, NumPartitions> partitions_;
     std::vector<Slot> slots_;    // Slots accessed via atomic operations
-    
+
     size_t partition_for(const IPAddr& ip) const {
         return std::hash<IPAddr>{}(ip) % NumPartitions;
     }
@@ -253,7 +255,7 @@ public:
         auto it = part.lookup.find(ip);
         return (it != part.lookup.end()) ? &slots_[it->second] : nullptr;
     }
-    
+
     // Contest - only locks one partition (exclusive lock)
     void contest(const IPAddr& ip, int incoming_score);
 };
@@ -289,18 +291,18 @@ struct IPSlot {
     // Identity (immutable once set, only changed during contest under lock)
     union { uint32_t ip4; uint8_t ip6[16]; } addr;
     std::atomic<uint8_t> addr_family{0};
-    
+
     // Counters - lock-free atomic operations
     std::atomic<uint32_t> client_errors{0};
     std::atomic<uint32_t> server_errors{0};
     std::atomic<uint32_t> successes{0};
     std::atomic<uint32_t> score{0};
     std::atomic<uint16_t> h2_error_counts[16]{};
-    
+
     // Timing
     std::atomic<uint64_t> last_seen{0};
     std::atomic<uint64_t> blocked_until{0};
-    
+
     // Increment error - completely lock-free
     void record_error(uint8_t error_code) {
         client_errors.fetch_add(1, std::memory_order_relaxed);
@@ -522,68 +524,42 @@ doc/admin-guide/plugins/
 
 All metrics are prefixed with `abuse_shield.`
 
-### Rule Metrics
+### Implemented Metrics (Phase 1)
 
-Per-rule counters (one set for each rule defined in config):
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `rule.<name>.matched` | counter | Times rule filter condition was true |
-| `rule.<name>.blocked` | counter | Times block action executed |
-| `rule.<name>.closed` | counter | Times close action executed |
-| `rule.<name>.downgraded` | counter | Times downgrade action executed |
-| `rule.<name>.logged` | counter | Times log action executed |
-
-Example with rules from config:
-```
-abuse_shield.rule.protocol_error_flood.matched
-abuse_shield.rule.protocol_error_flood.blocked
-abuse_shield.rule.compression_error_flood.matched
-abuse_shield.rule.pure_attack.matched
-abuse_shield.rule.pure_attack.blocked
-abuse_shield.rule.conn_rate_flood.matched
-...
-```
-
-### HTTP/2 Error Metrics
-
-Per-error-code counters:
-
-| Metric | Error Code | Type | Description |
-|--------|------------|------|-------------|
-| `h2_error.0x00` | NO_ERROR | counter | Graceful shutdown |
-| `h2_error.0x01` | PROTOCOL_ERROR | counter | Protocol violation (Client) |
-| `h2_error.0x02` | INTERNAL_ERROR | counter | Internal error (Server) |
-| `h2_error.0x03` | FLOW_CONTROL_ERROR | counter | Flow control violation (Client) |
-| `h2_error.0x04` | SETTINGS_TIMEOUT | counter | Settings ACK timeout (Client) |
-| `h2_error.0x05` | STREAM_CLOSED | counter | Frame on closed stream (Client) |
-| `h2_error.0x06` | FRAME_SIZE_ERROR | counter | Invalid frame size (Client) |
-| `h2_error.0x07` | REFUSED_STREAM | counter | Stream refused (Server) |
-| `h2_error.0x08` | CANCEL | counter | Stream cancelled (Client) |
-| `h2_error.0x09` | COMPRESSION_ERROR | counter | HPACK error (Client) |
-| `h2_error.0x0a` | CONNECT_ERROR | counter | CONNECT failed |
-| `h2_error.0x0b` | ENHANCE_YOUR_CALM | counter | Rate limit (Server) |
-| `h2_error.0x0c` | INADEQUATE_SECURITY | counter | TLS error (Server) |
-| `h2_error.0x0d` | HTTP_1_1_REQUIRED | counter | Use HTTP/1.1 (Server) |
-
-Aggregate counters:
+These ATS stats are exposed via `traffic_ctl metric get abuse_shield.*`:
 
 | Metric | Type | Description |
 |--------|------|-------------|
+| `rules.matched` | counter | Total times any rule filter condition was true |
+| `actions.blocked` | counter | Total times block action executed (IP added to block list) |
+| `actions.closed` | counter | Total times close action executed (connection shutdown) |
+| `actions.logged` | counter | Total times log action executed |
+| `connections.rejected` | counter | Connections rejected at VCONN_START (previously blocked IPs) |
+
+**Example:**
+```bash
+traffic_ctl metric get abuse_shield.rules.matched
+traffic_ctl metric get abuse_shield.actions.blocked
+traffic_ctl metric get abuse_shield.connections.rejected
+```
+
+### Planned Metrics (Phase 2)
+
+Per-rule counters (dynamic, one set for each rule defined in config):
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `rule.<name>.matched` | counter | Times this specific rule matched |
+| `rule.<name>.blocked` | counter | Times block action executed for this rule |
+
+Per HTTP/2 error code counters:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `h2_error.0x01` | counter | PROTOCOL_ERROR count |
+| `h2_error.0x09` | counter | COMPRESSION_ERROR count |
 | `h2_error.client_total` | counter | Sum of all client-caused errors |
 | `h2_error.server_total` | counter | Sum of all server-caused errors |
-| `h2_error.total` | counter | Sum of all H2 errors |
-
-### Action Totals
-
-Aggregate action counters across all rules:
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `actions.blocked` | counter | Total IPs added to block list |
-| `actions.closed` | counter | Total connections closed |
-| `actions.downgraded` | counter | Total connections downgraded to HTTP/1.1 |
-| `actions.logged` | counter | Total events logged |
 
 ### Tracker (Udi Table) Metrics
 
@@ -599,6 +575,8 @@ Aggregate action counters across all rules:
 | `tracker.lookups` | counter | Total hash table lookups |
 | `tracker.lookup_hits` | counter | Lookups where IP was found |
 | `tracker.lookup_misses` | counter | Lookups where IP was not found |
+| `tracker.last_reset` | gauge | Epoch timestamp of last reset (or startup) |
+| `tracker.seconds_since_reset` | gauge | Seconds elapsed since last reset (or startup) |
 
 ### Block List Metrics
 
@@ -679,6 +657,7 @@ rate(abuse_shield_tracker_contests_won[1m]) / rate(abuse_shield_tracker_contests
 - Trusted IP bypass (from separate file)
 - YAML config with dynamic reload
 - Data dump via plugin message
+- Reset metrics via plugin message (zero table-level metrics: contests, evictions)
 - Metrics
 
 **Testing:**

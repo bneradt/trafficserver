@@ -31,6 +31,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <shared_mutex>
@@ -116,7 +117,8 @@ public:
       get_score_(std::move(get_score)),
       set_score_(std::move(set_score)),
       is_empty_(is_empty ? std::move(is_empty) : [this](Slot const &s) { return get_score_(s) == 0; }),
-      clear_slot_(clear_slot ? std::move(clear_slot) : [](Slot &s) { s.clear(); })
+      clear_slot_(clear_slot ? std::move(clear_slot) : [](Slot &s) { s.clear(); }),
+      last_reset_time_(std::chrono::system_clock::now())
   {
   }
 
@@ -290,6 +292,45 @@ public:
   }
 
   /**
+   * Reset table-level metrics to zero.
+   *
+   * This resets the metrics (contests, contests_won, evictions) and updates
+   * the reset timestamp. It does NOT modify any entries in the table.
+   */
+  void
+  reset_metrics()
+  {
+    metric_contests_.store(0, std::memory_order_relaxed);
+    metric_contests_won_.store(0, std::memory_order_relaxed);
+    metric_evictions_.store(0, std::memory_order_relaxed);
+    last_reset_time_ = std::chrono::system_clock::now();
+  }
+
+  /**
+   * Get the timestamp of the last reset (or table creation).
+   *
+   * @return Time point of last reset or construction
+   */
+  std::chrono::system_clock::time_point
+  last_reset_time() const
+  {
+    return last_reset_time_;
+  }
+
+  /**
+   * Get the number of seconds since last reset (or table creation).
+   *
+   * @return Seconds since last reset
+   */
+  uint64_t
+  seconds_since_reset() const
+  {
+    auto now     = std::chrono::system_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_reset_time_);
+    return static_cast<uint64_t>(elapsed.count());
+  }
+
+  /**
    * Dump all entries to a string (for debugging).
    *
    * @param format_slot Optional function to format each slot
@@ -321,9 +362,9 @@ private:
    * Partition - Contains a portion of the hash table with its own lock.
    */
   struct Partition {
-    std::unordered_map<Key, size_t, Hash> lookup;       ///< Key -> slot index
-    mutable ts::shared_mutex              mutex;        ///< Partition lock
-    std::atomic<size_t>                   contest_ptr;  ///< Contest pointer for this partition
+    std::unordered_map<Key, size_t, Hash> lookup;      ///< Key -> slot index
+    mutable ts::shared_mutex              mutex;       ///< Partition lock
+    std::atomic<size_t>                   contest_ptr; ///< Contest pointer for this partition
 
     Partition() : contest_ptr(0) {}
   };
@@ -366,7 +407,7 @@ private:
 
     auto [slot_start, slot_end] = slot_range_for_partition(part_idx);
     if (slot_start >= slot_end) {
-      return nullptr;  // No slots for this partition
+      return nullptr; // No slots for this partition
     }
 
     size_t num_slots_in_partition = slot_end - slot_start;
@@ -403,9 +444,9 @@ private:
     }
   }
 
-  std::vector<Slot>                    slots_;                ///< Fixed-size slot array
-  std::array<Partition, NumPartitions> partitions_;           ///< Partitioned hash table
-  size_t                               slots_per_partition_;  ///< Slots per partition
+  std::vector<Slot>                    slots_;               ///< Fixed-size slot array
+  std::array<Partition, NumPartitions> partitions_;          ///< Partitioned hash table
+  size_t                               slots_per_partition_; ///< Slots per partition
 
   // Accessors
   get_key_fn    get_key_;
@@ -419,6 +460,9 @@ private:
   std::atomic<uint64_t> metric_contests_{0};
   std::atomic<uint64_t> metric_contests_won_{0};
   std::atomic<uint64_t> metric_evictions_{0};
+
+  // Timestamp of last reset (or construction)
+  std::chrono::system_clock::time_point last_reset_time_;
 };
 
-}  // namespace ts
+} // namespace ts

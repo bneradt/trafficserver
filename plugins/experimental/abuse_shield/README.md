@@ -120,6 +120,11 @@ Dump tracked IPs:
 traffic_ctl plugin msg abuse_shield.dump
 ```
 
+Reset table metrics (contests, evictions) without removing tracked IPs:
+```bash
+traffic_ctl plugin msg abuse_shield.reset
+```
+
 Enable/disable:
 ```bash
 traffic_ctl plugin msg abuse_shield.enabled 1
@@ -142,11 +147,15 @@ Create `abuse_shield_trusted.txt` with one IP or CIDR per line:
 
 ## Metrics
 
+View metrics with `traffic_ctl metric get abuse_shield.*`:
+
 | Metric | Description |
 |--------|-------------|
-| `abuse_shield.slots_used` | Number of IPs currently tracked |
-| `abuse_shield.blocked_count` | Total IPs blocked |
-| `abuse_shield.rules_matched` | Rules matched per rule name |
+| `abuse_shield.rules.matched` | Total times any rule filter condition was true |
+| `abuse_shield.actions.blocked` | Total times block action executed |
+| `abuse_shield.actions.closed` | Total times close action executed |
+| `abuse_shield.actions.logged` | Total times log action executed |
+| `abuse_shield.connections.rejected` | Connections rejected from previously blocked IPs |
 
 ## Memory Usage
 

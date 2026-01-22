@@ -49,7 +49,7 @@ struct StringSlot {
   }
 };
 
-auto str_get_key   = [](const StringSlot &s) -> const std::string & { return s.key; };
+auto str_get_key   = [](const StringSlot &s) -> const std::string   &{ return s.key; };
 auto str_set_key   = [](StringSlot &s, const std::string &k) { s.key = k; };
 auto str_get_score = [](const StringSlot &s) -> uint32_t { return s.score.load(std::memory_order_relaxed); };
 auto str_set_score = [](StringSlot &s, uint32_t v) { s.score.store(v, std::memory_order_relaxed); };
@@ -82,7 +82,7 @@ struct IPSlot {
   }
 };
 
-auto ip_get_key   = [](const IPSlot &s) -> const swoc::IPAddr & { return s.addr; };
+auto ip_get_key   = [](const IPSlot &s) -> const swoc::IPAddr   &{ return s.addr; };
 auto ip_set_key   = [](IPSlot &s, const swoc::IPAddr &k) { s.addr = k; };
 auto ip_get_score = [](const IPSlot &s) -> uint32_t { return s.score.load(std::memory_order_relaxed); };
 auto ip_set_score = [](IPSlot &s, uint32_t v) { s.score.store(v, std::memory_order_relaxed); };
@@ -90,7 +90,7 @@ auto ip_is_empty  = [](const IPSlot &s) -> bool { return s.empty(); };
 
 using IPTable = ts::UdiTable<swoc::IPAddr, IPSlot, std::hash<swoc::IPAddr>, 4>;
 
-}  // namespace
+} // namespace
 
 // ============================================================================
 // String key tests
@@ -316,7 +316,7 @@ TEST_CASE("UdiTable IP key basic operations", "[UdiTable][ip]")
   SECTION("mixed IPv4 and IPv6")
   {
     swoc::IPAddr ipv4{"192.168.1.100"};
-    swoc::IPAddr ipv6{"::ffff:192.168.1.100"};  // IPv4-mapped IPv6
+    swoc::IPAddr ipv6{"::ffff:192.168.1.100"}; // IPv4-mapped IPv6
 
     table.record(ipv4, 5);
     table.record(ipv6, 10);
@@ -376,7 +376,7 @@ TEST_CASE("UdiTable IP key slot data", "[UdiTable][ip]")
     REQUIRE(found != nullptr);
     REQUIRE(found->error_count.load() == 5);
     REQUIRE(found->success_count.load() == 2);
-    REQUIRE(found->score.load() == 6);  // 1 initial + 5 from errors
+    REQUIRE(found->score.load() == 6); // 1 initial + 5 from errors
   }
 }
 

@@ -199,6 +199,23 @@ Dump all currently tracked IPs and their statistics to the error log::
 
     traffic_ctl plugin msg abuse_shield.dump
 
+The dump output includes:
+
+* Last reset timestamp and age (e.g., "2026-01-21 14:32:05 (2h 15m ago)")
+* Slots used vs total
+* Contest statistics (total contests, wins)
+* Eviction count
+* Per-IP details: client errors, server errors, successes, score, block status
+
+Reset Metrics
+-------------
+
+Reset the table-level metrics (contests, evictions) without removing tracked IPs::
+
+    traffic_ctl plugin msg abuse_shield.reset
+
+This is useful for getting clean metrics after a known event or for periodic monitoring.
+
 Enable/Disable
 --------------
 
@@ -206,6 +223,32 @@ Enable or disable the plugin at runtime::
 
     traffic_ctl plugin msg abuse_shield.enabled 1
     traffic_ctl plugin msg abuse_shield.enabled 0
+
+Metrics
+=======
+
+The plugin exposes ATS statistics for monitoring. View with::
+
+    traffic_ctl metric get abuse_shield.*
+
+Available metrics:
+
+================================= ===========================================================
+Metric                            Description
+================================= ===========================================================
+``abuse_shield.rules.matched``    Total times any rule filter condition was true
+``abuse_shield.actions.blocked``  Total times block action executed (IP added to block list)
+``abuse_shield.actions.closed``   Total times close action executed (connection shutdown)
+``abuse_shield.actions.logged``   Total times log action executed
+``abuse_shield.connections.rejected`` Connections rejected at start (previously blocked IPs)
+================================= ===========================================================
+
+These metrics are useful for:
+
+* Monitoring attack detection in production
+* Alerting on sudden spikes in blocked IPs
+* Verifying rules are triggering as expected
+* Measuring the effectiveness of abuse protection
 
 Example Configuration
 =====================

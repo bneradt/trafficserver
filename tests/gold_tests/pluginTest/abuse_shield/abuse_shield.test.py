@@ -33,29 +33,30 @@ ts.Disk.records_config.update({
 
 # Create the plugin config file
 ts.Disk.File(ts.Variables.CONFIGDIR + "/abuse_shield.yaml", id="abuse_shield_yaml", typename="ats:config")
-ts.Disk.abuse_shield_yaml.AddLines([
-    "tracker:",
-    "  slots: 1000",
-    "  partitions: 8",
-    "",
-    "blocking:",
-    "  duration_seconds: 60",
-    "",
-    "rules:",
-    "  - name: \"test_error_rule\"",
-    "    filter:",
-    "      h2_error: 0x01",
-    "      min_count: 5",
-    "    action: [log, block]",
-    "",
-    "  - name: \"pure_attack_rule\"",
-    "    filter:",
-    "      min_client_errors: 10",
-    "      max_successes: 0",
-    "    action: [log, block, close]",
-    "",
-    "enabled: true",
-])
+ts.Disk.abuse_shield_yaml.AddLines(
+    [
+        "tracker:",
+        "  slots: 1000",
+        "  partitions: 8",
+        "",
+        "blocking:",
+        "  duration_seconds: 60",
+        "",
+        "rules:",
+        "  - name: \"test_error_rule\"",
+        "    filter:",
+        "      h2_error: 0x01",
+        "      min_count: 5",
+        "    action: [log, block]",
+        "",
+        "  - name: \"pure_attack_rule\"",
+        "    filter:",
+        "      min_client_errors: 10",
+        "      max_successes: 0",
+        "    action: [log, block, close]",
+        "",
+        "enabled: true",
+    ])
 
 # Create empty trusted IPs file
 ts.Disk.File(ts.Variables.CONFIGDIR + "/abuse_shield_trusted.txt", id="trusted_txt", typename="ats:config")
@@ -69,8 +70,7 @@ ts.Disk.plugin_config.AddLine('abuse_shield.so abuse_shield.yaml')
 
 # Verify the plugin loads
 ts.Disk.traffic_out.Content = Testers.ContainsExpression(
-    r"abuse_shield.*Plugin initialized with 1000 slots, 2 rules",
-    "Verify the abuse_shield plugin loaded successfully.")
+    r"abuse_shield.*Plugin initialized with 1000 slots, 2 rules", "Verify the abuse_shield plugin loaded successfully.")
 
 #
 # Test 1: Verify the plugin starts with configured values
@@ -82,8 +82,7 @@ tr.Processes.Default.StartBefore(ts)
 tr.StillRunningAfter = ts
 
 ts.Disk.traffic_out.Content += Testers.ContainsExpression(
-    "Created IP tracker with 1000 slots and 8 partitions",
-    "Verify abuse_shield created tracker with correct slots and partitions.")
+    "Created IP tracker with 1000 slots and 8 partitions", "Verify abuse_shield created tracker with correct slots and partitions.")
 
 #
 # Test 2: Verify the 'enabled' setting can be changed via traffic_ctl
@@ -101,8 +100,7 @@ await_enabled = tr.Processes.Process('await_enabled', 'sleep 30')
 await_enabled.Ready = When.FileContains(ts.Disk.traffic_out.Name, "Plugin disabled")
 tr.Processes.Default.StartBefore(await_enabled)
 
-ts.Disk.traffic_out.Content += Testers.ContainsExpression(
-    "Plugin disabled", "Verify abuse_shield received the disabled command.")
+ts.Disk.traffic_out.Content += Testers.ContainsExpression("Plugin disabled", "Verify abuse_shield received the disabled command.")
 
 #
 # Test 3: Re-enable the plugin
@@ -120,8 +118,7 @@ await_reenable = tr.Processes.Process('await_reenable', 'sleep 30')
 await_reenable.Ready = When.FileContains(ts.Disk.traffic_out.Name, "Plugin enabled")
 tr.Processes.Default.StartBefore(await_reenable)
 
-ts.Disk.traffic_out.Content += Testers.ContainsExpression(
-    "Plugin enabled", "Verify abuse_shield received the enabled command.")
+ts.Disk.traffic_out.Content += Testers.ContainsExpression("Plugin enabled", "Verify abuse_shield received the enabled command.")
 
 #
 # Test 4: Verify dump command (should show empty table initially)
@@ -139,8 +136,7 @@ await_dump = tr.Processes.Process('await_dump', 'sleep 30')
 await_dump.Ready = When.FileContains(ts.Disk.traffic_out.Name, "# abuse_shield dump")
 tr.Processes.Default.StartBefore(await_dump)
 
-ts.Disk.traffic_out.Content += Testers.ContainsExpression(
-    "# abuse_shield dump", "Verify abuse_shield dump command works.")
+ts.Disk.traffic_out.Content += Testers.ContainsExpression("# abuse_shield dump", "Verify abuse_shield dump command works.")
 
 #
 # Test 5: Verify reload command

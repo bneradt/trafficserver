@@ -1,5 +1,5 @@
 # Abuse Shield - Trusted IPs
-# 
+#
 # IPs in this file are never blocked or tracked.
 # One IP or CIDR per line. Lines starting with # are comments.
 

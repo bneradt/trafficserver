@@ -47,6 +47,15 @@ DbgCtl dbg_ctl{"abuse_shield"};
 // Plugin name for logging and metrics
 constexpr char PLUGIN_NAME[] = "abuse_shield";
 
+// ============================================================================
+// Metrics (ATS stats)
+// ============================================================================
+int stat_rules_matched        = -1; // Total times any rule matched
+int stat_actions_blocked      = -1; // Total block actions executed
+int stat_actions_closed       = -1; // Total close actions executed
+int stat_actions_logged       = -1; // Total log actions executed
+int stat_connections_rejected = -1; // Connections rejected at VCONN_START (blocked IPs)
+
 // Helper to convert IPAddr to string
 std::string
 ip_to_string(const swoc::IPAddr &ip)
@@ -57,9 +66,9 @@ ip_to_string(const swoc::IPAddr &ip)
 }
 
 // Default configuration values
-constexpr size_t DEFAULT_SLOTS           = 50000;
-constexpr size_t DEFAULT_PARTITIONS      = 64;
-constexpr int DEFAULT_BLOCK_DURATION_SEC = 300;
+constexpr size_t DEFAULT_SLOTS              = 50000;
+constexpr size_t DEFAULT_PARTITIONS         = 64;
+constexpr int    DEFAULT_BLOCK_DURATION_SEC = 300;
 
 // ============================================================================
 // Action types
@@ -89,19 +98,19 @@ add_action(ActionSet set, Action action)
 // Rule configuration
 // ============================================================================
 struct RuleFilter {
-  int h2_error_code{-1};        // Specific H2 error code (-1 = any)
-  int h2_min_count{0};          // Minimum count of h2_error_code
-  int h2_min_client_errors{0};  // Minimum total client errors
-  int h2_min_server_errors{0};  // Minimum total server errors
-  int max_successes{-1};        // Maximum successes (-1 = unlimited)
-  int max_conn_rate{0};         // Max connections per window
-  int max_req_rate{0};          // Max requests per window
+  int h2_error_code{-1};       // Specific H2 error code (-1 = any)
+  int h2_min_count{0};         // Minimum count of h2_error_code
+  int h2_min_client_errors{0}; // Minimum total client errors
+  int h2_min_server_errors{0}; // Minimum total server errors
+  int max_successes{-1};       // Maximum successes (-1 = unlimited)
+  int max_conn_rate{0};        // Max connections per window
+  int max_req_rate{0};         // Max requests per window
 };
 
 struct Rule {
   std::string name;
-  RuleFilter filter;
-  ActionSet actions{0};
+  RuleFilter  filter;
+  ActionSet   actions{0};
 };
 
 // ============================================================================
@@ -110,10 +119,10 @@ struct Rule {
 struct Config {
   size_t slots{DEFAULT_SLOTS};
   size_t partitions{DEFAULT_PARTITIONS};
-  int block_duration_sec{DEFAULT_BLOCK_DURATION_SEC};
-  int window_seconds{60};  // Default window period: 60 seconds
+  int    block_duration_sec{DEFAULT_BLOCK_DURATION_SEC};
+  int    window_seconds{60}; // Default window period: 60 seconds
 
-  std::vector<Rule> rules;
+  std::vector<Rule>   rules;
   swoc::IPSpace<bool> trusted_ips;
 
   bool enabled{true};
@@ -124,8 +133,8 @@ struct Config {
 
 // Global state
 std::unique_ptr<abuse_shield::IPTracker> g_tracker;
-std::shared_ptr<Config> g_config;
-std::shared_mutex g_config_mutex;  // Protects g_config pointer swaps
+std::shared_ptr<Config>                  g_config;
+std::shared_mutex                        g_config_mutex; // Protects g_config pointer swaps
 
 // ============================================================================
 // Configuration parsing
@@ -210,9 +219,9 @@ parse_config(const std::string &path)
 
     // IP reputation table settings
     if (root["ip_reputation"]) {
-      auto ip_rep             = root["ip_reputation"];
-      config->slots           = ip_rep["slots"].as<size_t>(DEFAULT_SLOTS);
-      config->window_seconds  = ip_rep["window_seconds"].as<int>(60);
+      auto ip_rep            = root["ip_reputation"];
+      config->slots          = ip_rep["slots"].as<size_t>(DEFAULT_SLOTS);
+      config->window_seconds = ip_rep["window_seconds"].as<int>(60);
     }
 
     // Blocking settings
@@ -234,14 +243,14 @@ parse_config(const std::string &path)
         rule.name = rule_node["name"].as<std::string>("");
 
         if (rule_node["filter"]) {
-          auto filter_node                = rule_node["filter"];
-          rule.filter.h2_error_code       = filter_node["h2_error"].as<int>(-1);
-          rule.filter.h2_min_count        = filter_node["min_count"].as<int>(0);
+          auto filter_node                 = rule_node["filter"];
+          rule.filter.h2_error_code        = filter_node["h2_error"].as<int>(-1);
+          rule.filter.h2_min_count         = filter_node["min_count"].as<int>(0);
           rule.filter.h2_min_client_errors = filter_node["min_client_errors"].as<int>(0);
           rule.filter.h2_min_server_errors = filter_node["min_server_errors"].as<int>(0);
-          rule.filter.max_successes       = filter_node["max_successes"].as<int>(-1);
-          rule.filter.max_conn_rate       = filter_node["max_conn_rate"].as<int>(0);
-          rule.filter.max_req_rate        = filter_node["max_req_rate"].as<int>(0);
+          rule.filter.max_successes        = filter_node["max_successes"].as<int>(-1);
+          rule.filter.max_conn_rate        = filter_node["max_conn_rate"].as<int>(0);
+          rule.filter.max_req_rate         = filter_node["max_req_rate"].as<int>(0);
         }
 
         if (rule_node["action"]) {
@@ -257,8 +266,8 @@ parse_config(const std::string &path)
     config->enabled = root["enabled"].as<bool>(true);
 
   } catch (const YAML::Exception &e) {
-    TSError("[%s] YAML parse error in %s at line %d, column %d: %s",
-            PLUGIN_NAME, path.c_str(), e.mark.line + 1, e.mark.column + 1, e.what());
+    TSError("[%s] YAML parse error in %s at line %d, column %d: %s", PLUGIN_NAME, path.c_str(), e.mark.line + 1, e.mark.column + 1,
+            e.what());
     return nullptr;
   }
 
@@ -306,14 +315,14 @@ rule_matches(const Rule &rule, const abuse_shield::IPSlot &slot)
   // Check connection rate
   if (filter.max_conn_rate > 0) {
     if (slot.conn_count.load(std::memory_order_relaxed) < static_cast<uint32_t>(filter.max_conn_rate)) {
-      return false;  // Under limit, rule doesn't match
+      return false; // Under limit, rule doesn't match
     }
   }
 
   // Check request rate
   if (filter.max_req_rate > 0) {
     if (slot.req_count.load(std::memory_order_relaxed) < static_cast<uint32_t>(filter.max_req_rate)) {
-      return false;  // Under limit, rule doesn't match
+      return false; // Under limit, rule doesn't match
     }
   }
 
@@ -338,8 +347,8 @@ evaluate_rules(const abuse_shield::IPSlot &slot, const Config &config)
 
 // Helper struct for error info
 struct H2Errors {
-  uint32_t cls{0};   // Error class (1 = connection, 2 = stream)
-  uint64_t code{0};  // HTTP/2 error code
+  uint32_t cls{0};  // Error class (1 = connection, 2 = stream)
+  uint64_t code{0}; // HTTP/2 error code
 };
 
 // Check if error code is typically client-caused
@@ -348,8 +357,8 @@ is_client_caused_error(uint64_t error_code)
 {
   // Client errors: PROTOCOL_ERROR(1), FLOW_CONTROL_ERROR(3), SETTINGS_TIMEOUT(4),
   //                STREAM_CLOSED(5), FRAME_SIZE_ERROR(6), CANCEL(8), COMPRESSION_ERROR(9)
-  return (error_code == 1 || error_code == 3 || error_code == 4 ||
-          error_code == 5 || error_code == 6 || error_code == 8 || error_code == 9);
+  return (error_code == 1 || error_code == 3 || error_code == 4 || error_code == 5 || error_code == 6 || error_code == 8 ||
+          error_code == 9);
 }
 
 // Called at connection start to block known abusive IPs
@@ -397,6 +406,7 @@ handle_vconn_start(TSCont /* contp */, TSEvent /* event */, void *edata)
   if (slot && slot->is_blocked()) {
     // IP is blocked - shutdown the connection
     Dbg(dbg_ctl, "Blocking connection from %s (blocked IP)", ip_to_string(ip).c_str());
+    TSStatIntIncrement(stat_connections_rejected, 1);
 
     int fd = TSVConnFdGet(vconn);
     if (fd >= 0) {
@@ -436,8 +446,8 @@ handle_txn_close(TSCont /* contp */, TSEvent /* event */, void *edata)
   }
 
   // Get client IP from session
-  TSHttpSsn ssn   = TSHttpTxnSsnGet(txnp);
-  TSVConn vconn   = TSHttpSsnClientVConnGet(ssn);
+  TSHttpSsn       ssn         = TSHttpTxnSsnGet(txnp);
+  TSVConn         vconn       = TSHttpSsnClientVConnGet(ssn);
   sockaddr const *client_addr = TSNetVConnRemoteAddrGet(vconn);
   if (!client_addr) {
     TSHttpTxnReenable(txnp, TS_EVENT_HTTP_CONTINUE);
@@ -454,15 +464,15 @@ handle_txn_close(TSCont /* contp */, TSEvent /* event */, void *edata)
   }
 
   // Get HTTP/2 errors
-  H2Errors received_error;  // Client received (stream error)
-  H2Errors sent_error;      // Client sent (connection error)
+  H2Errors received_error; // Client received (stream error)
+  H2Errors sent_error;     // Client sent (connection error)
   TSHttpTxnClientReceivedErrorGet(txnp, &received_error.cls, &received_error.code);
   TSHttpTxnClientSentErrorGet(txnp, &sent_error.cls, &sent_error.code);
 
   // Check for HTTP/2 errors
-  bool has_error       = false;
-  uint64_t error_code  = 0;
-  bool is_client_error = true;
+  bool     has_error       = false;
+  uint64_t error_code      = 0;
+  bool     is_client_error = true;
 
   // Stream-level error (class 2)
   if (received_error.cls == 2 && received_error.code != 0) {
@@ -490,29 +500,30 @@ handle_txn_close(TSCont /* contp */, TSEvent /* event */, void *edata)
       ActionSet actions = evaluate_rules(*slot, *config);
 
       if (actions != 0) {
+        TSStatIntIncrement(stat_rules_matched, 1);
+
         // Log if requested
         if (has_action(actions, Action::LOG)) {
-          TSError("[%s] IP=%s client_errors=%u server_errors=%u successes=%u score=%u h2_error=0x%02x",
-                  PLUGIN_NAME, ip_to_string(ip).c_str(),
-                  slot->client_errors.load(std::memory_order_relaxed),
-                  slot->server_errors.load(std::memory_order_relaxed),
-                  slot->successes.load(std::memory_order_relaxed),
-                  slot->score.load(std::memory_order_relaxed),
-                  static_cast<unsigned>(error_code));
+          TSStatIntIncrement(stat_actions_logged, 1);
+          TSError("[%s] IP=%s client_errors=%u server_errors=%u successes=%u score=%u h2_error=0x%02x", PLUGIN_NAME,
+                  ip_to_string(ip).c_str(), slot->client_errors.load(std::memory_order_relaxed),
+                  slot->server_errors.load(std::memory_order_relaxed), slot->successes.load(std::memory_order_relaxed),
+                  slot->score.load(std::memory_order_relaxed), static_cast<unsigned>(error_code));
         }
 
         // Block if requested
         if (has_action(actions, Action::BLOCK)) {
-          uint64_t block_until = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                   std::chrono::steady_clock::now().time_since_epoch())
-                                   .count() +
-                                 (config->block_duration_sec * 1000);
+          TSStatIntIncrement(stat_actions_blocked, 1);
+          uint64_t block_until =
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count() +
+            (config->block_duration_sec * 1000);
           slot->block_until(block_until);
           Dbg(dbg_ctl, "Blocked IP %s for %d seconds", ip_to_string(ip).c_str(), config->block_duration_sec);
         }
 
         // Close connection if requested
         if (has_action(actions, Action::CLOSE)) {
+          TSStatIntIncrement(stat_actions_closed, 1);
           int fd = TSVConnFdGet(vconn);
           if (fd >= 0) {
             shutdown(fd, SHUT_RDWR);
@@ -524,7 +535,7 @@ handle_txn_close(TSCont /* contp */, TSEvent /* event */, void *edata)
   } else {
     // No error - check for success
     TSMBuffer bufp;
-    TSMLoc hdr_loc;
+    TSMLoc    hdr_loc;
     if (TSHttpTxnClientRespGet(txnp, &bufp, &hdr_loc) == TS_SUCCESS) {
       TSHttpStatus status = TSHttpHdrStatusGet(bufp, hdr_loc);
       TSHandleMLocRelease(bufp, TS_NULL_MLOC, hdr_loc);
@@ -569,7 +580,7 @@ handle_lifecycle_msg(TSCont /* contp */, TSEvent /* event */, void *edata)
 
     auto new_config = parse_config(config_path);
     if (new_config) {
-      new_config->config_path = config_path;  // Preserve config path for future reloads
+      new_config->config_path = config_path; // Preserve config path for future reloads
       std::unique_lock lock(g_config_mutex);
       g_config = new_config;
       TSError("[%s] Configuration reloaded successfully", PLUGIN_NAME);
@@ -581,9 +592,14 @@ handle_lifecycle_msg(TSCont /* contp */, TSEvent /* event */, void *edata)
       std::string dump = g_tracker->dump();
       TSError("[%s] Dump:\n%s", PLUGIN_NAME, dump.c_str());
     }
+  } else if (tag == "abuse_shield.reset") {
+    if (g_tracker) {
+      g_tracker->reset_metrics();
+      TSError("[%s] Metrics reset", PLUGIN_NAME);
+    }
   } else if (tag == "abuse_shield.enabled") {
     if (msg->data_size > 0) {
-      bool enabled = (static_cast<const char *>(msg->data)[0] == '1');
+      bool             enabled = (static_cast<const char *>(msg->data)[0] == '1');
       std::unique_lock lock(g_config_mutex);
       if (g_config) {
         g_config->enabled = enabled;
@@ -595,7 +611,7 @@ handle_lifecycle_msg(TSCont /* contp */, TSEvent /* event */, void *edata)
   return TS_SUCCESS;
 }
 
-}  // anonymous namespace
+} // anonymous namespace
 
 // ============================================================================
 // Plugin initialization
@@ -640,6 +656,18 @@ TSPluginInit(int argc, const char *argv[])
   // Create the IP tracker (uses fixed 64 partitions from UdiTable template)
   g_tracker = std::make_unique<abuse_shield::IPTracker>(g_config->slots);
   Dbg(dbg_ctl, "Created IP tracker with %zu slots", g_config->slots);
+
+  // Create stats
+  stat_rules_matched =
+    TSStatCreate("abuse_shield.rules.matched", TS_RECORDDATATYPE_INT, TS_STAT_NON_PERSISTENT, TS_STAT_SYNC_COUNT);
+  stat_actions_blocked =
+    TSStatCreate("abuse_shield.actions.blocked", TS_RECORDDATATYPE_INT, TS_STAT_NON_PERSISTENT, TS_STAT_SYNC_COUNT);
+  stat_actions_closed =
+    TSStatCreate("abuse_shield.actions.closed", TS_RECORDDATATYPE_INT, TS_STAT_NON_PERSISTENT, TS_STAT_SYNC_COUNT);
+  stat_actions_logged =
+    TSStatCreate("abuse_shield.actions.logged", TS_RECORDDATATYPE_INT, TS_STAT_NON_PERSISTENT, TS_STAT_SYNC_COUNT);
+  stat_connections_rejected =
+    TSStatCreate("abuse_shield.connections.rejected", TS_RECORDDATATYPE_INT, TS_STAT_NON_PERSISTENT, TS_STAT_SYNC_COUNT);
 
   // Register hooks
   TSCont vconn_cont = TSContCreate(handle_vconn_start, nullptr);

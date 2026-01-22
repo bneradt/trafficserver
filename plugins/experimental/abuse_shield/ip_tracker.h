@@ -22,6 +22,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 
@@ -48,22 +49,22 @@ struct IPSlot {
   swoc::IPAddr addr;
 
   // Counters - lock-free atomic operations
-  std::atomic<uint32_t> client_errors{0};  ///< Client-caused HTTP/2 errors
-  std::atomic<uint32_t> server_errors{0};  ///< Server-caused HTTP/2 errors
-  std::atomic<uint32_t> successes{0};      ///< Successful requests (2xx)
-  std::atomic<uint32_t> score{0};          ///< Udi algorithm contest score
+  std::atomic<uint32_t> client_errors{0}; ///< Client-caused HTTP/2 errors
+  std::atomic<uint32_t> server_errors{0}; ///< Server-caused HTTP/2 errors
+  std::atomic<uint32_t> successes{0};     ///< Successful requests (2xx)
+  std::atomic<uint32_t> score{0};         ///< Udi algorithm contest score
 
   // Per HTTP/2 error code counts
   std::atomic<uint16_t> h2_error_counts[NUM_H2_ERROR_CODES]{};
 
   // Rate limiting counters
-  std::atomic<uint32_t> conn_count{0};  ///< Connections in current window
-  std::atomic<uint32_t> req_count{0};   ///< Requests in current window
+  std::atomic<uint32_t> conn_count{0}; ///< Connections in current window
+  std::atomic<uint32_t> req_count{0};  ///< Requests in current window
 
   // Timing
-  std::atomic<uint64_t> window_start{0};   ///< Start of rate window (epoch ms)
-  std::atomic<uint64_t> last_seen{0};      ///< Last activity timestamp (epoch ms)
-  std::atomic<uint64_t> blocked_until{0};  ///< Block expiration (epoch ms, 0 = not blocked)
+  std::atomic<uint64_t> window_start{0};  ///< Start of rate window (epoch ms)
+  std::atomic<uint64_t> last_seen{0};     ///< Last activity timestamp (epoch ms)
+  std::atomic<uint64_t> blocked_until{0}; ///< Block expiration (epoch ms, 0 = not blocked)
 
   /// Clear all data in this slot
   void clear();
@@ -193,6 +194,40 @@ public:
   }
 
   /**
+   * Reset table-level metrics to zero.
+   *
+   * This resets the metrics (contests, contests_won, evictions) and updates
+   * the reset timestamp. It does NOT modify any tracked IPs or their counters.
+   */
+  void
+  reset_metrics()
+  {
+    table_->reset_metrics();
+  }
+
+  /**
+   * Get the timestamp of the last reset (or tracker creation).
+   *
+   * @return Time point of last reset or construction
+   */
+  std::chrono::system_clock::time_point
+  last_reset_time() const
+  {
+    return table_->last_reset_time();
+  }
+
+  /**
+   * Get the number of seconds since last reset (or tracker creation).
+   *
+   * @return Seconds since last reset
+   */
+  uint64_t
+  seconds_since_reset() const
+  {
+    return table_->seconds_since_reset();
+  }
+
+  /**
    * Dump all tracked IPs to a string (for debugging).
    */
   std::string dump() const;
@@ -201,4 +236,4 @@ private:
   std::unique_ptr<Table> table_;
 };
 
-}  // namespace abuse_shield
+} // namespace abuse_shield
