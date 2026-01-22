@@ -41,31 +41,11 @@ namespace
 } // namespace
 
 // ============================================================================
-// IPSlot implementation
+// IPData implementation
 // ============================================================================
 
 void
-IPSlot::clear()
-{
-  addr = swoc::IPAddr{};
-  client_errors.store(0, std::memory_order_relaxed);
-  server_errors.store(0, std::memory_order_relaxed);
-  successes.store(0, std::memory_order_relaxed);
-  score.store(0, std::memory_order_relaxed);
-
-  for (auto &count : h2_error_counts) {
-    count.store(0, std::memory_order_relaxed);
-  }
-
-  conn_count.store(0, std::memory_order_relaxed);
-  req_count.store(0, std::memory_order_relaxed);
-  window_start.store(0, std::memory_order_relaxed);
-  last_seen.store(0, std::memory_order_relaxed);
-  blocked_until.store(0, std::memory_order_relaxed);
-}
-
-void
-IPSlot::record_h2_error(uint8_t error_code, bool is_client_error)
+IPData::record_h2_error(uint8_t error_code, bool is_client_error)
 {
   if (is_client_error) {
     client_errors.fetch_add(1, std::memory_order_relaxed);
@@ -77,49 +57,39 @@ IPSlot::record_h2_error(uint8_t error_code, bool is_client_error)
     h2_error_counts[error_code].fetch_add(1, std::memory_order_relaxed);
   }
 
-  score.fetch_add(1, std::memory_order_relaxed);
   last_seen.store(now_ms(), std::memory_order_relaxed);
 }
 
 void
-IPSlot::record_success()
+IPData::record_success()
 {
   successes.fetch_add(1, std::memory_order_relaxed);
-
-  // Decrement score (but don't go below 0)
-  uint32_t current = score.load(std::memory_order_relaxed);
-  while (current > 0) {
-    if (score.compare_exchange_weak(current, current - 1, std::memory_order_relaxed)) {
-      break;
-    }
-  }
-
   last_seen.store(now_ms(), std::memory_order_relaxed);
 }
 
 void
-IPSlot::record_connection()
+IPData::record_connection()
 {
   conn_count.fetch_add(1, std::memory_order_relaxed);
   last_seen.store(now_ms(), std::memory_order_relaxed);
 }
 
 void
-IPSlot::record_request()
+IPData::record_request()
 {
   req_count.fetch_add(1, std::memory_order_relaxed);
   last_seen.store(now_ms(), std::memory_order_relaxed);
 }
 
 bool
-IPSlot::is_blocked() const
+IPData::is_blocked() const
 {
   uint64_t until = blocked_until.load(std::memory_order_relaxed);
   return until > 0 && now_ms() < until;
 }
 
 void
-IPSlot::block_until(uint64_t until_ms)
+IPData::block_until(uint64_t until_ms)
 {
   blocked_until.store(until_ms, std::memory_order_relaxed);
 }
@@ -128,51 +98,28 @@ IPSlot::block_until(uint64_t until_ms)
 // IPTracker implementation
 // ============================================================================
 
-IPTracker::IPTracker(size_t num_slots)
-{
-  // Define accessor functions for UdiTable
-  auto get_key = [](const IPSlot &slot) -> const swoc::IPAddr & { return slot.addr; };
+IPTracker::IPTracker(size_t num_slots) : table_(std::make_unique<Table>(num_slots)) {}
 
-  auto set_key = [](IPSlot &slot, const swoc::IPAddr &ip) { slot.addr = ip; };
-
-  auto get_score = [](const IPSlot &slot) -> uint32_t { return slot.score.load(std::memory_order_relaxed); };
-
-  auto set_score = [](IPSlot &slot, uint32_t value) { slot.score.store(value, std::memory_order_relaxed); };
-
-  auto is_empty = [](const IPSlot &slot) -> bool { return slot.empty(); };
-
-  auto clear_slot = [](IPSlot &slot) { slot.clear(); };
-
-  table_ = std::make_unique<Table>(num_slots, get_key, set_key, get_score, set_score, is_empty, clear_slot);
-}
-
-IPSlot *
+IPTracker::IPDataPtr
 IPTracker::find(const swoc::IPAddr &ip)
 {
   return table_->find(ip);
 }
 
-const IPSlot *
+std::shared_ptr<const IPData>
 IPTracker::find(const swoc::IPAddr &ip) const
 {
   return table_->find(ip);
 }
 
-IPSlot *
+IPTracker::IPDataPtr
 IPTracker::record_event(const swoc::IPAddr &ip, int score_delta)
 {
-  IPSlot *slot = table_->record(ip, static_cast<uint32_t>(score_delta));
-  if (slot) {
-    slot->last_seen.store(now_ms(), std::memory_order_relaxed);
+  auto data = table_->process_event(ip, static_cast<uint32_t>(score_delta));
+  if (data) {
+    data->last_seen.store(now_ms(), std::memory_order_relaxed);
   }
-  return slot;
-}
-
-void
-IPTracker::record_success(const swoc::IPAddr &ip)
-{
-  // Use decrement which will evict if score reaches 0
-  table_->decrement(ip, 1);
+  return data;
 }
 
 namespace
@@ -217,18 +164,14 @@ namespace
 std::string
 IPTracker::dump() const
 {
-  auto format_slot = [](const IPSlot &slot) -> std::string {
-    if (slot.empty()) {
-      return "";
-    }
-
+  auto format_entry = [](const swoc::IPAddr &ip, uint32_t score, const IPDataPtr &data) -> std::string {
     swoc::LocalBufferWriter<64> ip_str;
-    ip_str.print("{}", slot.addr);
+    ip_str.print("{}", ip);
 
     std::ostringstream oss;
-    oss << ip_str.view() << "\t" << slot.client_errors.load(std::memory_order_relaxed) << "\t"
-        << slot.server_errors.load(std::memory_order_relaxed) << "\t" << slot.successes.load(std::memory_order_relaxed) << "\t"
-        << slot.score.load(std::memory_order_relaxed) << "\t" << slot.blocked_until.load(std::memory_order_relaxed) << "\n";
+    oss << ip_str.view() << "\t" << data->client_errors.load(std::memory_order_relaxed) << "\t"
+        << data->server_errors.load(std::memory_order_relaxed) << "\t" << data->successes.load(std::memory_order_relaxed) << "\t"
+        << score << "\t" << data->blocked_until.load(std::memory_order_relaxed) << "\n";
     return oss.str();
   };
 
@@ -245,7 +188,7 @@ IPTracker::dump() const
   header << "# evictions: " << evictions() << "\n";
   header << "# IP\tCLIENT_ERR\tSERVER_ERR\tSUCCESS\tSCORE\tBLOCKED_UNTIL\n";
 
-  return header.str() + table_->dump(format_slot);
+  return header.str() + table_->dump(format_entry);
 }
 
 } // namespace abuse_shield

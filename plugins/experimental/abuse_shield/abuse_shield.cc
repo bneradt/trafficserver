@@ -402,7 +402,7 @@ handle_vconn_start(TSCont /* contp */, TSEvent /* event */, void *edata)
   }
 
   // Check if IP is currently blocked
-  abuse_shield::IPSlot *slot = g_tracker->find(ip);
+  auto slot = g_tracker->find(ip);
   if (slot && slot->is_blocked()) {
     // IP is blocked - shutdown the connection
     Dbg(dbg_ctl, "Blocking connection from %s (blocked IP)", ip_to_string(ip).c_str());
@@ -492,7 +492,7 @@ handle_txn_close(TSCont /* contp */, TSEvent /* event */, void *edata)
 
   if (has_error) {
     // Record the error
-    abuse_shield::IPSlot *slot = g_tracker->record_event(ip, 1);
+    auto slot = g_tracker->record_event(ip, 1);
     if (slot) {
       slot->record_h2_error(static_cast<uint8_t>(error_code), is_client_error);
 
@@ -505,10 +505,10 @@ handle_txn_close(TSCont /* contp */, TSEvent /* event */, void *edata)
         // Log if requested
         if (has_action(actions, Action::LOG)) {
           TSStatIntIncrement(stat_actions_logged, 1);
-          TSError("[%s] IP=%s client_errors=%u server_errors=%u successes=%u score=%u h2_error=0x%02x", PLUGIN_NAME,
+          TSError("[%s] IP=%s client_errors=%u server_errors=%u successes=%u h2_error=0x%02x", PLUGIN_NAME,
                   ip_to_string(ip).c_str(), slot->client_errors.load(std::memory_order_relaxed),
                   slot->server_errors.load(std::memory_order_relaxed), slot->successes.load(std::memory_order_relaxed),
-                  slot->score.load(std::memory_order_relaxed), static_cast<unsigned>(error_code));
+                  static_cast<unsigned>(error_code));
         }
 
         // Block if requested
@@ -542,7 +542,7 @@ handle_txn_close(TSCont /* contp */, TSEvent /* event */, void *edata)
 
       // Record success for 2xx responses
       if (status >= 200 && status < 300) {
-        abuse_shield::IPSlot *slot = g_tracker->find(ip);
+        auto slot = g_tracker->find(ip);
         if (slot) {
           slot->record_success();
         }
@@ -551,7 +551,7 @@ handle_txn_close(TSCont /* contp */, TSEvent /* event */, void *edata)
   }
 
   // Record request
-  abuse_shield::IPSlot *slot = g_tracker->find(ip);
+  auto slot = g_tracker->find(ip);
   if (slot) {
     slot->record_request();
   }

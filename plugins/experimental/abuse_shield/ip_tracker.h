@@ -35,24 +35,19 @@ namespace abuse_shield
 // Number of HTTP/2 error codes to track (0x00-0x0f)
 constexpr size_t NUM_H2_ERROR_CODES = 16;
 
-// Default number of partitions for the hash table
-constexpr size_t DEFAULT_NUM_PARTITIONS = 64;
-
 /**
- * IPSlot - Stores tracking data for a single IP address.
+ * IPData - User data stored for each IP address in the UdiTable.
+ *
+ * The IP address (key) and score are managed by UdiTable internally.
+ * This struct contains only the application-specific tracking data.
  *
  * All counters are atomic for lock-free updates.
- * Size is approximately 128 bytes per slot.
  */
-struct IPSlot {
-  // Identity - only modified during contest (under lock)
-  swoc::IPAddr addr;
-
+struct IPData {
   // Counters - lock-free atomic operations
   std::atomic<uint32_t> client_errors{0}; ///< Client-caused HTTP/2 errors
   std::atomic<uint32_t> server_errors{0}; ///< Server-caused HTTP/2 errors
   std::atomic<uint32_t> successes{0};     ///< Successful requests (2xx)
-  std::atomic<uint32_t> score{0};         ///< Udi algorithm contest score
 
   // Per HTTP/2 error code counts
   std::atomic<uint16_t> h2_error_counts[NUM_H2_ERROR_CODES]{};
@@ -65,16 +60,6 @@ struct IPSlot {
   std::atomic<uint64_t> window_start{0};  ///< Start of rate window (epoch ms)
   std::atomic<uint64_t> last_seen{0};     ///< Last activity timestamp (epoch ms)
   std::atomic<uint64_t> blocked_until{0}; ///< Block expiration (epoch ms, 0 = not blocked)
-
-  /// Clear all data in this slot
-  void clear();
-
-  /// Check if this slot is empty (no IP assigned)
-  bool
-  empty() const
-  {
-    return !addr.is_valid();
-  }
 
   /// Record an HTTP/2 error (lock-free)
   void record_h2_error(uint8_t error_code, bool is_client_error);
@@ -95,23 +80,23 @@ struct IPSlot {
   void block_until(uint64_t until_ms);
 };
 
+// For backward compatibility, alias IPSlot to IPData
+using IPSlot = IPData;
+
 /**
  * IPTracker - Tracks IP addresses using the Udi "King of the Hill" algorithm.
  *
  * This is a thin wrapper around ts::UdiTable providing IP-specific functionality.
  *
- * Uses partitioned locking to minimize contention:
- * - Hash table is divided into N partitions, each with its own lock
- * - Slot updates use atomic operations (lock-free)
- * - Contest operations only lock one partition
- *
  * Thread-safe for concurrent access from multiple ATS threads.
+ * Returns shared_ptr<IPData> so callers hold safe references even if slots are evicted.
  */
 class IPTracker
 {
 public:
   // UdiTable type for IP tracking
-  using Table = ts::UdiTable<swoc::IPAddr, IPSlot, std::hash<swoc::IPAddr>, DEFAULT_NUM_PARTITIONS>;
+  using Table     = ts::UdiTable<swoc::IPAddr, IPData, std::hash<swoc::IPAddr>>;
+  using IPDataPtr = std::shared_ptr<IPData>;
 
   /**
    * Construct an IPTracker with the specified number of slots.
@@ -128,37 +113,26 @@ public:
    * Find an IP in the tracker.
    *
    * @param ip The IP address to look up
-   * @return Pointer to the slot if found, nullptr otherwise
+   * @return shared_ptr to the IPData if found, nullptr otherwise
    *
-   * Thread-safe: Uses shared lock on the relevant partition.
+   * Thread-safe. The returned shared_ptr remains valid even if the slot is evicted.
    */
-  IPSlot       *find(const swoc::IPAddr &ip);
-  const IPSlot *find(const swoc::IPAddr &ip) const;
+  IPDataPtr                     find(const swoc::IPAddr &ip);
+  std::shared_ptr<const IPData> find(const swoc::IPAddr &ip) const;
 
   /**
    * Record an event for an IP, creating a slot if needed.
    *
-   * If the IP is already tracked, returns the existing slot.
+   * If the IP is already tracked, returns the existing data.
    * If not, attempts to contest a slot using the Udi algorithm.
    *
    * @param ip The IP address
    * @param score_delta Score to add (typically 1 for errors)
-   * @return Pointer to the slot (may be nullptr if contest failed)
+   * @return shared_ptr to the IPData (nullptr if contest failed)
    *
-   * Thread-safe: Uses exclusive lock on the relevant partition.
+   * Thread-safe. The returned shared_ptr remains valid even if the slot is evicted.
    */
-  IPSlot *record_event(const swoc::IPAddr &ip, int score_delta = 1);
-
-  /**
-   * Record a success for an IP (decrements score).
-   *
-   * If the score reaches 0, the IP may be evicted.
-   *
-   * @param ip The IP address
-   *
-   * Thread-safe: Uses exclusive lock on the relevant partition.
-   */
-  void record_success(const swoc::IPAddr &ip);
+  IPDataPtr record_event(const swoc::IPAddr &ip, int score_delta = 1);
 
   /**
    * Get statistics about the tracker.

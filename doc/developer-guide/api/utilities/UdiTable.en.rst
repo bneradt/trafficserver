@@ -22,52 +22,59 @@
 UdiTable
 ********
 
-The ``ts::UdiTable`` class implements the Udi "King of the Hill" algorithm for
-tracking entities (IP addresses, URLs, etc.) with bounded memory. When the table
-is full, new entries compete with existing entries based on a score - the higher
-score wins the slot.
+The ``ts::UdiTable`` class implements the Udi "King of the Hill" algorithm
+(US Patent 7533414) for tracking entities with bounded memory.
+
+Background
+==========
+
+The Udi algorithm was developed specifically to address abuse detection. From
+the patent:
+
+   "A screening list includes event IDs and associated count values. A pointer
+   cyclically selects entries in the table, advancing as events are received.
+   An incoming event ID is compared with the event IDs in the table. If the
+   incoming event ID matches an event ID in the screening list, the associated
+   count is incremented. Otherwise, the count of a selected table entry is
+   decremented. If the count value of the selected entry falls to zero, it is
+   replaced with the incoming event and the count is reset to one."
+
+The table serves as a **screening list** - the "hot" items to investigate.
+Each slot can be examined to determine which top talkers require action.
+This two-step approach is important: the table identifies the top N talkers
+(where N is the table size), and then each can be investigated to decide
+if action is needed.
 
 Synopsis
 ========
 
 .. code-block:: cpp
 
-   #include "tsutil/udi_table.h"
+   #include "tsutil/UdiTable.h"
 
-   // Define your slot type
-   struct MySlot {
-     std::string key;
-     std::atomic<uint32_t> score{0};
-     std::atomic<uint32_t> count{0};
-     void clear() { key.clear(); score = 0; count = 0; }
+   // Define your data type (user data only - key and score are managed by UdiTable)
+   struct MyData {
+     std::atomic<uint32_t> error_count{0};
+     std::atomic<uint32_t> success_count{0};
    };
 
-   // Create accessor functions
-   auto get_key = [](const MySlot& s) -> const std::string& { return s.key; };
-   auto set_key = [](MySlot& s, const std::string& k) { s.key = k; };
-   auto get_score = [](const MySlot& s) { return s.score.load(); };
-   auto set_score = [](MySlot& s, uint32_t v) { s.score.store(v); };
-   auto is_empty = [](const MySlot& s) { return s.key.empty(); };
-
    // Create table with 10000 slots
-   ts::UdiTable<std::string, MySlot> table(10000, get_key, set_key, get_score, set_score, is_empty);
+   ts::UdiTable<std::string, MyData> table(10000);
 
-   // Record an event (creates or updates slot)
-   MySlot* slot = table.record("some_key", 1);
-   if (slot) {
-     slot->count.fetch_add(1);
+   // Process an event (creates or updates entry)
+   auto data = table.process_event("some_key", 1);
+   if (data) {
+     data->error_count.fetch_add(1);
    }
 
    // Find existing entry
-   MySlot* found = table.find("some_key");
+   auto found = table.find("some_key");
+   if (found) {
+     // Use found->...
+   }
 
-   // Decrement score (may evict if score reaches 0)
-   table.decrement("some_key", 1);
-
-Description
-===========
-
-The Udi algorithm provides several key properties:
+Key Properties
+==============
 
 **Fixed Memory**
    The table allocates a fixed number of slots at construction time. Memory usage
@@ -81,14 +88,25 @@ The Udi algorithm provides several key properties:
    Frequently-accessed keys naturally stay in the table because they have higher
    scores and win contests against less active entries.
 
-**Lock-Efficient**
-   The table uses partitioned locking (default 64 partitions) to minimize contention.
-   Most operations only lock a single partition.
+**Global Contest**
+   The contest pointer rotates through all slots globally, ensuring fair distribution
+   across the entire table regardless of key hash distribution.
+
+**Simple Locking**
+   A single mutex protects all operations. All operations are serialized.
+   This is simple to reason about and sufficient for most use cases.
+
+**Safe References**
+   Returns ``shared_ptr<Data>`` so callers hold safe references even after
+   the slot is evicted. No use-after-free concerns.
+
+**Simple API**
+   The table owns key and score internally. Users only provide their custom data type.
 
 Algorithm
----------
+=========
 
-When a new key is recorded and it's not already in the table:
+When a new key is processed and it's not already in the table:
 
 1. The table picks a "contest slot" using a rotating pointer
 2. The new key's score is compared against the existing slot's score
@@ -103,102 +121,66 @@ Template Parameters
 
 .. code-block:: cpp
 
-   template <typename Key, typename Slot, typename Hash = std::hash<Key>, size_t NumPartitions = 64>
+   template <typename Key,
+             typename Data,
+             typename Hash = std::hash<Key>>
    class UdiTable;
 
 ``Key``
-   The key type used to identify entries. Must be hashable. Common choices:
-   ``std::string``, ``swoc::IPAddr``.
+   The key type used to identify entries. Must be hashable and default-constructible.
+   Common choices: ``std::string``, ``swoc::IPAddr``.
 
-``Slot``
-   The slot type that stores data associated with each key. Must be default-constructible.
+``Data``
+   User's custom data type to associate with each entry. The table owns the key
+   and score internally. Must be default-constructible.
 
 ``Hash``
    Hash function for keys. Defaults to ``std::hash<Key>``.
-
-``NumPartitions``
-   Number of hash table partitions. Default is 64. More partitions means less
-   lock contention but more memory overhead.
 
 Constructor
 ===========
 
 .. code-block:: cpp
 
-   UdiTable(size_t num_slots,
-            get_key_fn get_key,
-            set_key_fn set_key,
-            get_score_fn get_score,
-            set_score_fn set_score,
-            slot_empty_fn is_empty = nullptr,
-            slot_clear_fn clear_slot = nullptr);
+   explicit UdiTable(size_t num_slots);
 
 ``num_slots``
    Total number of slots to allocate. Memory usage is approximately
-   ``num_slots * sizeof(Slot)``.
-
-``get_key``
-   Function to get the key from a slot: ``Key const& (Slot const&)``
-
-``set_key``
-   Function to set the key in a slot: ``void(Slot&, Key const&)``
-
-``get_score``
-   Function to get the score from a slot: ``uint32_t(Slot const&)``
-
-``set_score``
-   Function to set the score in a slot: ``void(Slot&, uint32_t)``
-
-``is_empty``
-   Optional function to check if a slot is empty. Defaults to checking if
-   ``get_score(slot) == 0``.
-
-``clear_slot``
-   Optional function to clear a slot. Defaults to calling ``slot.clear()``.
+   ``num_slots * (sizeof(Key) + sizeof(uint32_t) + sizeof(shared_ptr<Data>))``.
 
 Methods
 =======
+
+process_event
+-------------
+
+.. code-block:: cpp
+
+   std::shared_ptr<Data> process_event(Key const& key, uint32_t score_delta = 1);
+
+Process an event for a key. If the key exists, increments its score and returns
+the data. If the key doesn't exist, attempts to contest for a slot using the
+Udi algorithm.
+
+Returns ``nullptr`` if the key lost the contest and couldn't get a slot.
+
+The returned ``shared_ptr`` remains valid even if the slot is later evicted.
+
+Thread-safe: uses mutex lock.
 
 find
 ----
 
 .. code-block:: cpp
 
-   Slot* find(Key const& key);
-   Slot const* find(Key const& key) const;
+   std::shared_ptr<Data> find(Key const& key);
+   std::shared_ptr<Data const> find(Key const& key) const;
 
 Find an existing entry by key. Returns ``nullptr`` if not found.
 
-Thread-safe: uses a shared lock on one partition.
+The returned ``shared_ptr`` remains valid even if the slot is later evicted.
 
-record
-------
-
-.. code-block:: cpp
-
-   Slot* record(Key const& key, uint32_t score_delta = 1);
-
-Record an event for a key. If the key exists, increments its score and returns
-the slot. If the key doesn't exist, attempts to contest for a slot using the
-Udi algorithm.
-
-Returns ``nullptr`` if the key lost the contest and couldn't get a slot.
-
-Thread-safe: uses an exclusive lock on one partition.
-
-decrement
----------
-
-.. code-block:: cpp
-
-   bool decrement(Key const& key, uint32_t amount = 1);
-
-Decrement the score for a key. If the score reaches 0, the key is evicted from
-the table.
-
-Returns ``true`` if the key was found, ``false`` otherwise.
-
-Thread-safe: uses an exclusive lock on one partition.
+Thread-safe: uses mutex lock.
 
 remove
 ------
@@ -211,7 +193,9 @@ Remove a key from the table regardless of its score.
 
 Returns ``true`` if the key was found and removed.
 
-Thread-safe: uses an exclusive lock on one partition.
+Note: Existing ``shared_ptr`` references to the removed data remain valid.
+
+Thread-safe: uses mutex lock.
 
 Statistics
 ----------
@@ -219,71 +203,66 @@ Statistics
 .. code-block:: cpp
 
    size_t num_slots() const;        // Total allocated slots
-   size_t num_partitions() const;   // Number of partitions (template parameter)
    size_t slots_used() const;       // Currently occupied slots
    uint64_t contests() const;       // Total contest attempts
    uint64_t contests_won() const;   // Contests won by new keys
-   uint64_t evictions() const;      // Keys evicted due to score reaching 0
+   uint64_t evictions() const;      // Keys evicted due to contest loss
+
+reset_metrics
+-------------
+
+.. code-block:: cpp
+
+   void reset_metrics();
+
+Reset table-level metrics (contests, contests_won, evictions) to zero and
+update the reset timestamp. Does not modify any tracked entries.
 
 dump
 ----
 
 .. code-block:: cpp
 
-   std::string dump(slot_format_fn format_slot = nullptr) const;
+   std::string dump(data_format_fn format_data = nullptr) const;
 
-Dump all entries to a string for debugging. If ``format_slot`` is provided,
-it's called for each slot to format the output.
+Dump all entries to a string for debugging. The format function signature is:
+
+.. code-block:: cpp
+
+   std::string format_data(Key const& key, uint32_t score, std::shared_ptr<Data> const& data);
 
 Example: IP Address Tracking
 ============================
 
 .. code-block:: cpp
 
-   #include "tsutil/udi_table.h"
+   #include "tsutil/UdiTable.h"
    #include "swoc/swoc_ip.h"
 
-   struct IPSlot {
-     swoc::IPAddr addr;
-     std::atomic<uint32_t> score{0};
+   // User data only - IP address and score are managed by UdiTable
+   struct IPData {
      std::atomic<uint32_t> error_count{0};
      std::atomic<uint64_t> blocked_until{0};
-
-     void clear() {
-       addr = swoc::IPAddr{};
-       score = 0;
-       error_count = 0;
-       blocked_until = 0;
-     }
-
-     bool empty() const { return !addr.is_valid(); }
    };
 
-   // Create table
-   ts::UdiTable<swoc::IPAddr, IPSlot> table(
-     50000,  // 50k slots
-     [](const IPSlot& s) -> const swoc::IPAddr& { return s.addr; },
-     [](IPSlot& s, const swoc::IPAddr& ip) { s.addr = ip; },
-     [](const IPSlot& s) { return s.score.load(); },
-     [](IPSlot& s, uint32_t v) { s.score.store(v); },
-     [](const IPSlot& s) { return s.empty(); }
-   );
+   // Create table with 50000 slots
+   ts::UdiTable<swoc::IPAddr, IPData> table(50000);
 
    // Track an error from an IP
    void record_error(const swoc::IPAddr& ip) {
-     if (auto* slot = table.record(ip, 1)) {
-       slot->error_count.fetch_add(1);
-       if (slot->error_count.load() > 100) {
-         // Block this IP
-         slot->blocked_until.store(now_ms() + 300000);  // 5 minutes
+     if (auto data = table.process_event(ip, 1)) {
+       data->error_count.fetch_add(1);
+       if (data->error_count.load() > 100) {
+         // Block this IP for 5 minutes
+         data->blocked_until.store(now_ms() + 300000);
        }
      }
    }
 
    // Check if IP is blocked
    bool is_blocked(const swoc::IPAddr& ip) {
-     if (auto* slot = table.find(ip)) {
-       uint64_t until = slot->blocked_until.load();
+     if (auto data = table.find(ip)) {
+       uint64_t until = data->blocked_until.load();
        return until > 0 && now_ms() < until;
      }
      return false;
@@ -292,16 +271,22 @@ Example: IP Address Tracking
 Thread Safety
 =============
 
-The ``UdiTable`` is thread-safe for concurrent access:
+The ``UdiTable`` is thread-safe for concurrent access using a single ``std::mutex``:
 
-- ``find()`` uses a shared lock (multiple concurrent readers allowed)
-- ``record()``, ``decrement()``, and ``remove()`` use exclusive locks
-- Locks are partitioned: operations on different keys in different partitions
-  don't contend
+- All operations (``find()``, ``process_event()``, ``remove()``) use the same mutex
+- All operations are serialized
 
-**Important**: After calling ``find()`` or ``record()``, modifications to the
-returned slot should use atomic operations since other threads may be accessing
-the same slot concurrently.
+This simple locking model is easy to reason about and sufficient for most use cases.
+For high-contention scenarios, partitioned locking could be added as a future enhancement.
+
+**Safe Shared Ownership**
+
+The ``find()`` and ``process_event()`` methods return ``std::shared_ptr<Data>``.
+This provides safe shared ownership:
+
+- The returned pointer remains valid even after the slot is evicted
+- The ``Data`` object lives until all ``shared_ptr`` references are released
+- No use-after-free concerns
 
 Memory Sizing
 =============
@@ -310,16 +295,20 @@ The memory usage is approximately:
 
 .. code-block:: text
 
-   Total = num_slots * sizeof(Slot) + NumPartitions * sizeof(Partition)
+   Total = num_slots * sizeof(Slot) + sizeof(lookup_map) + sizeof(mutex)
 
-For IP tracking with the example ``IPSlot`` above (approximately 64 bytes):
+   where Slot = Key + uint32_t (score) + shared_ptr<Data>
 
-- 10,000 slots ≈ 640 KB
-- 50,000 slots ≈ 3.2 MB
-- 100,000 slots ≈ 6.4 MB
+For IP tracking with an ``IPData`` of approximately 16 bytes and ``swoc::IPAddr``
+of approximately 24 bytes:
+
+- 10,000 slots ≈ 0.6 MB
+- 50,000 slots ≈ 3.0 MB
+- 100,000 slots ≈ 6.0 MB
+
+Note: Each entry has a heap-allocated ``Data`` object managed by ``shared_ptr``.
 
 See Also
 ========
 
-- :ref:`abuse-shield-plugin` - Uses UdiTable for IP abuse tracking
-- :ref:`block-errors-plugin` - Could be refactored to use UdiTable
+- :ref:`admin-plugins-abuse_shield` - Uses UdiTable for IP abuse tracking

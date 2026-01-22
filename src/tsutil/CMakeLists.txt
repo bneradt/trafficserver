@@ -88,6 +88,10 @@ if(BUILD_TESTING)
   target_link_libraries(test_tsutil PRIVATE tsutil Catch2::Catch2WithMain)
 
   add_catch2_test(NAME test_tsutil COMMAND $<TARGET_FILE:test_tsutil>)
+
+  # UdiTable benchmark
+  add_executable(benchmark_UdiTable benchmark_UdiTable.cc)
+  target_link_libraries(benchmark_UdiTable PRIVATE tsutil Catch2::Catch2)
 endif()
 
 clang_tidy_check(tsutil)
