@@ -83,9 +83,9 @@ The configuration uses YAML format with the following structure:
 
 .. code-block:: yaml
 
-    tracker:
+    ip_reputation:
       slots: 50000              # Number of IP tracking slots
-      partitions: 64            # Hash table partitions for concurrency
+      window_seconds: 60        # Time window for rate calculations (default 60s)
 
     blocking:
       duration_seconds: 300     # How long to block abusive IPs
@@ -214,9 +214,9 @@ Basic protection against HTTP/2 attacks:
 
 .. code-block:: yaml
 
-    tracker:
+    ip_reputation:
       slots: 50000
-      partitions: 64
+      window_seconds: 60
 
     blocking:
       duration_seconds: 300

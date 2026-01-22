@@ -42,9 +42,9 @@ abuse_shield.so abuse_shield.yaml
 Create `abuse_shield.yaml` in the config directory:
 
 ```yaml
-tracker:
+ip_reputation:
   slots: 50000              # Number of IP tracking slots
-  partitions: 64            # Hash table partitions
+  window_seconds: 60        # Time window for rate calculations
 
 blocking:
   duration_seconds: 300     # Block duration (5 minutes)

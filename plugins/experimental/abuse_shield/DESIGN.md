@@ -329,9 +329,9 @@ struct IPSlot {
 ## Configuration (YAML)
 
 ```yaml
-tracker:
+ip_reputation:
   slots: 50000
-  window_seconds: 1
+  window_seconds: 60
 
 blocking:
   duration_seconds: 300       # 5 minutes
@@ -453,13 +453,11 @@ enabled: true
 ### Udi Algorithm (Reusable Library in tsutil)
 
 ```
-src/tsutil/
-├── include/tsutil/
-│   └── UdiTable.h            # Udi "King of the Hill" template class
-├── src/
-│   └── UdiTable.cc           # Implementation (if needed, mostly header-only)
-└── unit_tests/
-    └── test_UdiTable.cc      # Unit tests for Udi algorithm
+include/tsutil/
+└── UdiTable.h                # Udi "King of the Hill" template class (header-only)
+
+src/tsutil/unit_tests/
+└── test_UdiTable.cc          # Unit tests for Udi algorithm
 ```
 
 **Thread Safety:** Uses `std::shared_mutex` for read-write locking:
