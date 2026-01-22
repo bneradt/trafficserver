@@ -92,6 +92,10 @@ if(BUILD_TESTING)
   # UdiTable benchmark
   add_executable(benchmark_UdiTable benchmark_UdiTable.cc)
   target_link_libraries(benchmark_UdiTable PRIVATE tsutil Catch2::Catch2)
+
+  # UdiTable locking strategy comparison benchmark
+  add_executable(benchmark_UdiTable_locking benchmark_UdiTable_locking.cc)
+  target_link_libraries(benchmark_UdiTable_locking PRIVATE tsutil)
 endif()
 
 clang_tidy_check(tsutil)
