@@ -148,41 +148,50 @@ Contest Ptr: index into slot array  (advances after each contest)
 ### Request Flow
 
 ```
-1. Error arrives from IP
+1. Event arrives from IP (error, connection, request)
 
-2. Hash lookup: Is IP already tracked?
+2. Acquire mutex, then hash lookup: Is IP already tracked?
 
-   YES -> slot = slots[hash[IP]]
-          slot.score++
-          slot.client_errors++
-          slot.h2_error_counts[error_code]++
-          -> Check thresholds, take action if exceeded
+   YES -> slot = slots[lookup[IP]]
+          slot.score += score_delta
+          return shared_ptr<Data>     // caller updates Data atomically
           -> DONE
 
-   NO  -> Contest using pointer:
+   NO  -> Contest for a slot:
 
-          contest_idx = contest_pointer
-          contest_pointer = (contest_pointer + 1) % N   // advance
+          contest_idx = contest_ptr
+          contest_ptr = (contest_ptr + 1) % N   // advance pointer
 
-          if (incoming_score > slots[contest_idx].score):
+          if (slots[contest_idx].is_empty() || incoming_score > current_score):
               // NEW IP WINS - takes the slot
-              old_ip = slots[contest_idx].addr
-              hash.remove(old_ip)
-              hash[new_ip] = contest_idx
-              slots[contest_idx] = new IPSlot(new_ip, score=1)
+              if (!slot.is_empty()):
+                  lookup.erase(slot.key)     // evict old key
+                  evictions++
+              slot.key = new_ip
+              slot.score = incoming_score
+              slot.data = make_shared<Data>()
+              lookup[new_ip] = contest_idx
+              return slot.data             // caller updates Data
           else:
-              // NEW IP LOSES - slot survives but weakened
-              slots[contest_idx].score--
-              // new IP stays out of table
+              // NEW IP LOSES - existing slot survives but weakened
+              slot.score--
+              return nullptr               // new IP not tracked
 
-3. Success (2xx response) arrives from IP
+3. Caller receives shared_ptr<Data> and updates atomically:
 
-   If IP in hash:
-       slot.score--
-       slot.successes++
-       if (slot.score == 0):
-           hash.remove(IP)     // evict - IP redeemed itself
+   if (data) {
+       data->client_errors.fetch_add(1);
+       data->h2_error_counts[error_code].fetch_add(1);
+       // Check thresholds, take action if exceeded
+   }
 ```
+
+**Key implementation details:**
+
+- `is_empty()` checks `!data` (not `score == 0`) - fixes stale key bug
+- Returns `shared_ptr<Data>` so reference survives eviction
+- Score is managed by UdiTable, not exposed to callers
+- Data counters use atomics for lock-free updates after mutex released
 
 ### Why This Works
 
@@ -198,133 +207,114 @@ Contest Ptr: index into slot array  (advances after each contest)
 
 ---
 
-## Data Structure: IPSlot (128 bytes)
+## Data Structure: IPData
+
+The IPData struct stores application-specific tracking data for each IP. The key and score
+are managed internally by UdiTable.
 
 ```cpp
-struct IPSlot {
-    union { uint32_t ip4; uint8_t ip6[16]; } addr;
-    uint8_t  addr_family;
-    uint8_t  blocked;
-    uint8_t  padding[2];
+struct IPData {
+    // Counters - atomic for concurrent access
+    std::atomic<uint32_t> client_errors{0};   // Client-caused HTTP/2 errors
+    std::atomic<uint32_t> server_errors{0};   // Server-caused HTTP/2 errors
+    std::atomic<uint32_t> successes{0};       // Successful requests (2xx)
 
-    // Use atomics for counters updated from multiple threads
-    std::atomic<uint32_t> client_errors;    // Client-caused HTTP/2 errors
-    std::atomic<uint32_t> server_errors;    // Server-caused HTTP/2 errors
-    std::atomic<uint32_t> successes;        // Successful requests (2xx)
-    std::atomic<uint32_t> score;            // Udi algorithm score
+    std::atomic<uint16_t> h2_error_counts[16]{};  // Per error code (0x00-0x0f)
 
-    std::atomic<uint16_t> h2_error_counts[16];  // Per error code (0x00-0x0f)
-
-    std::atomic<uint32_t> conn_count;       // Connections in window
-    std::atomic<uint32_t> req_count;        // Requests in window
-
-    std::atomic<uint64_t> window_start;
-    std::atomic<uint64_t> last_seen;
-    std::atomic<uint64_t> blocked_until;
-};
-```
-
-**Memory:** 50,000 slots = ~8.4 MB (recommended)
-
-### Thread Safety - Minimized Locking
-
-The Udi table uses **partitioned locking** to minimize contention:
-
-```cpp
-template<typename Slot, size_t NumPartitions = 64>
-class UdiTable {
-    // Partitioned hash table - each partition has its own lock
-    struct Partition {
-        std::unordered_map<IPAddr, size_t> lookup;
-        mutable std::shared_mutex mutex;
-        std::atomic<size_t> contest_ptr{0};  // Per-partition contest pointer
-    };
-
-    std::array<Partition, NumPartitions> partitions_;
-    std::vector<Slot> slots_;    // Slots accessed via atomic operations
-
-    size_t partition_for(const IPAddr& ip) const {
-        return std::hash<IPAddr>{}(ip) % NumPartitions;
-    }
-
-public:
-    // Lookup - only locks one partition (shared lock)
-    Slot* find(const IPAddr& ip) const {
-        auto& part = partitions_[partition_for(ip)];
-        std::shared_lock lock(part.mutex);
-        auto it = part.lookup.find(ip);
-        return (it != part.lookup.end()) ? &slots_[it->second] : nullptr;
-    }
-
-    // Contest - only locks one partition (exclusive lock)
-    void contest(const IPAddr& ip, int incoming_score);
-};
-```
-
-**Partitioning Strategy:**
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  64 Partitions (each with own mutex)                            │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐     ┌─────────┐           │
-│  │ Part 0  │ │ Part 1  │ │ Part 2  │ ... │ Part 63 │           │
-│  │ lookup  │ │ lookup  │ │ lookup  │     │ lookup  │           │
-│  │ mutex   │ │ mutex   │ │ mutex   │     │ mutex   │           │
-│  │ contest │ │ contest │ │ contest │     │ contest │           │
-│  │ ptr     │ │ ptr     │ │ ptr     │     │ ptr     │           │
-│  └─────────┘ └─────────┘ └─────────┘     └─────────┘           │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  Slot Array (atomic fields, no lock needed for reads)           │
-│  [0] [1] [2] ... [781] ... [49999]                              │
-│       │           │                                             │
-│       └───────────┴── Accessed via atomic operations            │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**Slot fields use atomics (lock-free access):**
-
-```cpp
-struct IPSlot {
-    // Identity (immutable once set, only changed during contest under lock)
-    union { uint32_t ip4; uint8_t ip6[16]; } addr;
-    std::atomic<uint8_t> addr_family{0};
-
-    // Counters - lock-free atomic operations
-    std::atomic<uint32_t> client_errors{0};
-    std::atomic<uint32_t> server_errors{0};
-    std::atomic<uint32_t> successes{0};
-    std::atomic<uint32_t> score{0};
-    std::atomic<uint16_t> h2_error_counts[16]{};
+    // Rate limiting
+    std::atomic<uint32_t> conn_count{0};      // Connections in window
+    std::atomic<uint32_t> req_count{0};       // Requests in window
 
     // Timing
-    std::atomic<uint64_t> last_seen{0};
-    std::atomic<uint64_t> blocked_until{0};
-
-    // Increment error - completely lock-free
-    void record_error(uint8_t error_code) {
-        client_errors.fetch_add(1, std::memory_order_relaxed);
-        h2_error_counts[error_code].fetch_add(1, std::memory_order_relaxed);
-        score.fetch_add(1, std::memory_order_relaxed);
-        last_seen.store(now(), std::memory_order_relaxed);
-    }
+    std::atomic<uint64_t> window_start{0};    // Rate window start (epoch ms)
+    std::atomic<uint64_t> last_seen{0};       // Last activity (epoch ms)
+    std::atomic<uint64_t> blocked_until{0};   // Block expiration (epoch ms)
 };
 ```
+
+**Memory:** 50,000 slots ≈ 8.4 MB (includes shared_ptr overhead)
+
+### Thread Safety - Current Implementation
+
+The current UdiTable uses a **single global mutex** for simplicity:
+
+```cpp
+template<typename Key, typename Data, typename Hash = std::hash<Key>>
+class UdiTable {
+    mutable std::mutex mutex_;                        // Global lock
+    std::unordered_map<Key, size_t, Hash> lookup_;   // Key → slot index
+    std::vector<Slot> slots_;                         // Fixed-size slot array
+    size_t contest_ptr_{0};                           // Rotating contest pointer
+
+    struct Slot {
+        Key key{};
+        uint32_t score{0};
+        std::shared_ptr<Data> data;                   // Safe reference
+
+        bool is_empty() const { return !data; }       // Check data, not score
+    };
+
+public:
+    // All operations acquire the global mutex
+    std::shared_ptr<Data> find(Key const &key);
+    std::shared_ptr<Data> process_event(Key const &key, uint32_t score_delta = 1);
+};
+```
+
+**Key design decisions:**
+
+| Aspect | Design | Rationale |
+|--------|--------|-----------|
+| **Locking** | Single `std::mutex` | Simple, correct, sufficient for most workloads |
+| **Data ownership** | `shared_ptr<Data>` | Callers hold safe references even after eviction |
+| **Empty check** | `!data` (not `score==0`) | Fixed bug where stale keys polluted lookup map |
+| **Score** | Plain `uint32_t` | Protected by mutex, no atomic needed |
+
+**Thread safety guarantees:**
 
 | Operation | Locking | Contention |
 |-----------|---------|------------|
-| `find()` | Shared lock on 1/64 partitions | Very low |
-| `record_event()` on existing IP | Lock-free atomics | None |
-| `contest()` | Exclusive lock on 1/64 partitions | Low |
-| Counter reads | Lock-free | None |
+| `find()` | Mutex lock | Serialized |
+| `process_event()` | Mutex lock | Serialized |
+| `contest()` | Called with mutex held | Serialized |
+| IPData counter updates | Lock-free atomics | Cache-line only |
 
-**Benefits:**
-- 64 partitions = 64x less contention than single lock
-- Slot updates are lock-free (atomic operations)
-- Different IPs in different partitions never contend
-- Read operations (most common) are very fast
+**Returned `shared_ptr<Data>` is safe:**
+- Callers can use the Data even after releasing the table lock
+- If the slot is evicted, the shared_ptr keeps the Data alive
+- No use-after-free possible
+
+### Benchmark Results: Locking Strategy Comparison
+
+Benchmarked on zeus (16-core x86_64, GCC 15.2.1, Release -O3):
+
+| Strategy | 16 Threads (Zipf) | Notes |
+|----------|-------------------|-------|
+| **A: Partitioned (16)** | **15.7M ops/sec** | 7x faster, recommended for high-throughput |
+| D: Single mutex (current) | 2.2M ops/sec | Simple, sufficient for moderate load |
+| C: shared_mutex | 2.0M ops/sec | Upgrade lock overhead hurts |
+| B: Hybrid lock | 1.8M ops/sec | Two-phase locking adds overhead |
+
+**Future optimization:** For very high throughput (>5M ops/sec), consider partitioned locking:
+
+```cpp
+// Partitioned design (not yet implemented)
+template<typename Key, typename Data, size_t NumPartitions = 16>
+class UdiTable_Partitioned {
+    struct Partition {
+        std::mutex mutex;
+        std::unordered_map<Key, size_t> lookup;
+        std::vector<Slot> slots;
+        size_t contest_ptr{0};
+    };
+    std::array<Partition, NumPartitions> partitions_;
+
+    // Key hash determines partition - threads hitting different partitions run in parallel
+    size_t partition_for(Key const &key) { return hasher_(key) % NumPartitions; }
+};
+```
+
+**Trade-off:** Partitioned design sacrifices global view (keys only compete within their partition) for 7x better throughput at high thread counts
 
 ---
 
@@ -456,16 +446,20 @@ enabled: true
 
 ```
 include/tsutil/
-└── UdiTable.h                # Udi "King of the Hill" template class (header-only)
+└── UdiTable.h                    # Udi "King of the Hill" template class (header-only)
 
-src/tsutil/unit_tests/
-└── test_UdiTable.cc          # Unit tests for Udi algorithm
+src/tsutil/
+├── benchmark_UdiTable.cc         # Throughput benchmark with Zipf distribution
+├── benchmark_UdiTable_locking.cc # Locking strategy comparison benchmark
+└── unit_tests/
+    └── test_UdiTable.cc          # Unit tests (contest, eviction, thread safety)
 ```
 
-**Thread Safety:** Uses `std::shared_mutex` for read-write locking:
-- Multiple readers (lookups) can proceed concurrently
-- Single writer (contest/update) blocks other writers
-- Atomic operations for counters where possible
+**Thread Safety:** Uses single `std::mutex` for all operations:
+- Simple and correct
+- All operations serialized
+- Returns `shared_ptr<Data>` for safe access after mutex released
+- Data counters use atomics for lock-free updates
 
 ### Plugin Files
 
