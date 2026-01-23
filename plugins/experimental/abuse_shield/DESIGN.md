@@ -15,33 +15,21 @@ The January 16, 2026 HTTP/2 attack exposed critical gaps:
 ### HTTP/2 Error Tracking
 
 | Feature | Description |
-
 |---------|-------------|
-
 | **Client Errors** | Track protocol violations caused by clients - these trigger blocking |
-
 | **Server Errors** | Track errors caused by server issues - log only, don't blame client |
-
 | **Per-Error Limits** | Configure different thresholds per error code |
-
 | **Total Limits** | Overall limit for all client/server errors combined |
-
 | **Pure Attack Detection** | Detect IPs with client errors but zero successful requests |
 
 ### Rate Limiting
 
 | Feature | Description |
-
 |---------|-------------|
-
 | **Per-IP Concurrent Connections** | Limit simultaneous connections from a single IP |
-
 | **Per-IP Connection Rate** | Limit new connections per second per IP |
-
 | **Per-IP Request Rate** | Limit requests per second per IP |
-
 | **Server-wide Request Rate** | Global rate limit for entire server |
-
 | **Latency-based Blocking** | Start blocking when server latency exceeds threshold |
 
 ### Actions (Independent, Combinable)
@@ -49,17 +37,11 @@ The January 16, 2026 HTTP/2 attack exposed critical gaps:
 Each rule specifies a list of actions. All actions are independent:
 
 | Action | Description |
-
 |--------|-------------|
-
 | `log` | Log the event with all tracked attributes to diags.log |
-
 | `block` | Add IP to block list for configured duration |
-
 | `close` | Close the current connection immediately |
-
 | `downgrade` | Disable HTTP/2, force HTTP/1.1 for this IP |
-
 | `rate_limit` | Return 429 Too Many Requests |
 
 **Example combinations:**
@@ -86,15 +68,10 @@ When `log` action is triggered, all tracked attributes are logged:
 ### Operations
 
 | Feature | Description |
-
 |---------|-------------|
-
 | **Dynamic Config Reload** | `traffic_ctl plugin msg abuse_shield.reload` |
-
 | **Data Dump** | `traffic_ctl plugin msg abuse_shield.dump` |
-
 | **Reset Metrics** | `traffic_ctl plugin msg abuse_shield.reset` |
-
 | **Trusted IP Bypass** | Never block IPs in trusted list |
 
 ---
@@ -102,31 +79,18 @@ When `log` action is triggered, all tracked attributes are logged:
 ## HTTP/2 Error Codes (RFC 9113)
 
 | Code | Name | Type | CVE | Description |
-
 |------|------|------|-----|-------------|
-
 | 0x00 | NO_ERROR | - | - | Graceful shutdown |
-
 | 0x01 | PROTOCOL_ERROR | **Client** | CVE-2019-9513, CVE-2019-9518 | Protocol violation |
-
 | 0x02 | INTERNAL_ERROR | **Server** | - | Internal error |
-
 | 0x03 | FLOW_CONTROL_ERROR | **Client** | CVE-2019-9511, CVE-2019-9517 | Flow control violation |
-
 | 0x04 | SETTINGS_TIMEOUT | **Client** | CVE-2019-9515 | Settings ACK timeout |
-
 | 0x05 | STREAM_CLOSED | **Client** | - | Frame on closed stream |
-
 | 0x06 | FRAME_SIZE_ERROR | **Client** | - | Invalid frame size |
-
 | 0x07 | REFUSED_STREAM | **Server** | - | Stream refused (at capacity) |
-
 | 0x08 | CANCEL | **Client** | CVE-2023-44487 | Stream cancelled (Rapid Reset) |
-
 | 0x09 | COMPRESSION_ERROR | **Client** | CVE-2016-1544 | HPACK compression error |
-
 | 0x0a | CONNECT_ERROR | Either | - | CONNECT method failed |
-
 | 0x0b | ENHANCE_YOUR_CALM | **Server** | - | Rate limit (server overwhelmed) |
 
 **Jan 16 attack:** 0x01 (PROTOCOL_ERROR) and 0x09 (COMPRESSION_ERROR)
@@ -143,6 +107,77 @@ Adapted from [carp/yahoo/YahooHotSpot.cc](dev/yahoo/ATSPlugins/carp/yahoo/YahooH
 Hash Table:  IP -> Slot Index     (O(1) lookup)
 Slot Array:  [0] [1] [2] ... [N-1]  (fixed size, stores IPSlot)
 Contest Ptr: index into slot array  (advances after each contest)
+```
+
+### Architecture Diagram
+
+```
+                                    UdiTable<Key, Data>
+    ┌───────────────────────────────────────────────────────────────────────────┐
+    │                                                                           │
+    │   lookup_ (unordered_map)              slots_ (vector<Slot>)              │
+    │   ┌─────────────────────┐              ┌─────────────────────────────┐    │
+    │   │  Key    │  Index    │              │ [0] │ [1] │ [2] │ ... │[N-1]│    │
+    │   ├─────────┼───────────┤              └──┬────┬─────┬───────────┬───┘    │
+    │   │ 1.2.3.4 │     0     │─────────────────┘    │     │           │        │
+    │   │ 5.6.7.8 │     2     │──────────────────────┼─────┘           │        │
+    │   │ 9.0.1.2 │    N-1    │────────────────────────────────────────┘        │
+    │   └─────────┴───────────┘                                                 │
+    │                                                  ▲                        │
+    │                                     contest_ptr ─┘                        │
+    │                                     (rotates through slots)               │
+    │                                                                           │
+    └───────────────────────────────────────────────────────────────────────────┘
+
+    Each Slot contains:
+    ┌──────────────────────────────────────────┐
+    │  Slot                                    │
+    │  ├── key: Key (e.g., IP address)         │
+    │  ├── score: uint32_t (contest weight)    │
+    │  └── data: shared_ptr<Data> ─────────────┼───► IPData (atomic counters)
+    └──────────────────────────────────────────┘
+```
+
+### Contest Flow Diagram
+
+```
+    Event arrives for IP X
+            │
+            ▼
+    ┌───────────────────┐
+    │ lookup_.find(X)?  │
+    └─────────┬─────────┘
+              │
+     ┌────────┴────────┐
+     │                 │
+     ▼                 ▼
+  FOUND             NOT FOUND
+     │                 │
+     ▼                 ▼
+┌─────────────┐   ┌─────────────────────────────┐
+│ slot.score++│   │ Contest at contest_ptr      │
+│ return data │   │                             │
+└─────────────┘   │  slot = slots[contest_ptr]  │
+                  │  contest_ptr = (ptr+1) % N  │
+                  └──────────────┬──────────────┘
+                                 │
+                    ┌────────────┴────────────┐
+                    │                         │
+                    ▼                         ▼
+           slot.is_empty() OR         X.score <= slot.score
+           X.score > slot.score              │
+                    │                        ▼
+                    ▼                 ┌──────────────┐
+            ┌──────────────┐         │ slot.score-- │
+            │  X WINS!     │         │ return null  │
+            │              │         │ (X not       │
+            │ evict old    │         │  tracked)    │
+            │ slot.key = X │         └──────────────┘
+            │ slot.score=1 │
+            │ slot.data=   │
+            │  new Data()  │
+            │ return data  │
+            └──────────────┘
 ```
 
 ### Request Flow
