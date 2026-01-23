@@ -498,71 +498,68 @@ handle_txn_close(TSCont /* contp */, TSEvent /* event */, void *edata)
     Dbg(dbg_ctl, "Connection error from %s: code=%" PRIu64, ip_to_string(ip).c_str(), error_code);
   }
 
+  // Create or get slot for this IP (always, for rate limiting support).
+  auto slot = g_tracker->record_event(ip, 1);
+  if (!slot) {
+    TSHttpTxnReenable(txnp, TS_EVENT_HTTP_CONTINUE);
+    return TS_SUCCESS;
+  }
+
+  // Record the request count for rate limiting.
+  slot->record_request();
+
+  // Track errors if present.
   if (has_error) {
-    // Record the error
     TSStatIntIncrement(stat_tracker_events, 1);
-    auto slot = g_tracker->record_event(ip, 1);
-    if (slot) {
-      slot->record_h2_error(static_cast<uint8_t>(error_code), is_client_error);
-
-      // Evaluate rules
-      ActionSet actions = evaluate_rules(*slot, *config);
-
-      if (actions != 0) {
-        TSStatIntIncrement(stat_rules_matched, 1);
-
-        // Log if requested
-        if (has_action(actions, Action::LOG)) {
-          TSStatIntIncrement(stat_actions_logged, 1);
-          TSError("[%s] IP=%s client_errors=%u server_errors=%u successes=%u h2_error=0x%02x", PLUGIN_NAME,
-                  ip_to_string(ip).c_str(), slot->client_errors.load(std::memory_order_relaxed),
-                  slot->server_errors.load(std::memory_order_relaxed), slot->successes.load(std::memory_order_relaxed),
-                  static_cast<unsigned>(error_code));
-        }
-
-        // Block if requested
-        if (has_action(actions, Action::BLOCK)) {
-          TSStatIntIncrement(stat_actions_blocked, 1);
-          uint64_t block_until =
-            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count() +
-            (config->block_duration_sec * 1000);
-          slot->block_until(block_until);
-          Dbg(dbg_ctl, "Blocked IP %s for %d seconds", ip_to_string(ip).c_str(), config->block_duration_sec);
-        }
-
-        // Close connection if requested
-        if (has_action(actions, Action::CLOSE)) {
-          TSStatIntIncrement(stat_actions_closed, 1);
-          int fd = TSVConnFdGet(vconn);
-          if (fd >= 0) {
-            shutdown(fd, SHUT_RDWR);
-            Dbg(dbg_ctl, "Closed connection from %s", ip_to_string(ip).c_str());
-          }
-        }
-      }
-    }
+    slot->record_h2_error(static_cast<uint8_t>(error_code), is_client_error);
   } else {
-    // No error - check for success
+    // No error - check for success.
     TSMBuffer bufp;
     TSMLoc    hdr_loc;
     if (TSHttpTxnClientRespGet(txnp, &bufp, &hdr_loc) == TS_SUCCESS) {
       TSHttpStatus status = TSHttpHdrStatusGet(bufp, hdr_loc);
       TSHandleMLocRelease(bufp, TS_NULL_MLOC, hdr_loc);
 
-      // Record success for 2xx responses
+      // Record success for 2xx responses.
       if (status >= 200 && status < 300) {
-        auto slot = g_tracker->find(ip);
-        if (slot) {
-          slot->record_success();
-        }
+        slot->record_success();
       }
     }
   }
 
-  // Record request
-  auto slot = g_tracker->find(ip);
-  if (slot) {
-    slot->record_request();
+  // Evaluate rules on every request (for rate limiting and error-based rules).
+  ActionSet actions = evaluate_rules(*slot, *config);
+
+  if (actions != 0) {
+    TSStatIntIncrement(stat_rules_matched, 1);
+
+    // Log if requested.
+    if (has_action(actions, Action::LOG)) {
+      TSStatIntIncrement(stat_actions_logged, 1);
+      TSError("[%s] IP=%s client_errors=%u server_errors=%u successes=%u req_count=%u", PLUGIN_NAME, ip_to_string(ip).c_str(),
+              slot->client_errors.load(std::memory_order_relaxed), slot->server_errors.load(std::memory_order_relaxed),
+              slot->successes.load(std::memory_order_relaxed), slot->req_count.load(std::memory_order_relaxed));
+    }
+
+    // Block if requested.
+    if (has_action(actions, Action::BLOCK)) {
+      TSStatIntIncrement(stat_actions_blocked, 1);
+      uint64_t block_until =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count() +
+        (config->block_duration_sec * 1000);
+      slot->block_until(block_until);
+      Dbg(dbg_ctl, "Blocked IP %s for %d seconds", ip_to_string(ip).c_str(), config->block_duration_sec);
+    }
+
+    // Close connection if requested.
+    if (has_action(actions, Action::CLOSE)) {
+      TSStatIntIncrement(stat_actions_closed, 1);
+      int fd = TSVConnFdGet(vconn);
+      if (fd >= 0) {
+        shutdown(fd, SHUT_RDWR);
+        Dbg(dbg_ctl, "Closed connection from %s", ip_to_string(ip).c_str());
+      }
+    }
   }
 
   TSHttpTxnReenable(txnp, TS_EVENT_HTTP_CONTINUE);
