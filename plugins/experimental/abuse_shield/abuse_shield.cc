@@ -102,6 +102,35 @@ add_action(ActionSet set, Action action)
   return set | static_cast<uint8_t>(action);
 }
 
+// Convert action bitmask to a human-readable comma-separated string.
+std::string
+actions_to_string(ActionSet set)
+{
+  std::string result;
+  if (has_action(set, Action::LOG)) {
+    result += "log";
+  }
+  if (has_action(set, Action::BLOCK)) {
+    if (!result.empty()) {
+      result += ",";
+    }
+    result += "block";
+  }
+  if (has_action(set, Action::CLOSE)) {
+    if (!result.empty()) {
+      result += ",";
+    }
+    result += "close";
+  }
+  if (has_action(set, Action::DOWNGRADE)) {
+    if (!result.empty()) {
+      result += ",";
+    }
+    result += "downgrade";
+  }
+  return result;
+}
+
 // ============================================================================
 // Rule configuration
 // ============================================================================
@@ -118,6 +147,12 @@ struct RuleFilter {
 struct Rule {
   std::string name;
   RuleFilter  filter;
+  ActionSet   actions{0};
+};
+
+// Result of rule evaluation, including the matched rule for logging.
+struct RuleMatch {
+  const Rule *rule{nullptr}; // nullptr if no match
   ActionSet   actions{0};
 };
 
@@ -337,16 +372,16 @@ rule_matches(const Rule &rule, const abuse_shield::IPSlot &slot)
   return true;
 }
 
-ActionSet
+RuleMatch
 evaluate_rules(const abuse_shield::IPSlot &slot, const Config &config)
 {
   for (const auto &rule : config.rules) {
     if (rule_matches(rule, slot)) {
       Dbg(dbg_ctl, "Rule matched: %s", rule.name.c_str());
-      return rule.actions;
+      return RuleMatch{&rule, rule.actions};
     }
   }
-  return 0;
+  return RuleMatch{};
 }
 
 // ============================================================================
@@ -528,36 +563,36 @@ handle_txn_close(TSCont /* contp */, TSEvent /* event */, void *edata)
   }
 
   // Evaluate rules on every request (for rate limiting and error-based rules).
-  ActionSet actions = evaluate_rules(*slot, *config);
+  RuleMatch match = evaluate_rules(*slot, *config);
 
-  if (actions != 0) {
+  if (match.actions != 0) {
     TSStatIntIncrement(stat_rules_matched, 1);
 
     // Log if requested.
-    if (has_action(actions, Action::LOG)) {
+    if (has_action(match.actions, Action::LOG)) {
       TSStatIntIncrement(stat_actions_logged, 1);
-      TSError("[%s] IP=%s client_errors=%u server_errors=%u successes=%u req_count=%u", PLUGIN_NAME, ip_to_string(ip).c_str(),
-              slot->client_errors.load(std::memory_order_relaxed), slot->server_errors.load(std::memory_order_relaxed),
-              slot->successes.load(std::memory_order_relaxed), slot->req_count.load(std::memory_order_relaxed));
+      TSError("[%s] Rule \"%s\" matched for IP=%s: actions=[%s] req_count=%u", PLUGIN_NAME, match.rule->name.c_str(),
+              ip_to_string(ip).c_str(), actions_to_string(match.actions).c_str(), slot->req_count.load(std::memory_order_relaxed));
     }
 
     // Block if requested.
-    if (has_action(actions, Action::BLOCK)) {
+    if (has_action(match.actions, Action::BLOCK)) {
       TSStatIntIncrement(stat_actions_blocked, 1);
       uint64_t block_until =
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count() +
         (config->block_duration_sec * 1000);
       slot->block_until(block_until);
-      Dbg(dbg_ctl, "Blocked IP %s for %d seconds", ip_to_string(ip).c_str(), config->block_duration_sec);
+      TSError("[%s] Blocking IP %s for %d seconds (rule: %s)", PLUGIN_NAME, ip_to_string(ip).c_str(), config->block_duration_sec,
+              match.rule->name.c_str());
     }
 
     // Close connection if requested.
-    if (has_action(actions, Action::CLOSE)) {
+    if (has_action(match.actions, Action::CLOSE)) {
       TSStatIntIncrement(stat_actions_closed, 1);
       int fd = TSVConnFdGet(vconn);
       if (fd >= 0) {
         shutdown(fd, SHUT_RDWR);
-        Dbg(dbg_ctl, "Closed connection from %s", ip_to_string(ip).c_str());
+        TSError("[%s] Closing connection from %s (rule: %s)", PLUGIN_NAME, ip_to_string(ip).c_str(), match.rule->name.c_str());
       }
     }
   }

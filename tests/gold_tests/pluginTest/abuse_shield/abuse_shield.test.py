@@ -281,14 +281,15 @@ enabled: true
         tr.StillRunningAfter = self._ts
 
         # Verify the rate limit rule was triggered.
-        # The plugin should log "Rule matched: req_rate_flood" when the rule fires.
-        self._ts.Disk.traffic_out.Content += Testers.ContainsExpression(
-            r"Rule matched: req_rate_flood", "Verify the req_rate_flood rule was triggered when request rate exceeded threshold.")
+        # The plugin logs via TSError to diags.log when a rule matches.
+        self._ts.Disk.diags_log.Content += Testers.ContainsExpression(
+            r'Rule "req_rate_flood" matched for IP=',
+            "Verify the req_rate_flood rule was triggered when request rate exceeded threshold.")
 
         # Verify the IP was blocked.
-        # The plugin should log "Blocked IP ... for N seconds" when blocking.
-        self._ts.Disk.traffic_out.Content += Testers.ContainsExpression(
-            r"Blocked IP.*for.*seconds", "Verify the offending IP was blocked after exceeding rate limit.")
+        # The plugin logs "Blocking IP ... for N seconds (rule: ...)" via TSError.
+        self._ts.Disk.diags_log.Content += Testers.ContainsExpression(
+            r"Blocking IP.*for.*seconds", "Verify the offending IP was blocked after exceeding rate limit.")
 
 
 #
