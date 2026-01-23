@@ -50,11 +50,19 @@ constexpr char PLUGIN_NAME[] = "abuse_shield";
 // ============================================================================
 // Metrics (ATS stats)
 // ============================================================================
+// Action counters
 int stat_rules_matched        = -1; // Total times any rule matched
 int stat_actions_blocked      = -1; // Total block actions executed
 int stat_actions_closed       = -1; // Total close actions executed
 int stat_actions_logged       = -1; // Total log actions executed
 int stat_connections_rejected = -1; // Connections rejected at VCONN_START (blocked IPs)
+
+// Tracker (UdiTable) metrics
+int stat_tracker_events       = -1; // Total events processed (record_event calls)
+int stat_tracker_slots_used   = -1; // Current slots in use (gauge)
+int stat_tracker_contests     = -1; // Total contest attempts
+int stat_tracker_contests_won = -1; // Contests won by new IP
+int stat_tracker_evictions    = -1; // IPs evicted (score reached 0)
 
 // Helper to convert IPAddr to string
 std::string
@@ -492,6 +500,7 @@ handle_txn_close(TSCont /* contp */, TSEvent /* event */, void *edata)
 
   if (has_error) {
     // Record the error
+    TSStatIntIncrement(stat_tracker_events, 1);
     auto slot = g_tracker->record_event(ip, 1);
     if (slot) {
       slot->record_h2_error(static_cast<uint8_t>(error_code), is_client_error);
@@ -560,6 +569,18 @@ handle_txn_close(TSCont /* contp */, TSEvent /* event */, void *edata)
   return TS_SUCCESS;
 }
 
+// Sync UdiTable stats to ATS metrics
+void
+sync_tracker_stats()
+{
+  if (g_tracker) {
+    TSStatIntSet(stat_tracker_slots_used, static_cast<int64_t>(g_tracker->slots_used()));
+    TSStatIntSet(stat_tracker_contests, static_cast<int64_t>(g_tracker->contests()));
+    TSStatIntSet(stat_tracker_contests_won, static_cast<int64_t>(g_tracker->contests_won()));
+    TSStatIntSet(stat_tracker_evictions, static_cast<int64_t>(g_tracker->evictions()));
+  }
+}
+
 // Handle plugin messages for dynamic config reload and data dump
 int
 handle_lifecycle_msg(TSCont /* contp */, TSEvent /* event */, void *edata)
@@ -589,9 +610,14 @@ handle_lifecycle_msg(TSCont /* contp */, TSEvent /* event */, void *edata)
     }
   } else if (tag == "abuse_shield.dump") {
     if (g_tracker) {
+      sync_tracker_stats(); // Update ATS metrics before dump
       std::string dump = g_tracker->dump();
       TSError("[%s] Dump:\n%s", PLUGIN_NAME, dump.c_str());
     }
+  } else if (tag == "abuse_shield.stats") {
+    // Just sync stats without full dump
+    sync_tracker_stats();
+    TSError("[%s] Stats synced", PLUGIN_NAME);
   } else if (tag == "abuse_shield.reset") {
     if (g_tracker) {
       g_tracker->reset_metrics();
@@ -657,7 +683,7 @@ TSPluginInit(int argc, const char *argv[])
   g_tracker = std::make_unique<abuse_shield::IPTracker>(g_config->slots);
   Dbg(dbg_ctl, "Created IP tracker with %zu slots", g_config->slots);
 
-  // Create stats
+  // Create stats - action counters
   stat_rules_matched =
     TSStatCreate("abuse_shield.rules.matched", TS_RECORDDATATYPE_INT, TS_STAT_NON_PERSISTENT, TS_STAT_SYNC_COUNT);
   stat_actions_blocked =
@@ -668,6 +694,18 @@ TSPluginInit(int argc, const char *argv[])
     TSStatCreate("abuse_shield.actions.logged", TS_RECORDDATATYPE_INT, TS_STAT_NON_PERSISTENT, TS_STAT_SYNC_COUNT);
   stat_connections_rejected =
     TSStatCreate("abuse_shield.connections.rejected", TS_RECORDDATATYPE_INT, TS_STAT_NON_PERSISTENT, TS_STAT_SYNC_COUNT);
+
+  // Create stats - tracker (UdiTable) metrics
+  stat_tracker_events =
+    TSStatCreate("abuse_shield.tracker.events", TS_RECORDDATATYPE_INT, TS_STAT_NON_PERSISTENT, TS_STAT_SYNC_COUNT);
+  stat_tracker_slots_used =
+    TSStatCreate("abuse_shield.tracker.slots_used", TS_RECORDDATATYPE_INT, TS_STAT_NON_PERSISTENT, TS_STAT_SYNC_SUM);
+  stat_tracker_contests =
+    TSStatCreate("abuse_shield.tracker.contests", TS_RECORDDATATYPE_INT, TS_STAT_NON_PERSISTENT, TS_STAT_SYNC_SUM);
+  stat_tracker_contests_won =
+    TSStatCreate("abuse_shield.tracker.contests_won", TS_RECORDDATATYPE_INT, TS_STAT_NON_PERSISTENT, TS_STAT_SYNC_SUM);
+  stat_tracker_evictions =
+    TSStatCreate("abuse_shield.tracker.evictions", TS_RECORDDATATYPE_INT, TS_STAT_NON_PERSISTENT, TS_STAT_SYNC_SUM);
 
   // Register hooks
   TSCont vconn_cont = TSContCreate(handle_vconn_start, nullptr);
