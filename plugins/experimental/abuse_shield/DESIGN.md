@@ -505,8 +505,8 @@ plugins/experimental/abuse_shield/
 ├── abuse_shield.cc           # Plugin entry, hooks, YAML parsing
 ├── abuse_shield.yaml         # Sample config
 ├── abuse_shield_trusted.txt  # Sample trusted IPs file
-├── ip_tracker.h              # IPTracker using UdiTable<IPSlot>
-└── ip_tracker.cc             # IPTracker implementation
+├── ip_data.h                 # IPData struct and IPTable type alias
+└── ip_data.cc                # IPData implementation
 ```
 
 ### Tests

@@ -17,7 +17,7 @@
 
 project(abuse_shield)
 
-add_atsplugin(abuse_shield abuse_shield.cc ip_tracker.cc)
+add_atsplugin(abuse_shield abuse_shield.cc ip_data.cc)
 
 target_link_libraries(abuse_shield PRIVATE yaml-cpp::yaml-cpp libswoc::libswoc ts::tsutil)
 

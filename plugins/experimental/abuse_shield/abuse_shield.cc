@@ -22,9 +22,12 @@
 
 #include <atomic>
 #include <cinttypes>
+#include <ctime>
 #include <fstream>
+#include <iomanip>
 #include <memory>
 #include <shared_mutex>
+#include <sstream>
 #include <string>
 #include <unistd.h>
 #include <vector>
@@ -36,7 +39,7 @@
 #include "swoc/bwf_ip.h"
 #include "tsutil/DbgCtl.h"
 
-#include "ip_tracker.h"
+#include "ip_data.h"
 
 #include <yaml-cpp/yaml.h>
 
@@ -175,9 +178,9 @@ struct Config {
 };
 
 // Global state
-std::unique_ptr<abuse_shield::IPTracker> g_tracker;
-std::shared_ptr<Config>                  g_config;
-std::shared_mutex                        g_config_mutex; // Protects g_config pointer swaps
+std::unique_ptr<abuse_shield::IPTable> g_tracker;
+std::shared_ptr<Config>                g_config;
+std::shared_mutex                      g_config_mutex; // Protects g_config pointer swaps
 
 // ============================================================================
 // Configuration parsing
@@ -321,7 +324,7 @@ parse_config(const std::string &path)
 // Rule evaluation
 // ============================================================================
 bool
-rule_matches(const Rule &rule, const abuse_shield::IPSlot &slot)
+rule_matches(const Rule &rule, const abuse_shield::IPData &slot)
 {
   const auto &filter = rule.filter;
 
@@ -373,7 +376,7 @@ rule_matches(const Rule &rule, const abuse_shield::IPSlot &slot)
 }
 
 RuleMatch
-evaluate_rules(const abuse_shield::IPSlot &slot, const Config &config)
+evaluate_rules(const abuse_shield::IPData &slot, const Config &config)
 {
   for (const auto &rule : config.rules) {
     if (rule_matches(rule, slot)) {
@@ -534,7 +537,7 @@ handle_txn_close(TSCont /* contp */, TSEvent /* event */, void *edata)
   }
 
   // Create or get slot for this IP (always, for rate limiting support).
-  auto slot = g_tracker->record_event(ip, 1);
+  auto slot = g_tracker->process_event(ip, 1);
   if (!slot) {
     TSHttpTxnReenable(txnp, TS_EVENT_HTTP_CONTINUE);
     return TS_SUCCESS;
@@ -613,6 +616,77 @@ sync_tracker_stats()
   }
 }
 
+// Format duration as human-readable string (e.g., "2h 15m 30s" or "45s").
+std::string
+format_duration(uint64_t total_seconds)
+{
+  if (total_seconds == 0) {
+    return "0s";
+  }
+
+  uint64_t hours   = total_seconds / 3600;
+  uint64_t minutes = (total_seconds % 3600) / 60;
+  uint64_t seconds = total_seconds % 60;
+
+  std::ostringstream oss;
+  if (hours > 0) {
+    oss << hours << "h ";
+  }
+  if (minutes > 0 || hours > 0) {
+    oss << minutes << "m ";
+  }
+  oss << seconds << "s";
+  return oss.str();
+}
+
+// Format time_point as ISO-like timestamp string.
+std::string
+format_timestamp(std::chrono::system_clock::time_point tp)
+{
+  auto    time_t_val = std::chrono::system_clock::to_time_t(tp);
+  std::tm tm_val;
+  localtime_r(&time_t_val, &tm_val);
+
+  std::ostringstream oss;
+  oss << std::put_time(&tm_val, "%Y-%m-%d %H:%M:%S");
+  return oss.str();
+}
+
+// Dump all tracked IPs to a string for debugging.
+std::string
+dump_tracker()
+{
+  if (!g_tracker) {
+    return "# No tracker initialized\n";
+  }
+
+  auto format_entry = [](const swoc::IPAddr &ip, uint32_t score, const std::shared_ptr<abuse_shield::IPData> &data) -> std::string {
+    swoc::LocalBufferWriter<64> ip_str;
+    ip_str.print("{}", ip);
+
+    std::ostringstream oss;
+    oss << ip_str.view() << "\t" << data->client_errors.load(std::memory_order_relaxed) << "\t"
+        << data->server_errors.load(std::memory_order_relaxed) << "\t" << data->successes.load(std::memory_order_relaxed) << "\t"
+        << score << "\t" << data->blocked_until.load(std::memory_order_relaxed) << "\n";
+    return oss.str();
+  };
+
+  uint64_t    age_seconds    = g_tracker->seconds_since_reset();
+  auto        reset_time     = g_tracker->last_reset_time();
+  std::string reset_time_str = format_timestamp(reset_time);
+  std::string age_str        = format_duration(age_seconds);
+
+  std::ostringstream header;
+  header << "# abuse_shield dump\n";
+  header << "# last_reset: " << reset_time_str << " (" << age_str << " ago)\n";
+  header << "# slots_used: " << g_tracker->slots_used() << " / " << g_tracker->num_slots() << "\n";
+  header << "# contests: " << g_tracker->contests() << " (won: " << g_tracker->contests_won() << ")\n";
+  header << "# evictions: " << g_tracker->evictions() << "\n";
+  header << "# IP\tCLIENT_ERR\tSERVER_ERR\tSUCCESS\tSCORE\tBLOCKED_UNTIL\n";
+
+  return header.str() + g_tracker->dump(format_entry);
+}
+
 // Handle plugin messages for dynamic config reload and data dump
 int
 handle_lifecycle_msg(TSCont /* contp */, TSEvent /* event */, void *edata)
@@ -643,7 +717,7 @@ handle_lifecycle_msg(TSCont /* contp */, TSEvent /* event */, void *edata)
   } else if (tag == "abuse_shield.dump") {
     if (g_tracker) {
       sync_tracker_stats(); // Update ATS metrics before dump
-      std::string dump = g_tracker->dump();
+      std::string dump = dump_tracker();
       TSError("[%s] Dump:\n%s", PLUGIN_NAME, dump.c_str());
     }
   } else if (tag == "abuse_shield.stats") {
@@ -711,8 +785,8 @@ TSPluginInit(int argc, const char *argv[])
   // Store config path for reload
   g_config->config_path = config_path;
 
-  // Create the IP tracker (uses fixed 64 partitions from UdiTable template)
-  g_tracker = std::make_unique<abuse_shield::IPTracker>(g_config->slots);
+  // Create the IP tracker table.
+  g_tracker = std::make_unique<abuse_shield::IPTable>(g_config->slots);
   Dbg(dbg_ctl, "Created IP tracker with %zu slots", g_config->slots);
 
   // Create stats - action counters
