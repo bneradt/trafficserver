@@ -199,7 +199,7 @@ directory of the |TS| source tree. Experimental plugins can be compiled by passi
    Transaction Box(TxnBox) <txn_box/index.en>
 
 :doc:`Abuse Shield <abuse_shield.en>`
-   Unified abuse protection with HTTP/2 error tracking, rate limiting, and IP-based detection using the Udi algorithm.
+   Unified abuse protection with rate limiting and HTTP/2 error tracking.
 
 :doc:`Access Control <access_control.en>`
    Access control plugin that handles various access control use-cases.

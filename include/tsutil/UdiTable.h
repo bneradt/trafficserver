@@ -33,12 +33,15 @@
 namespace ts
 {
 
-/**
- * UdiTable - A fixed-size hash table using the Udi "King of the Hill" algorithm.
+/** A fixed-size hash table using the Udi "King of the Hill" algorithm.
+ *
+ * Instantiations of this table track the keys/entities (IPs, URLs, etc.) with
+ * the highest rates of events (e.g. number of requests, number of errors, etc.).
  *
  * This implements the Udi algorithm (US Patent 7533414) for tracking entities
- * (IPs, URLs, etc.) with bounded memory. The algorithm was developed to address
- * abuse detection where a "screening list" identifies potential abuse events.
+ * (IPs, URLs, etc.) and their events with bounded memory. The algorithm was
+ * developed to address abuse detection where a "screening list" identifies
+ * potential abuse events.
  *
  * From the patent: "A screening list includes event IDs and associated count values.
  * A pointer cyclically selects entries in the table, advancing as events are received.
@@ -48,8 +51,8 @@ namespace ts
  * count value of the selected entry falls to zero, it is replaced with the incoming
  * event and the count is reset to one."
  *
- * The table serves as a "screening list" - the "hot" items to investigate. Each slot
- * can be investigated using the templated Data to determine which top talkers require
+ * Thus the table serves as a "screening list" - the "hot" items to investigate. Each slot
+ * can be investigated using the templated @a Data to determine which top talkers require
  * action.
  *
  * Key properties:
@@ -59,7 +62,7 @@ namespace ts
  * - Simple locking: Single mutex for all operations
  * - Safe references: Returns shared_ptr so data survives eviction
  *
- * @tparam Key The key type (e.g., IP address, URL)
+ * @tparam Key The entity type (e.g., IP address, URL)
  * @tparam Data User's custom data type to associate with each entry
  * @tparam Hash Hash function for keys (defaults to std::hash)
  *
@@ -99,9 +102,7 @@ public:
   // =========================================================================
 
   /**
-   * Construct a UdiTable with the specified number of slots.
-   *
-   * @param num_slots Total number of slots to allocate (runtime configurable)
+   * @param[in] num_slots Total number of slots to allocate.
    */
   explicit UdiTable(size_t num_slots);
 
@@ -111,11 +112,10 @@ public:
   UdiTable(UdiTable &&)                 = delete;
   UdiTable &operator=(UdiTable &&)      = delete;
 
-  /**
-   * Find a key in the table.
+  /** Retrieve the configured data for a given key.
    *
-   * @param key The key to look up
-   * @return shared_ptr to the Data if found, nullptr otherwise
+   * @param[in] key The key to look up.
+   * @return The data associated with @a key if found, nullptr otherwise.
    *
    * Thread-safe: Uses mutex lock.
    * The returned shared_ptr remains valid even if the slot is later evicted.
@@ -123,27 +123,25 @@ public:
   data_ptr                    find(Key const &key);
   std::shared_ptr<Data const> find(Key const &key) const;
 
-  /**
-   * Process an event for a key, creating a slot if needed via contest.
+  /** Process an event for a key, creating a slot if needed via @a contest.
    *
    * If the key is already tracked, increments its score and returns the Data.
-   * If not, attempts to contest a slot using the Udi algorithm with global
-   * rotation through all slots.
+   * If not, a call to @a contest is made to see whether the @a key should evict
+   * an entry and take its place.
    *
-   * @param key The key
-   * @param score_delta Score to add (typically 1 for events)
-   * @return shared_ptr to the Data (nullptr if contest failed)
+   * @param[in] key The key for which an event is being processed.
+   * @param[in] score_delta Score to add (typically 1 for events).
+   * @return The data for @a key if tracked or contest won, nullptr if contest lost.
    *
    * Thread-safe: Uses mutex lock.
    * The returned shared_ptr remains valid even if the slot is later evicted.
    */
   data_ptr process_event(Key const &key, uint32_t score_delta = 1);
 
-  /**
-   * Remove a key from the table.
+  /** Remove a key from the table.
    *
-   * @param key The key to remove
-   * @return true if key was found and removed, false if not found
+   * @param[in] key The key to remove.
+   * @return Whether @a key was found and removed.
    *
    * Note: Existing shared_ptr references to the removed Data remain valid.
    */
@@ -156,46 +154,53 @@ public:
   uint64_t contests_won() const;
   uint64_t evictions() const;
 
-  /**
-   * Reset table-level metrics to zero.
+  /** Reset table-level metrics to zero.
    *
-   * Resets contests, contests_won, evictions and updates the reset timestamp.
    * Does NOT modify any entries in the table.
    */
   void reset_metrics();
 
-  /**
-   * Get the timestamp of the last reset (or table creation).
+  /** Get the timestamp of the last reset (or table creation).
    */
   std::chrono::system_clock::time_point last_reset_time() const;
 
-  /**
-   * Get the number of seconds since last reset (or table creation).
+  /** Get the number of seconds since last reset (or table creation).
    */
   uint64_t seconds_since_reset() const;
 
-  /**
-   * Dump all entries to a string (for debugging).
+  /** Dump all entries to a string.
    *
-   * @param format_data Optional function to format each entry (key, score, data)
+   * This may be useful to evaluate the behavior of the table for debugging or
+   * diagnostic purposes.
+   *
+   * @param[in] format_data Optional function to format each entry (key, score, data).
+   * @return A string representation of all table entries.
    */
   std::string dump(data_format_fn format_data = nullptr) const;
 
 private:
-  /**
-   * Internal slot structure - owns key, score, and shared_ptr to Data.
+  /** The data used to track the key and score used to determine eviction.
    */
   struct Slot {
     Key      key{};
     uint32_t score{0};
     data_ptr data;
 
+    /** Check whether there is an entity associated with this slot.
+     *
+     * Note that a score of zero does not necessarily mean that the slot is
+     * empty. Upon table initialization, all slots are empty.
+     *
+     * @return Whether the slot has no entity assigned.
+     */
     bool
     is_empty() const
     {
       return !data;
     }
 
+    /** Remove the entity associated with this slot.
+     */
     void
     clear()
     {
@@ -205,35 +210,34 @@ private:
     }
   };
 
-  /**
-   * Perform the Udi contest algorithm.
+  /** Determine whether the given key should evict a slot.
    *
-   * Called with mutex_ already held exclusively.
+   * Assumes @a mutex_ already held exclusively.
    *
-   * @param key The key trying to enter
-   * @param incoming_score The score of the incoming key
-   * @return shared_ptr to Data if contest won, nullptr otherwise
+   * @param[in] key The key trying to enter.
+   * @param[in] incoming_score The score of the incoming key.
+   * @return The data for @a key if contest won, nullptr if contest lost.
    */
   data_ptr contest(Key const &key, uint32_t incoming_score);
 
-  // Single global mutex for all operations
+  /// Single global mutex for all operations
   mutable std::mutex mutex_;
 
-  // Lookup map: key -> slot index
+  /// Lookup map: key -> slot index
   std::unordered_map<Key, size_t, Hash> lookup_;
 
-  // Slot storage
+  /// The slots representing the table.
   std::vector<Slot> slots_;
 
-  // Contest pointer - rotates through all slots
+  /// The contest pointer - rotates through all slots as @a contest() is called.
   size_t contest_ptr_{0};
 
-  // Metrics (atomic for lock-free reads)
+  /// Metrics.
   std::atomic<uint64_t> metric_contests_{0};
   std::atomic<uint64_t> metric_contests_won_{0};
   std::atomic<uint64_t> metric_evictions_{0};
 
-  // Timestamp of last reset (or construction)
+  /// Timestamp of last reset (or construction)
   std::chrono::system_clock::time_point last_reset_time_;
 };
 
