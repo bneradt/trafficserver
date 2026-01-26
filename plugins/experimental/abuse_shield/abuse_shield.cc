@@ -220,28 +220,22 @@ actions_from_strings(const std::vector<std::string> &strings)
 bool
 load_trusted_ips(Config &config, const std::string &path)
 {
-  std::ifstream file(path);
-  if (!file.is_open()) {
-    TSError("[%s] Failed to open trusted IPs file: %s", PLUGIN_NAME, path.c_str());
-    return false;
-  }
+  try {
+    YAML::Node root = YAML::LoadFile(path);
 
-  std::string line;
-  while (std::getline(file, line)) {
-    // Skip comments and empty lines
-    size_t start = line.find_first_not_of(" \t");
-    if (start == std::string::npos || line[start] == '#') {
-      continue;
+    if (!root["trusted_ips"]) {
+      TSError("[%s] Missing 'trusted_ips' key in %s", PLUGIN_NAME, path.c_str());
+      return false;
     }
 
-    std::string ip_str = line.substr(start);
-    // Remove trailing whitespace/comments
-    size_t end = ip_str.find_first_of(" \t#");
-    if (end != std::string::npos) {
-      ip_str = ip_str.substr(0, end);
+    YAML::Node trusted_list = root["trusted_ips"];
+    if (!trusted_list.IsSequence()) {
+      TSError("[%s] 'trusted_ips' must be a sequence in %s", PLUGIN_NAME, path.c_str());
+      return false;
     }
 
-    if (!ip_str.empty()) {
+    for (const auto &item : trusted_list) {
+      std::string   ip_str = item.as<std::string>();
       swoc::IPRange range;
       if (range.load(ip_str)) {
         config.trusted_ips.fill(range, true);
@@ -250,6 +244,10 @@ load_trusted_ips(Config &config, const std::string &path)
         TSError("[%s] Invalid IP in trusted file: %s", PLUGIN_NAME, ip_str.c_str());
       }
     }
+
+  } catch (const YAML::Exception &e) {
+    TSError("[%s] YAML parse error in %s: %s", PLUGIN_NAME, path.c_str(), e.what());
+    return false;
   }
 
   return true;
@@ -263,23 +261,28 @@ parse_config(const std::string &path)
   try {
     YAML::Node root = YAML::LoadFile(path);
 
-    // IP reputation table settings
-    if (root["ip_reputation"]) {
-      auto ip_rep            = root["ip_reputation"];
-      config->slots          = ip_rep["slots"].as<size_t>(DEFAULT_SLOTS);
-      config->window_seconds = ip_rep["window_seconds"].as<int>(60);
-    }
+    // Global settings (ip_tracking, blocking, trusted_ips_file)
+    if (root["global"]) {
+      auto global = root["global"];
 
-    // Blocking settings
-    if (root["blocking"]) {
-      auto blocking              = root["blocking"];
-      config->block_duration_sec = blocking["duration_seconds"].as<int>(DEFAULT_BLOCK_DURATION_SEC);
-    }
+      // IP tracking table settings
+      if (global["ip_tracking"]) {
+        auto ip_tracking       = global["ip_tracking"];
+        config->slots          = ip_tracking["slots"].as<size_t>(DEFAULT_SLOTS);
+        config->window_seconds = ip_tracking["window_seconds"].as<int>(60);
+      }
 
-    // Trusted IPs file
-    if (root["trusted_ips_file"]) {
-      std::string trusted_path = root["trusted_ips_file"].as<std::string>();
-      load_trusted_ips(*config, trusted_path);
+      // Blocking settings
+      if (global["blocking"]) {
+        auto blocking              = global["blocking"];
+        config->block_duration_sec = blocking["duration_seconds"].as<int>(DEFAULT_BLOCK_DURATION_SEC);
+      }
+
+      // Trusted IPs file
+      if (global["trusted_ips_file"]) {
+        std::string trusted_path = global["trusted_ips_file"].as<std::string>();
+        load_trusted_ips(*config, trusted_path);
+      }
     }
 
     // Rules

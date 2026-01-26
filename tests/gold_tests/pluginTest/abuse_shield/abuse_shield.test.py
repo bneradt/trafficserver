@@ -52,11 +52,12 @@ class AbuseShieldMessageTest:
         self._ts.Disk.File(self._ts.Variables.CONFIGDIR + "/abuse_shield.yaml", id="abuse_shield_yaml", typename="ats:config")
         self._ts.Disk.abuse_shield_yaml.AddLines(
             '''
-ip_reputation:
-  slots: 1000
+global:
+  ip_tracking:
+    slots: 1000
 
-blocking:
-  duration_seconds: 60
+  blocking:
+    duration_seconds: 60
 
 rules:
   - name: "test_error_rule"
@@ -74,11 +75,11 @@ rules:
 enabled: true
 '''.strip().split('\n'))
 
-        # Create trusted IPs file.
-        self._ts.Disk.File(self._ts.Variables.CONFIGDIR + "/abuse_shield_trusted.txt", id="trusted_txt", typename="ats:config")
-        self._ts.Disk.trusted_txt.AddLines('''
-# Trusted IPs
-127.0.0.1
+        # Create trusted IPs file (YAML format).
+        self._ts.Disk.File(self._ts.Variables.CONFIGDIR + "/abuse_shield_trusted.yaml", id="trusted_yaml", typename="ats:config")
+        self._ts.Disk.trusted_yaml.AddLines('''
+trusted_ips:
+  - 127.0.0.1
 '''.strip().split('\n'))
 
         # Configure abuse_shield plugin.
@@ -238,11 +239,12 @@ class AbuseShieldRateLimitTest:
         self._ts.Disk.File(self._ts.Variables.CONFIGDIR + "/abuse_shield.yaml", id="abuse_shield_yaml", typename="ats:config")
         self._ts.Disk.abuse_shield_yaml.AddLines(
             '''
-ip_reputation:
-  slots: 1000
+global:
+  ip_tracking:
+    slots: 1000
 
-blocking:
-  duration_seconds: 60
+  blocking:
+    duration_seconds: 60
 
 rules:
   - name: "req_rate_flood"

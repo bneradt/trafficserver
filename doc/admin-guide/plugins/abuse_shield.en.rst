@@ -26,40 +26,31 @@ Abuse Shield Plugin
 Description
 ===========
 
-The ``abuse_shield`` plugin provides unified abuse protection for Apache Traffic Server,
-including HTTP/2 error tracking, IP-based abuse detection, and rate limiting. It uses
-the Udi "King of the Hill" algorithm for efficient, bounded-memory IP tracking.
+The ``abuse_shield`` plugin provides consolidated abuse protection for Apache
+Traffic Server, providing IP-based abuse detection for high rates of
+connections, requests, and various errors.
 
 Key features:
 
-* Tracks all 16 HTTP/2 error codes per IP
-* Distinguishes between client-caused and server-caused errors
-* Detects "pure attacks" (many errors with zero successful requests)
-* **Per-IP request rate limiting** - Block IPs exceeding request thresholds
-* **Per-IP connection rate limiting** - Block IPs opening too many connections
-* Bounded memory usage via the Udi algorithm
-* Dynamic configuration reload via ``traffic_ctl``
-* YAML-based configuration with flexible rules
+* YAML based configuration, dynamically reloadable via ``traffic_ctl``.
+* IP-based abuse detection for both high rates of connections and requests.
+* IP allow-listing for trusted IPs (such as in-network IPs).
+* Detects "pure attacks" (many errors with zero successful requests).
+* **Per-IP request rate limiting** - Block IPs exceeding request thresholds.
+* **Per-IP connection rate limiting** - Block IPs opening too many connections.
+* A configurable variety of actions per rule, such as logging, blocking,
+  connection closing, and protocol downgrading to HTTP/1.1.
 
 Algorithm
 =========
 
-The plugin uses the "Udi King of the Hill" algorithm for IP tracking:
+The plugin uses the "Udi King of the Hill" algorithm for IP tracking. This is an
+implementation of the Uid algorithm described in the now expired US Patent 7533414B1:
 
-* Fixed-size slot array (configurable, default 50K slots)
-* New IPs contest existing slots based on their error score
-* High-score (abusive) IPs naturally remain in the table
-* Low-activity IPs are automatically evicted
-* Memory is bounded regardless of traffic volume
+https://patents.google.com/patent/US7533414B1
 
-Each IP slot tracks:
-
-* Client-caused HTTP/2 errors
-* Server-caused HTTP/2 errors
-* Per-error-code counts (all 16 HTTP/2 error codes)
-* Successful request count
-* Connection and request rates
-* Block status and expiration
+This algorithm uses a table, the size of which is configurable. See the
+``slots`` configuration below.
 
 Installation
 ============
@@ -72,7 +63,7 @@ Build with CMake::
 Configuration
 =============
 
-To enable the plugin, add to :file:`plugin.config`::
+To enable the plugin, add it to :file:`plugin.config`::
 
     abuse_shield.so abuse_shield.yaml
 
@@ -85,14 +76,15 @@ The configuration uses YAML format with the following structure:
 
 .. code-block:: yaml
 
-    ip_reputation:
-      slots: 50000              # Number of IP tracking slots
-      window_seconds: 60        # Time window for rate calculations (default 60s)
+    global:
+      ip_tracking:
+        slots: 50000              # Number of IP tracking slots
+        window_seconds: 60        # Time window for rate calculations (default 60s)
 
-    blocking:
-      duration_seconds: 300     # How long to block abusive IPs
+      blocking:
+        duration_seconds: 300     # How long to block abusive IPs
 
-    trusted_ips_file: /etc/trafficserver/abuse_shield_trusted.txt
+      trusted_ips_file: /etc/trafficserver/abuse_shield_trusted.yaml
 
     rules:
       - name: "protocol_error_flood"
@@ -114,31 +106,31 @@ Rule Filters
 
 Each rule has a ``filter`` section that defines when the rule matches:
 
-==================== ===========================================================
-Filter               Description
-==================== ===========================================================
-``h2_error``         Specific HTTP/2 error code (0x00-0x0f)
-``min_count``        Minimum count of the specific ``h2_error``
-``min_client_errors`` Total client-caused HTTP/2 errors
-``min_server_errors`` Total server-caused HTTP/2 errors
-``max_successes``    Maximum successful requests (use 0 for "pure attack" detection)
-``max_conn_rate``    Maximum connections per rate window
-``max_req_rate``     Maximum requests per rate window
-==================== ===========================================================
+====================== ===========================================================
+Filter                 Description
+====================== ===========================================================
+``h2_error``           Specific HTTP/2 error code (0x00-0x0f)
+``min_count``          Minimum count of the specific ``h2_error``
+``min_client_errors``  Total client-caused HTTP/2 errors
+``min_server_errors``  Total server-caused HTTP/2 errors
+``max_successes``      Maximum successful requests (use 0 for "pure attack" detection)
+``max_conn_rate``      Maximum connections per rate window
+``max_req_rate``       Maximum requests per rate window
+====================== ===========================================================
 
 Actions
 -------
 
 Each rule has an ``action`` list with one or more actions:
 
-============ ============================================================
-Action       Description
-============ ============================================================
-``log``      Log the abuse detection with all tracked attributes
-``block``    Block the IP for ``blocking.duration_seconds``
-``close``    Immediately close the connection
-``downgrade`` Downgrade to HTTP/1.1 (future feature)
-============ ============================================================
+============== ============================================================
+Action         Description
+============== ============================================================
+``log``        Log the abuse detection with all tracked attributes
+``block``      Block the IP for ``blocking.duration_seconds``
+``close``      Immediately close the connection
+``downgrade``  Downgrade to HTTP/1.1 (future feature)
+============== ============================================================
 
 HTTP/2 Error Codes
 ------------------
@@ -146,23 +138,23 @@ HTTP/2 Error Codes
 The plugin tracks all HTTP/2 error codes. Client-caused errors are typically
 indicative of abuse, while server-caused errors usually indicate server issues.
 
-============ ====================== ============ ==================================
+============ ====================== ============= ==================================
 Code         Name                   Typical Cause CVEs
-============ ====================== ============ ==================================
-0x01         PROTOCOL_ERROR         Client       CVE-2019-9513, CVE-2019-9518
+============ ====================== ============= ==================================
+0x01         PROTOCOL_ERROR         Client        CVE-2019-9513, CVE-2019-9518
 0x02         INTERNAL_ERROR         Server
-0x03         FLOW_CONTROL_ERROR     Client       CVE-2019-9511, CVE-2019-9517
+0x03         FLOW_CONTROL_ERROR     Client        CVE-2019-9511, CVE-2019-9517
 0x04         SETTINGS_TIMEOUT       Client
 0x05         STREAM_CLOSED          Client
 0x06         FRAME_SIZE_ERROR       Client
 0x07         REFUSED_STREAM         Server
-0x08         CANCEL (RST_STREAM)    Client       CVE-2023-44487 (Rapid Reset)
-0x09         COMPRESSION_ERROR      Client       CVE-2016-1544 (HPACK bomb)
+0x08         CANCEL (RST_STREAM)    Client        CVE-2023-44487 (Rapid Reset)
+0x09         COMPRESSION_ERROR      Client        CVE-2016-1544 (HPACK bomb)
 0x0a         CONNECT_ERROR          Either
 0x0b         ENHANCE_YOUR_CALM      Server
 0x0c         INADEQUATE_SECURITY    Either
 0x0d         HTTP_1_1_REQUIRED      Server
-============ ====================== ============ ==================================
+============ ====================== ============= ==================================
 
 Rate Limiting
 -------------
@@ -201,20 +193,35 @@ Example rate limiting rules:
 Trusted IPs
 -----------
 
-Create :file:`abuse_shield_trusted.txt` with one IP or CIDR per line::
+Create a YAML file containing a sequence of trusted IP addresses under the
+``trusted_ips`` key. The following IP formats are supported:
 
-    # Localhost
-    127.0.0.1
-    ::1
+======================= ===========================================================
+Example                 Effect
+======================= ===========================================================
+``10.0.2.123``          Exempt a single IP Address.
+``10.0.3.1-10.0.3.254`` Exempt a range of IP addresses.
+``10.0.4.0/24``         Exempt a range of IP addresses specified by CIDR notation.
+======================= ===========================================================
 
-    # Internal networks
-    10.0.0.0/8
-    192.168.0.0/16
+Example :file:`abuse_shield_trusted.yaml`:
 
-    # Monitoring servers
-    203.0.113.50
+.. code-block:: yaml
 
-Lines starting with ``#`` are comments.
+    trusted_ips:
+      # Localhost
+      - 127.0.0.1
+      - "::1"
+
+      # Internal networks
+      - 10.0.0.0/8
+      - 192.168.0.0/16
+
+      # Monitoring servers
+      - 203.0.113.50
+
+      # Range example
+      - 172.16.0.1-172.16.0.100
 
 Runtime Control
 ===============
@@ -224,9 +231,13 @@ The plugin supports runtime control via ``traffic_ctl plugin msg``:
 Reload Configuration
 --------------------
 
-Reload the YAML configuration without restarting ATS::
+The plugin supports dynamic configuration reload without requiring an ATS restart.
+Reload the YAML configuration at runtime::
 
     traffic_ctl plugin msg abuse_shield.reload
+
+This reloads all settings including rules, blocking duration, and trusted IPs.
+Tracked IP data and current block states are preserved across reloads.
 
 Dump Tracked IPs
 ----------------
@@ -269,15 +280,15 @@ The plugin exposes ATS statistics for monitoring. View with::
 
 Available metrics:
 
-================================= ===========================================================
-Metric                            Description
-================================= ===========================================================
-``abuse_shield.rules.matched``    Total times any rule filter condition was true
-``abuse_shield.actions.blocked``  Total times block action executed (IP added to block list)
-``abuse_shield.actions.closed``   Total times close action executed (connection shutdown)
-``abuse_shield.actions.logged``   Total times log action executed
-``abuse_shield.connections.rejected`` Connections rejected at start (previously blocked IPs)
-================================= ===========================================================
+======================================= =========================================================
+Metric                                  Description
+======================================= =========================================================
+``abuse_shield.rules.matched``          Total times any rule filter condition was true
+``abuse_shield.actions.blocked``        Total times block action executed (IP added to blocklist)
+``abuse_shield.actions.closed``         Total times close action executed (connection shutdown)
+``abuse_shield.actions.logged``         Total times log action executed
+``abuse_shield.connections.rejected``   Connections rejected at start (previously blocked IPs)
+======================================= =========================================================
 
 These metrics are useful for:
 
@@ -293,14 +304,15 @@ Basic protection against HTTP/2 attacks:
 
 .. code-block:: yaml
 
-    ip_reputation:
-      slots: 50000
-      window_seconds: 60
+    global:
+      ip_tracking:
+        slots: 50000
+        window_seconds: 60
 
-    blocking:
-      duration_seconds: 300
+      blocking:
+        duration_seconds: 300
 
-    trusted_ips_file: /etc/trafficserver/abuse_shield_trusted.txt
+      trusted_ips_file: /etc/trafficserver/abuse_shield_trusted.yaml
 
     rules:
       # Block protocol errors (CVE-2019-9513, CVE-2019-9518)
