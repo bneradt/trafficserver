@@ -166,7 +166,8 @@ struct Config {
   size_t slots{DEFAULT_SLOTS};
   size_t partitions{DEFAULT_PARTITIONS};
   int    block_duration_sec{DEFAULT_BLOCK_DURATION_SEC};
-  int    window_seconds{60}; // Default window period: 60 seconds
+  int    window_decay_seconds{60};      // Default EWMA decay window: 60 seconds
+  int    window_expiration_seconds{60}; // Default staleness expiration window: 60 seconds
 
   std::vector<Rule>   rules;
   swoc::IPSpace<bool> trusted_ips;
@@ -267,9 +268,10 @@ parse_config(const std::string &path)
 
       // IP tracking table settings
       if (global["ip_tracking"]) {
-        auto ip_tracking       = global["ip_tracking"];
-        config->slots          = ip_tracking["slots"].as<size_t>(DEFAULT_SLOTS);
-        config->window_seconds = ip_tracking["window_seconds"].as<int>(60);
+        auto ip_tracking                  = global["ip_tracking"];
+        config->slots                     = ip_tracking["slots"].as<size_t>(DEFAULT_SLOTS);
+        config->window_decay_seconds      = ip_tracking["window_decay_seconds"].as<int>(60);
+        config->window_expiration_seconds = ip_tracking["window_expiration_seconds"].as<int>(60);
       }
 
       // Blocking settings
@@ -663,7 +665,7 @@ dump_tracker()
     return "# No tracker initialized\n";
   }
 
-  auto format_entry = [](const swoc::IPAddr &ip, uint32_t score, const std::shared_ptr<abuse_shield::IPData> &data) -> std::string {
+  auto format_entry = [](const swoc::IPAddr &ip, double score, const std::shared_ptr<abuse_shield::IPData> &data) -> std::string {
     swoc::LocalBufferWriter<64> ip_str;
     ip_str.print("{}", ip);
 
@@ -788,9 +790,11 @@ TSPluginInit(int argc, const char *argv[])
   // Store config path for reload
   g_config->config_path = config_path;
 
-  // Create the IP tracker table.
-  g_tracker = std::make_unique<abuse_shield::IPTable>(g_config->slots);
-  Dbg(dbg_ctl, "Created IP tracker with %zu slots", g_config->slots);
+  // Create the IP tracker table with EWMA scoring and window-based expiration.
+  g_tracker = std::make_unique<abuse_shield::IPTable>(g_config->slots, static_cast<double>(g_config->window_decay_seconds),
+                                                      static_cast<double>(g_config->window_expiration_seconds));
+  Dbg(dbg_ctl, "Created IP tracker with %zu slots, decay=%ds, expiration=%ds", g_config->slots, g_config->window_decay_seconds,
+      g_config->window_expiration_seconds);
 
   // Create stats - action counters
   stat_rules_matched =

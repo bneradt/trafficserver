@@ -40,6 +40,7 @@ set(TSUTIL_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tsutil/ts_unit_parser.h
     ${PROJECT_SOURCE_DIR}/include/tsutil/ts_errata.h
     ${PROJECT_SOURCE_DIR}/include/tsutil/UdiTable.h
+    ${PROJECT_SOURCE_DIR}/include/tsutil/Xoroshiro128Plus.h
 )
 add_library(
   tsutil
@@ -53,6 +54,7 @@ add_library(
   ts_unit_parser.cc
   Regex.cc
   ts_errata.cc
+  Xoroshiro128Plus.cc
 )
 
 add_library(ts::tsutil ALIAS tsutil)
@@ -83,6 +85,7 @@ if(BUILD_TESTING)
     unit_tests/test_ts_meta.cc
     unit_tests/test_time_parser.cc
     unit_tests/test_UdiTable.cc
+    unit_tests/test_Xoroshiro128Plus.cc
   )
 
   target_link_libraries(test_tsutil PRIVATE tsutil Catch2::Catch2WithMain)

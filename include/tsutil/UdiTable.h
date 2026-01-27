@@ -22,13 +22,17 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include "tsutil/Xoroshiro128Plus.h"
 
 namespace ts
 {
@@ -95,16 +99,25 @@ public:
   using data_type = Data;
   using data_ptr  = std::shared_ptr<Data>;
 
-  using data_format_fn = std::function<std::string(Key const &, uint32_t, data_ptr const &)>;
+  using data_format_fn = std::function<std::string(Key const &, double, data_ptr const &)>;
 
   // =========================================================================
   // Public API - Declarations
   // =========================================================================
 
-  /**
+  /** Construct a UdiTable with EWMA scoring and multi-probe eviction.
+   *
    * @param[in] num_slots Total number of slots to allocate.
+   * @param[in] window_decay_seconds Time window for EWMA decay (default: 60 seconds).
+   *            Controls how quickly scores decay over time. After this many seconds,
+   *            an inactive entry's score decays to approximately 37% (1/e) of original.
+   * @param[in] window_expiration_seconds Time window for staleness expiration (default: 60 seconds).
+   *            Entries not updated within this window are considered stale and can be
+   *            evicted without score comparison.
+   * @param[in] num_probes Number of random slots to probe during eviction (default: 4).
    */
-  explicit UdiTable(size_t num_slots);
+  explicit UdiTable(size_t num_slots, double window_decay_seconds = 60.0, double window_expiration_seconds = 60.0,
+                    size_t num_probes = 4);
 
   // No copying or moving
   UdiTable(UdiTable const &)            = delete;
@@ -180,16 +193,18 @@ public:
 
 private:
   /** The data used to track the key and score used to determine eviction.
+   *
+   * Uses EWMA (Exponential Weighted Moving Average) scoring where scores
+   * decay naturally over time. This allows stale entries to be evicted
+   * more easily than active entries.
    */
   struct Slot {
     Key      key{};
-    uint32_t score{0};
+    double   ewma_score{0.0};       ///< Decaying score (undecayed accumulator)
+    double   last_update_time{0.0}; ///< Seconds (monotonic clock) of last update
     data_ptr data;
 
     /** Check whether there is an entity associated with this slot.
-     *
-     * Note that a score of zero does not necessarily mean that the slot is
-     * empty. Upon table initialization, all slots are empty.
      *
      * @return Whether the slot has no entity assigned.
      */
@@ -199,13 +214,29 @@ private:
       return !data;
     }
 
+    /** Calculate decayed score at current time for eviction comparison.
+     *
+     * Applies exponential decay based on time since last update.
+     *
+     * @param[in] now Current time in seconds (monotonic).
+     * @param[in] window_inverse Pre-computed 1.0 / window_seconds.
+     * @return The time-decayed score.
+     */
+    double
+    decayed_score(double now, double window_inverse) const
+    {
+      double delta_t = now - last_update_time;
+      return ewma_score * std::exp(-delta_t * window_inverse) * window_inverse;
+    }
+
     /** Remove the entity associated with this slot.
      */
     void
     clear()
     {
-      key   = Key{};
-      score = 0;
+      key              = Key{};
+      ewma_score       = 0.0;
+      last_update_time = 0.0;
       data.reset();
     }
   };
@@ -220,6 +251,20 @@ private:
    */
   data_ptr contest(Key const &key, uint32_t incoming_score);
 
+  /** Get current monotonic time in seconds.
+   *
+   * Uses std::chrono::steady_clock for monotonic time, similar to
+   * SafeT-Span's use of CLOCK_MONOTONIC_RAW.
+   *
+   * @return Current time in seconds as a double.
+   */
+  static double
+  current_time()
+  {
+    using namespace std::chrono;
+    return duration<double>(steady_clock::now().time_since_epoch()).count();
+  }
+
   /// Single global mutex for all operations
   mutable std::mutex mutex_;
 
@@ -229,8 +274,15 @@ private:
   /// The slots representing the table.
   std::vector<Slot> slots_;
 
-  /// The contest pointer - rotates through all slots as @a contest() is called.
-  size_t contest_ptr_{0};
+  /// EWMA window parameters
+  double window_decay_inverse_;      ///< 1.0 / window_decay_seconds (pre-computed for EWMA)
+  double window_expiration_seconds_; ///< Window for staleness expiration check
+
+  /// Number of random slots to probe during eviction
+  size_t num_probes_;
+
+  /// Per-table fast PRNG for eviction candidate selection
+  mutable Xoroshiro128Plus rng_;
 
   /// Metrics.
   std::atomic<uint64_t> metric_contests_{0};
@@ -246,7 +298,13 @@ private:
 // ===========================================================================
 
 template <typename Key, typename Data, typename Hash>
-UdiTable<Key, Data, Hash>::UdiTable(size_t num_slots) : slots_(num_slots), last_reset_time_(std::chrono::system_clock::now())
+UdiTable<Key, Data, Hash>::UdiTable(size_t num_slots, double window_decay_seconds, double window_expiration_seconds,
+                                    size_t num_probes)
+  : slots_(num_slots),
+    window_decay_inverse_(1.0 / window_decay_seconds),
+    window_expiration_seconds_(window_expiration_seconds),
+    num_probes_(num_probes),
+    last_reset_time_(std::chrono::system_clock::now())
 {
   slots_.reserve(num_slots);
   lookup_.reserve(num_slots);
@@ -278,11 +336,18 @@ UdiTable<Key, Data, Hash>::process_event(Key const &key, uint32_t score_delta)
 {
   std::lock_guard<std::mutex> lock(mutex_);
 
+  double now = current_time();
+
   // Check if already tracked
   auto it = lookup_.find(key);
   if (it != lookup_.end()) {
-    Slot &slot  = slots_[it->second];
-    slot.score += score_delta;
+    Slot  &slot    = slots_[it->second];
+    double delta_t = now - slot.last_update_time;
+    double factor  = std::exp(-delta_t * window_decay_inverse_);
+
+    // Apply EWMA: decay existing score then add new input
+    slot.ewma_score       = factor * slot.ewma_score + static_cast<double>(score_delta);
+    slot.last_update_time = now;
     return slot.data;
   }
 
@@ -378,12 +443,14 @@ UdiTable<Key, Data, Hash>::dump(data_format_fn format_data) const
 
   std::lock_guard<std::mutex> lock(mutex_);
 
+  double now = current_time();
   for (auto const &[key, slot_idx] : lookup_) {
-    Slot const &slot = slots_[slot_idx];
+    Slot const &slot          = slots_[slot_idx];
+    double      decayed_score = slot.decayed_score(now, window_decay_inverse_);
     if (format_data) {
-      result += format_data(slot.key, slot.score, slot.data);
+      result += format_data(slot.key, decayed_score, slot.data);
     } else {
-      result += "slot[" + std::to_string(slot_idx) + "] score=" + std::to_string(slot.score) + "\n";
+      result += "slot[" + std::to_string(slot_idx) + "] score=" + std::to_string(decayed_score) + "\n";
     }
   }
   return result;
@@ -397,41 +464,70 @@ UdiTable<Key, Data, Hash>::contest(Key const &key, uint32_t incoming_score)
 
   metric_contests_.fetch_add(1, std::memory_order_relaxed);
 
-  // This should never happen, but just in case
   if (slots_.empty()) {
     return nullptr;
   }
 
-  // Get next contest slot and advance pointer (rotating through all slots)
-  size_t slot_idx = contest_ptr_;
-  contest_ptr_    = (contest_ptr_ + 1) % slots_.size();
+  double now            = current_time();
+  Slot  *best_candidate = nullptr;
+  double best_score     = std::numeric_limits<double>::max();
+  size_t best_idx       = 0;
 
-  Slot    &slot          = slots_[slot_idx];
-  uint32_t current_score = slot.score;
+  // If table isn't full, find an empty slot directly (guaranteed to exist).
+  if (lookup_.size() < slots_.size()) {
+    for (size_t idx = 0; idx < slots_.size(); ++idx) {
+      if (slots_[idx].is_empty()) {
+        best_candidate = &slots_[idx];
+        best_idx       = idx;
+        best_score     = 0.0;
+        break;
+      }
+    }
+  } else {
+    // Table is full - probe random slots to find best eviction candidate.
+    for (size_t probe = 0; probe < num_probes_; ++probe) {
+      size_t idx  = rng_() % slots_.size();
+      Slot  &slot = slots_[idx];
 
-  if (slot.is_empty() || incoming_score > current_score) {
-    // New key wins - takes the slot
-    if (!slot.is_empty()) {
-      // Evict the old key from the lookup
-      lookup_.erase(slot.key);
+      // Window-based expiration: if entry is older than window, it's stale
+      if (slot.last_update_time + window_expiration_seconds_ <= now) {
+        // Stale entry - can be evicted without score comparison
+        best_candidate = &slot;
+        best_idx       = idx;
+        best_score     = 0.0;
+        break;
+      }
+
+      double score = slot.decayed_score(now, window_decay_inverse_);
+      if (score < best_score) {
+        best_candidate = &slot;
+        best_idx       = idx;
+        best_score     = score;
+      }
+    }
+  }
+
+  // Compare incoming score against best candidate's decayed score
+  if (static_cast<double>(incoming_score) > best_score) {
+    // Evict and take the slot
+    if (best_candidate != nullptr && !best_candidate->is_empty()) {
+      lookup_.erase(best_candidate->key);
       metric_evictions_.fetch_add(1, std::memory_order_relaxed);
     }
 
     // Initialize the slot with new key and fresh Data
-    slot.key     = key;
-    slot.score   = incoming_score;
-    slot.data    = std::make_shared<Data>();
-    lookup_[key] = slot_idx;
+    best_candidate->key              = key;
+    best_candidate->ewma_score       = static_cast<double>(incoming_score);
+    best_candidate->last_update_time = now;
+    best_candidate->data             = std::make_shared<Data>();
+    lookup_[key]                     = best_idx;
 
     metric_contests_won_.fetch_add(1, std::memory_order_relaxed);
-    return slot.data;
-  } else {
-    // New key loses - existing slot survives but is weakened
-    if (current_score > 0) {
-      --slot.score;
-    }
-    return nullptr;
+    return best_candidate->data;
   }
+
+  // No eviction candidate found.
+  return nullptr;
 }
 
 } // namespace ts

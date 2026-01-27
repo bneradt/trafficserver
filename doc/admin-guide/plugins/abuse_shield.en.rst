@@ -44,13 +44,29 @@ Key features:
 Algorithm
 =========
 
-The plugin uses the "Udi King of the Hill" algorithm for IP tracking. This is an
-implementation of the Uid algorithm described in the now expired US Patent 7533414B1:
+The plugin uses an enhanced "Udi King of the Hill" algorithm for IP tracking,
+based on the Udi algorithm described in the now expired US Patent 7533414B1:
 
 https://patents.google.com/patent/US7533414B1
 
-This algorithm uses a table, the size of which is configurable. See the
-``slots`` configuration below.
+Key enhancements over the original algorithm:
+
+**EWMA Scoring**
+  IP scores use Exponential Weighted Moving Average (EWMA) decay. Scores naturally
+  decrease over time, so inactive IPs become easier to evict while active abusers
+  maintain high scores. The decay rate is controlled by ``window_seconds``.
+
+**Multi-Probe Eviction**
+  When the table is full and a new IP needs a slot, the algorithm probes 4 random
+  slots and evicts the one with the lowest decayed score. This "power of N choices"
+  approach significantly improves eviction quality compared to single-slot selection.
+
+**Window-Based Expiration**
+  IPs that haven't been seen for longer than ``window_seconds`` are automatically
+  considered stale and can be evicted without score comparison. This prevents
+  "zombie" entries from occupying slots indefinitely.
+
+This algorithm uses a fixed-size table configured by ``slots``.
 
 Installation
 ============
@@ -78,8 +94,9 @@ The configuration uses YAML format with the following structure:
 
     global:
       ip_tracking:
-        slots: 50000              # Number of IP tracking slots
-        window_seconds: 60        # Time window for rate calculations (default 60s)
+        slots: 50000                    # Number of IP tracking slots
+        window_decay_seconds: 60        # EWMA decay window (default 60s)
+        window_expiration_seconds: 60   # Staleness expiration window (default 60s)
 
       blocking:
         duration_seconds: 300     # How long to block abusive IPs
@@ -100,6 +117,45 @@ The configuration uses YAML format with the following structure:
         action: [log, block, close]
 
     enabled: true
+
+IP Tracking Settings
+--------------------
+
+The ``ip_tracking`` section controls the IP tracking table behavior:
+
+============================= ======= ============================================================
+Setting                       Default Description
+============================= ======= ============================================================
+``slots``                     50000   Maximum number of IPs to track simultaneously. Memory usage
+                                      is approximately 128 bytes per slot.
+``window_decay_seconds``      60      Controls the EWMA decay rate for IP scores. Scores decay
+                                      exponentially over time. After this many seconds, an
+                                      inactive IP's score will have decayed to approximately
+                                      37% (1/e) of its original value.
+``window_expiration_seconds`` 60      Controls staleness expiration. IPs that haven't been seen
+                                      for longer than this many seconds are automatically
+                                      considered stale and can be evicted without score
+                                      comparison, even if they had high scores previously.
+============================= ======= ============================================================
+
+**Tuning the decay window** (``window_decay_seconds``):
+
+* **Shorter decay** (e.g., 30s): Scores decay faster, so brief pauses in attack
+  traffic may allow the attacker to "reset" their score. Better for detecting
+  burst attacks.
+
+* **Longer decay** (e.g., 300s): Scores persist longer, better for detecting
+  slow, sustained attacks.
+
+**Tuning the expiration window** (``window_expiration_seconds``):
+
+* **Shorter expiration** (e.g., 30s): IPs are evicted sooner, freeing slots for
+  new IPs. Good when you have many unique IPs.
+
+* **Longer expiration** (e.g., 300s): IPs remain tracked longer even when idle.
+  Useful if attackers pause and resume attacks.
+
+In most cases, setting both to the same value is appropriate.
 
 Rule Filters
 ------------
@@ -160,8 +216,10 @@ Rate Limiting
 -------------
 
 The plugin supports per-IP rate limiting for both connections and requests.
-Rates are measured within a sliding time window configured by ``window_seconds``
-(default: 60 seconds).
+Rate counters use EWMA (Exponential Weighted Moving Average) scoring, which
+provides smooth decay over the ``window_seconds`` time period. This is more
+robust than simple sliding windows because it doesn't have abrupt "cliff"
+effects when events age out.
 
 **Connection Rate Limiting** (``max_conn_rate``):
 
@@ -307,7 +365,8 @@ Basic protection against HTTP/2 attacks:
     global:
       ip_tracking:
         slots: 50000
-        window_seconds: 60
+        window_decay_seconds: 60
+        window_expiration_seconds: 60
 
       blocking:
         duration_seconds: 300

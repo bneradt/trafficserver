@@ -119,10 +119,10 @@ generate_keys(int n)
 
 // Run benchmark with specified number of threads
 void
-run_benchmark(int nthreads, int table_size, int ops_per_thread, const std::vector<std::string> &keys, bool use_zipf,
-              double zipf_exponent)
+run_benchmark(int nthreads, int table_size, double window_decay_seconds, double window_expiration_seconds, int ops_per_thread,
+              const std::vector<std::string> &keys, bool use_zipf, double zipf_exponent)
 {
-  BenchTable               table(table_size);
+  BenchTable               table(table_size, window_decay_seconds, window_expiration_seconds);
   std::vector<std::thread> threads;
   std::atomic<uint64_t>    total_ops{0};
   std::atomic<uint64_t>    successful_ops{0};
@@ -181,18 +181,24 @@ run_benchmark(int nthreads, int table_size, int ops_per_thread, const std::vecto
 int
 main(int argc, char *argv[])
 {
-  int    table_size     = 10000;
-  int    ops_per_thread = 100000;
-  int    unique_keys    = 50000;
-  int    max_threads    = 16;
-  bool   use_zipf       = false;
-  double zipf_exponent  = 1.0;
+  int    table_size                = 10000;
+  double window_decay_seconds      = 60.0;
+  double window_expiration_seconds = 60.0;
+  int    ops_per_thread            = 100000;
+  int    unique_keys               = 50000;
+  int    max_threads               = 16;
+  bool   use_zipf                  = false;
+  double zipf_exponent             = 1.0;
 
   // Parse args
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
     if (arg == "--table-size" && i + 1 < argc) {
       table_size = std::stoi(argv[++i]);
+    } else if (arg == "--window-decay" && i + 1 < argc) {
+      window_decay_seconds = std::stod(argv[++i]);
+    } else if (arg == "--window-expiration" && i + 1 < argc) {
+      window_expiration_seconds = std::stod(argv[++i]);
     } else if (arg == "--ops" && i + 1 < argc) {
       ops_per_thread = std::stoi(argv[++i]);
     } else if (arg == "--keys" && i + 1 < argc) {
@@ -207,8 +213,10 @@ main(int argc, char *argv[])
       }
     } else if (arg == "--help" || arg == "-h") {
       std::cout << "Usage: " << argv[0] << " [options]\n"
-                << "  --table-size N    Table size (default: 10000)\n"
-                << "  --ops N           Operations per thread (default: 100000)\n"
+                << "  --table-size N         Table size (default: 10000)\n"
+                << "  --window-decay S       EWMA decay window in seconds (default: 60.0)\n"
+                << "  --window-expiration S  Staleness expiration window in seconds (default: 60.0)\n"
+                << "  --ops N                Operations per thread (default: 100000)\n"
                 << "  --keys N          Unique keys (default: 50000)\n"
                 << "  --max-threads N   Max threads to test (default: 16)\n"
                 << "  --zipf [S]        Use Zipf (power-law) distribution with exponent S (default: 1.0)\n"
@@ -221,10 +229,12 @@ main(int argc, char *argv[])
 
   auto keys = generate_keys(unique_keys);
 
-  std::cout << "UdiTable Benchmark\n"
-            << "  Table size:  " << table_size << "\n"
-            << "  Ops/thread:  " << ops_per_thread << "\n"
-            << "  Unique keys: " << unique_keys << "\n"
+  std::cout << "UdiTable Benchmark (EWMA + Multi-Probe)\n"
+            << "  Table size:         " << table_size << "\n"
+            << "  Window decay:       " << window_decay_seconds << "s\n"
+            << "  Window expiration:  " << window_expiration_seconds << "s\n"
+            << "  Ops/thread:         " << ops_per_thread << "\n"
+            << "  Unique keys:  " << unique_keys << "\n"
             << "  Distribution: " << (use_zipf ? "Zipf (s=" + std::to_string(zipf_exponent) + ")" : "Uniform") << "\n\n";
 
   // Show distribution preview for Zipf
@@ -242,7 +252,8 @@ main(int argc, char *argv[])
   std::cout << std::string(76, '-') << std::endl;
 
   for (int nthreads = 1; nthreads <= max_threads; nthreads *= 2) {
-    run_benchmark(nthreads, table_size, ops_per_thread, keys, use_zipf, zipf_exponent);
+    run_benchmark(nthreads, table_size, window_decay_seconds, window_expiration_seconds, ops_per_thread, keys, use_zipf,
+                  zipf_exponent);
   }
 
   return 0;
