@@ -1,6 +1,7 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) and similar coding
+agents (including Codex) when working with code in this repository.
 
 ## Project Overview
 
@@ -19,10 +20,21 @@ with a sophisticated plugin system.
 If `.claude/CLAUDE.local.md` sub-agent exists, load it for user-specific code style
 preferences and working conventions. This file is gitignored and optional.
 
+## Agent Operating Guidance
+
+- Prefer non-interactive shell commands and scripts.
+- Never run destructive git commands (for example `git reset --hard`) unless explicitly requested.
+- Do not push commits, post PR comments, or merge unless explicitly requested.
+- If the task is "review", prioritize reporting concrete findings first (severity + file references).
+- Keep changes focused; do not refactor unrelated areas.
+
 ## Build Commands
 
 ### Basic Build
 ```bash
+# Preferred if available (local helper script):
+~/bin/build_ats
+
 # Configure (creates out-of-source build directory)
 cmake -B build
 
@@ -54,8 +66,8 @@ cmake --build build-autest
 cmake -B build -Djemalloc_ROOT=/opt/jemalloc -DOPENSSL_ROOT_DIR=/opt/boringssl
 
 # Build specific targets
-cmake --build build -t traffic_server
-cmake --build build -t format  # Format code before committing
+cmake --build build --target traffic_server
+cmake --build build --target format  # Format code before committing
 ```
 
 ### Key CMake Options
@@ -91,14 +103,14 @@ cmake --install build
 
 **Run all autests:**
 ```bash
-cmake --build build -t autest
+cmake --build build --target autest
 ```
 
 **Run specific test(s):**
 ```bash
 cd build/tests
 pipenv install  # First time only
-./autest.sh --sandbox /tmp/sbcursor --clean=none -f <test_name_without_test_py>
+./autest.sh --sandbox /tmp/sbcursor --clean=none -f <test_name_without_.test.py>
 ```
 
 For example, to run `cache-auth.test.py`:
@@ -127,7 +139,7 @@ parseable by tools.
 ### Code Formatting
 Always format code before committing:
 ```bash
-cmake --build build -t format
+cmake --build build --target format
 ```
 
 ### Git Workflow
@@ -271,9 +283,9 @@ SMDebug(dbg_ctl, "Processing request for URL: %s", url);
 - Use RAII principles
 - Prefer smart pointers for ownership
 - Don't use templates unless needed and appropriate
-- Run `cmake --build build -t format` before committing
+- Run `cmake --build build --target format` before committing
 - Line length: 132 characters maximum
-- Don't add comments where the code documents itself, don't comment claude interactions
+- Don't add comments where the code documents itself, and don't add comments about agent interactions
 
 **C++ Formatting (Mozilla-based style):**
 - Indentation: 2 spaces for C/C++
