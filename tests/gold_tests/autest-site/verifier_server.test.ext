@@ -35,8 +35,11 @@ def _filter_client_only_transactions(process, replay_path):
         return replay_path
 
     replay_abspath = replay_path if os.path.isabs(replay_path) else os.path.join(process.TestDirectory, replay_path)
-    with open(replay_abspath, 'r') as replay_file:
-        replay_config = yaml.safe_load(replay_file)
+    try:
+        with open(replay_abspath, 'r') as replay_file:
+            replay_config = yaml.safe_load(replay_file)
+    except (OSError, yaml.YAMLError):
+        return replay_path
 
     sessions = replay_config.get('sessions')
     if not isinstance(sessions, list):

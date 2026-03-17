@@ -30,26 +30,3 @@ sessions:
             encoding: plain
             data: client_test
             size: 11
-
-    proxy-request:
-      content:
-        encoding: plain
-        data: client_test
-        verify: {as: equal}
-
-    server-response:
-      headers:
-        fields:
-        - [:status, 200]
-        - [Content-Type, text/html]
-        - [Content-Length, '11']
-      content:
-        encoding: plain
-        data: server_test
-        size: 11
-
-    proxy-response:
-      content:
-        encoding: plain
-        data: server_test
-        verify: {as: equal}

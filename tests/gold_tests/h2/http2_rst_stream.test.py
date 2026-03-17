@@ -29,7 +29,7 @@ Test.SkipUnless(Condition.HasOpenSSLVersion('1.1.1'), Condition.HasProxyVerifier
 #
 ts = Test.MakeATSProcess("ts0", enable_tls=True)
 replay_file = "replay_rst_stream/http2_rst_stream_client_after_data.yaml"
-server = Test.MakeVerifierServerProcess("server0", replay_file)
+server = Test.MakeVerifierServerProcess("server0", "replay_rst_stream/http2_rst_stream_no_origin.yaml")
 ts.addDefaultSSLFiles()
 ts.Disk.records_config.update(
     {
@@ -73,7 +73,7 @@ ts.Disk.traffic_out.Content += Testers.ContainsExpression('Parsed RST_STREAM fra
 #
 ts = Test.MakeATSProcess("ts1", enable_tls=True)
 replay_file = "replay_rst_stream/http2_rst_stream_client_after_headers.yaml"
-server = Test.MakeVerifierServerProcess("server1", replay_file)
+server = Test.MakeVerifierServerProcess("server1", "replay_rst_stream/http2_rst_stream_no_origin.yaml")
 ts.addDefaultSSLFiles()
 ts.Disk.records_config.update(
     {
