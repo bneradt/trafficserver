@@ -156,18 +156,19 @@ restore_accept_encoding(TSHttpTxn /* txnp ATS_UNUSED */, TSMBuffer reqp, TSMLoc 
 const char *
 init_hidden_header_name()
 {
-  char        *hidden_header_name{nullptr};
-  const char  *var_name = "proxy.config.proxy_name";
-  TSMgmtString result;
+  static constexpr char DEFAULT_PROXY_NAME[] = "traffic_server";
+  char                 *hidden_header_name{nullptr};
+  const char           *var_name = "proxy.config.proxy_name";
+  TSMgmtString          result   = nullptr;
 
-  if (TSMgmtStringGet(var_name, &result) != TS_SUCCESS) {
-    fatal("failed to get server name");
-  } else {
-    size_t hidden_header_name_size = strlen("x-accept-encoding-") + strlen(result) + 1; // add one for null
-    hidden_header_name             = static_cast<char *>(TSmalloc(hidden_header_name_size));
-    snprintf(hidden_header_name, hidden_header_name_size, "x-accept-encoding-%s", result);
-    TSfree(result);
+  if (TSMgmtStringGet(var_name, &result) != TS_SUCCESS || result == nullptr || result[0] == '\0') {
+    warning("failed to get server name from %s, using default %s", var_name, DEFAULT_PROXY_NAME);
+    result = TSstrdup(DEFAULT_PROXY_NAME);
   }
+  size_t hidden_header_name_size = strlen("x-accept-encoding-") + strlen(result) + 1; // add one for null
+  hidden_header_name             = static_cast<char *>(TSmalloc(hidden_header_name_size));
+  snprintf(hidden_header_name, hidden_header_name_size, "x-accept-encoding-%s", result);
+  TSfree(result);
   return hidden_header_name;
 }
 
