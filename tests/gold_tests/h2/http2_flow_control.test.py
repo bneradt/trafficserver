@@ -20,6 +20,8 @@ import re
 from enum import Enum
 from typing import List, Optional
 
+from ports import get_port
+
 Test.Summary = __doc__
 
 
@@ -125,12 +127,17 @@ class Http2FlowControlTest:
                 'proxy.config.ssl.server.cert.path': f'{ts.Variables.SSLDir}',
                 'proxy.config.ssl.server.private_key.path': f'{ts.Variables.SSLDir}',
                 'proxy.config.ssl.client.verify.server.policy': 'PERMISSIVE',
-                'proxy.config.dns.nameservers': '127.0.0.1:{0}'.format(self._dns.Variables.Port),
-                'proxy.config.dns.resolv_conf': 'NULL',
                 'proxy.config.http.insert_age_in_response': 0,
                 'proxy.config.diags.debug.enabled': 3,
                 'proxy.config.diags.debug.tags': 'http',
             })
+
+        if self._dns is not None:
+            ts.Disk.records_config.update(
+                {
+                    'proxy.config.dns.nameservers': f'127.0.0.1:{self._dns.Variables.Port}',
+                    'proxy.config.dns.resolv_conf': 'NULL',
+                })
 
         if server_type == self.ServerType.HTTP2:
             ts.Disk.records_config.update({
