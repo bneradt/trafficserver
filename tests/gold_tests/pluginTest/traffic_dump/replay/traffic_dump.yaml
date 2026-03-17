@@ -214,16 +214,6 @@ sessions:
         - [ Content-Length, 0 ]
         - [ uuid, 6 ]
 
-    # We do not expect this to make it to the server since it should be served
-    # out of the cache. If it makes it to the server, reply with a 503 so
-    # we can detect that this happened.
-    server-response:
-      status: 503
-      reason: Service Unavailable
-      headers:
-        fields:
-        - [ Content-Length, 16 ]
-
     # Expect the cached 200 response.
     proxy-response:
       status: 200
@@ -367,4 +357,3 @@ sessions:
         # Again, the sensitive set-cookie should get through to the client, it
         # just shouldn't be dumped in traffic dumps.
         - [ X-Response-1, { value: response_tunnel, as: equal } ]
-

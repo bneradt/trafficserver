@@ -160,9 +160,6 @@ sessions:
       # transaction.
       delay: 100ms
 
-    server-response:
-      <<: *404_response
-
     # The response should be served out of the cache, not from the server.
     proxy-response:
       status: 200
@@ -306,9 +303,6 @@ sessions:
       # transaction.
       delay: 100ms
 
-    server-response:
-      <<: *404_response
-
     # The fifth alternate should be served out of cache.
     proxy-response:
       status: 200
@@ -371,15 +365,6 @@ sessions:
       # Add a delay so ATS has time to finish any caching IO for the previous
       # transaction.
       delay: 100ms
-
-    proxy-request:
-      headers:
-        fields:
-        - [ X-Vary-On-This, { value: sixth, as: equal } ]
-
-    # This should be served out of the cache and not reach the origin.
-    server-response:
-      <<: *404_response
 
     proxy-response:
       status: 200

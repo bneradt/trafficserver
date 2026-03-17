@@ -72,10 +72,6 @@ sessions:
       headers:
         fields:
         - [ Host, base.ex ]
-    proxy-request:
-      <<: *base-req
-    server-response:
-      <<: *base-rsp
     proxy-response:
       status: 301
       headers:
@@ -89,10 +85,6 @@ sessions:
       headers:
         fields:
         - [ "Host", "base.ex" ]
-    proxy-request:
-      <<: *base-req
-    server-response:
-      <<: *base-rsp
     proxy-response:
       status: 301
       headers:
@@ -106,10 +98,6 @@ sessions:
       headers:
         fields:
         - [ Host, base.ex ]
-    proxy-request:
-      <<: *base-req
-    server-response:
-      <<: *base-rsp
     proxy-response:
       status: 301
       headers:
@@ -123,10 +111,6 @@ sessions:
       headers:
         fields:
         - [ "Host", "base.ex" ]
-    proxy-request:
-      <<: *base-req
-    server-response:
-      <<: *base-rsp
     proxy-response:
       status: 302
       headers:
@@ -140,10 +124,6 @@ sessions:
       headers:
         fields:
         - [ "Host", "base.ex" ]
-    proxy-request:
-      <<: *base-req
-    server-response:
-      <<: *base-rsp
     proxy-response:
       status: 302
       headers:
@@ -158,10 +138,6 @@ sessions:
       headers:
         fields:
         - [ "Host", "base.ex" ]
-    proxy-request:
-      <<: *base-req
-    server-response:
-      <<: *base-rsp
     proxy-response:
       status: 302
       headers:
@@ -194,10 +170,6 @@ sessions:
       headers:
         fields:
         - [ "Host", "base.ex" ]
-    proxy-request:
-      <<: *base-req
-    server-response:
-      <<: *base-rsp
     proxy-response:
       status: 302
       headers:
@@ -211,10 +183,6 @@ sessions:
       headers:
         fields:
         - [ "Host", "base.ex" ]
-    proxy-request:
-      <<: *base-req
-    server-response:
-      <<: *base-rsp
     proxy-response:
       status: 302
       headers:
@@ -228,10 +196,6 @@ sessions:
       headers:
         fields:
         - [ "Host", "encode.ex" ]
-    proxy-request:
-      <<: *base-req
-    server-response:
-      <<: *base-rsp
     proxy-response:
       status: 302
       headers:
@@ -244,10 +208,6 @@ sessions:
       headers:
         fields:
         - [ "Host", "decode.ex" ]
-    proxy-request:
-      <<: *base-req
-    server-response:
-      <<: *base-rsp
     proxy-response:
       status: 302
       headers:

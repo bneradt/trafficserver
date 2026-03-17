@@ -341,10 +341,6 @@ sessions:
       headers:
         fields:
         - [ Host, unmapped.ex ]
-    proxy-request:
-      <<: *base-req
-    server-response:
-      <<: *base-rsp
     proxy-response:
       status: 404
 
@@ -356,10 +352,6 @@ sessions:
       headers:
         fields:
         - [ Host, unmapped.ex ]
-    proxy-request:
-      <<: *base-req
-    server-response:
-      <<: *base-rsp
     proxy-response:
       status: 200
 
@@ -371,10 +363,6 @@ sessions:
       headers:
         fields:
         - [ Host, unmapped.ex ]
-    proxy-request:
-      <<: *base-req
-    server-response:
-      <<: *base-rsp
     proxy-response:
       status: 404
 
@@ -386,16 +374,6 @@ sessions:
       headers:
         fields:
         - [ Host, base.ex ]
-    proxy-request:
-      <<: *base-req
-    server-response:
-      status: 404
-      reason: "Missing"
-      headers:
-        fields:
-        - [ Content-Type, html/plaintext ]
-        - [ Content-Length, 90 ]
-        - [ Cache-Status, live ] # Should not arrive because not in cached version.
     proxy-response:
       status: 200
       headers:

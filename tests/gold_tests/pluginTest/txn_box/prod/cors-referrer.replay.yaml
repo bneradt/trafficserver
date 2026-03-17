@@ -74,10 +74,6 @@ sessions:
       headers:
         fields:
         - [ Host, api.ex ]
-    proxy-request:
-      <<: *base-req
-    server-response:
-      <<: *base-rsp
     proxy-response:
       status: 401
 
@@ -90,10 +86,6 @@ sessions:
         fields:
         - [ Host, api.ex ]
         - [ Referrer, "http://echo.ex/ui/demo" ]
-    proxy-request:
-        <<: *base-req
-    server-response:
-      <<: *base-rsp
     proxy-response:
       status: 401
 
@@ -114,4 +106,3 @@ sessions:
       headers:
         fields:
         - [ "CORS", { value: "delta.ex", as: equal }]
-

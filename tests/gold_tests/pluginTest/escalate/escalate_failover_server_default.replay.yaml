@@ -1,0 +1,56 @@
+meta:
+  version: "1.0"
+
+sessions:
+- transactions:
+  - client-request:
+      method: "GET"
+      version: "1.1"
+      url: /path/get_failed
+      headers:
+        fields:
+        - [ Host, origin.server.com ]
+        - [ Content-Length, 0 ]
+        - [ X-Request, third ]
+        - [ uuid, GET_failed ]
+
+    proxy-request:
+      method: "GET"
+      headers:
+        fields:
+        - [ X-Request, { value: third, as: equal } ]
+
+    server-response:
+      status: 200
+      reason: OK
+      headers:
+        fields:
+        - [ Content-Length, 320000 ]
+        - [ X-Response, third ]
+
+  - client-request:
+      method: "GET"
+      version: "1.1"
+      url: /path/get_down
+      headers:
+        fields:
+        - [ Host, down_origin.server.com ]
+        - [ Content-Length, 0 ]
+        - [ X-Request, fourth ]
+        - [ uuid, GET_down_origin ]
+
+    proxy-request:
+      method: "GET"
+      headers:
+        fields:
+        - [ X-Request, { value: fourth, as: equal } ]
+
+    server-response:
+      status: 200
+      reason: OK
+      headers:
+        fields:
+        - [ Transfer-Encoding, chunked ]
+        - [ X-Response, fourth ]
+      content:
+        size: 320000

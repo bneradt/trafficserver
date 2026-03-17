@@ -166,7 +166,8 @@ class Http2FlowControlTest:
 
         ts.Disk.ssl_multicert_config.AddLine('dest_ip=* ssl_cert_name=server.pem ssl_key_name=server.key')
 
-        ts.Disk.remap_config.AddLine(f'map / https://127.0.0.1:{self._server.Variables.https_port}')
+        origin_port = self._server.Variables.https_port if self._server is not None else get_port(ts, "dead_port")
+        ts.Disk.remap_config.AddLine(f'map / https://127.0.0.1:{origin_port}')
 
         if self._flow_control_policy_is_malformed:
             if is_outbound:
@@ -286,8 +287,11 @@ class Http2FlowControlTest:
 
     def _configure_test_run_common(self, tr, is_outbound: bool, server_type: ServerType) -> None:
         """Perform the common Process configuration."""
-        self._dns = self._configure_dns(tr)
-        self._server = self._configure_server(tr, server_type)
+        self._dns = None
+        self._server = None
+        if not self._flow_control_policy_is_malformed:
+            self._dns = self._configure_dns(tr)
+            self._server = self._configure_server(tr, server_type)
         self._ts = self._configure_trafficserver(tr, is_outbound, server_type)
         if not self._flow_control_policy_is_malformed:
             self._configure_client(tr)

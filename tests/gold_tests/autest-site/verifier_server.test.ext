@@ -18,9 +18,58 @@ Implement the Proxy Verifier test server extension.
 #  limitations under the License.
 
 import os
+import tempfile
+import yaml
 
 from ports import get_port
 from verifier_common import create_address_argument, substitute_context_in_replay_file
+
+
+def _filter_client_only_transactions(process, replay_path):
+    """
+    Create a server-specific replay file by dropping transactions that do not
+    define a server-response. Those client-only transactions are valid for the
+    verifier client, but current proxy-verifier server parsing rejects them.
+    """
+    if os.path.isdir(replay_path):
+        return replay_path
+
+    replay_abspath = replay_path if os.path.isabs(replay_path) else os.path.join(process.TestDirectory, replay_path)
+    with open(replay_abspath, 'r') as replay_file:
+        replay_config = yaml.safe_load(replay_file)
+
+    sessions = replay_config.get('sessions')
+    if not isinstance(sessions, list):
+        return replay_path
+
+    filtered_sessions = []
+    changed = False
+    for session in sessions:
+        transactions = session.get('transactions')
+        if not isinstance(transactions, list):
+            filtered_sessions.append(session)
+            continue
+
+        filtered_transactions = [transaction for transaction in transactions if 'server-response' in transaction]
+        if len(filtered_transactions) != len(transactions):
+            changed = True
+
+        if filtered_transactions:
+            filtered_session = dict(session)
+            filtered_session['transactions'] = filtered_transactions
+            filtered_sessions.append(filtered_session)
+        else:
+            changed = True
+
+    if not changed:
+        return replay_path
+
+    replay_config['sessions'] = filtered_sessions
+    temp_replay = tempfile.NamedTemporaryFile(delete=False, dir=process.RunDirectory, suffix=f"_{os.path.basename(replay_path)}")
+    temp_replay.close()
+    with open(temp_replay.name, 'w') as replay_file:
+        yaml.safe_dump(replay_config, replay_file, sort_keys=False)
+    return temp_replay.name
 
 
 def _configure_server(
@@ -132,6 +181,8 @@ def _configure_server(
             # replace the passed replay file with the new one generated using the passed
             # context
             replay_path = substitute_context_in_replay_file(process, replay_path, context)
+
+        replay_path = _filter_client_only_transactions(process, replay_path)
 
         run_replay_path = os.path.join(server_dir, os.path.basename(replay_path))
         # Create a copy of the replay directory in the run directory.

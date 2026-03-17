@@ -136,23 +136,6 @@ sessions:
               - [Host, example.com]
               - [X-Request, second-exhausted]
 
-        proxy-request:
-          headers:
-            fields:
-              - [X-Request, {value: 'second-exhausted', as: equal}]
-
-        # This request should NOT reach the server if read-while-writer works
-        # It should be served from Request 1's response
-        server-response:
-          status: 400
-          reason: OK
-          headers:
-            fields:
-              - [Content-Length, 200]
-              - [Cache-Control, "max-age=300"]
-              - [X-Response, second-origin]
-              - [X-Origin-Request, second]
-
         # Proxy should respond with 200 from read-while-writer (first request's response)
         proxy-response:
           status: 200
@@ -177,22 +160,6 @@ sessions:
               - [Host, example.com]
               - [X-Request, third-concurrent]
 
-        proxy-request:
-          headers:
-            fields:
-              - [X-Request, {value: 'third-concurrent', as: equal}]
-
-        # This request will also be served via read-while-writer
-        server-response:
-          status: 400
-          reason: OK
-          headers:
-            fields:
-              - [Content-Length, 200]
-              - [Cache-Control, "max-age=300"]
-              - [X-Response, third-origin]
-              - [X-Origin-Request, third]
-
         # Should get a response from read-while-writer
         proxy-response:
           status: 200
@@ -216,15 +183,6 @@ sessions:
               - [uuid, fourth-request-verify]
               - [Host, example.com]
               - [X-Request, fourth-verify]
-
-        # Server should NOT receive this request (should be cache hit)
-        server-response:
-          status: 400
-          reason: OK
-          headers:
-            fields:
-              - [Content-Length, 200]
-              - [X-Response, should-not-reach-origin]
 
         # Proxy should respond from cache with the first-origin response
         proxy-response:
