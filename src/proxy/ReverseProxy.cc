@@ -30,6 +30,7 @@
 #include "tscore/ink_platform.h"
 #include "tscore/Filenames.h"
 #include <dlfcn.h>
+#include "iocore/cache/Cache.h"
 #include "iocore/eventsystem/ConfigProcessor.h"
 #include "proxy/ReverseProxy.h"
 #include "tscore/MatcherUtils.h"
@@ -68,21 +69,27 @@ int
 init_reverse_proxy()
 {
   ink_assert(rewrite_table.load() == nullptr);
-  reconfig_mutex = new_ProxyMutex();
-  rewrite_table.store(new UrlRewrite());
+  reconfig_mutex      = new_ProxyMutex();
+  auto *initial_table = new UrlRewrite();
 
-  rewrite_table.load()->acquire();
+  initial_table->acquire();
   Note("%s loading ...", ts::filename::REMAP);
-  if (!rewrite_table.load()->load()) {
+  if (!initial_table->load()) {
     Emergency("%s failed to load", ts::filename::REMAP);
   } else {
     Note("%s finished loading", ts::filename::REMAP);
   }
 
+  rewrite_table.store(initial_table, std::memory_order_release);
+
   RecRegisterConfigUpdateCb("proxy.config.url_remap.filename", url_rewrite_CB, (void *)FILE_CHANGED);
   RecRegisterConfigUpdateCb("proxy.config.proxy_name", url_rewrite_CB, (void *)TSNAME_CHANGED);
   RecRegisterConfigUpdateCb("proxy.config.reverse_proxy.enabled", url_rewrite_CB, (void *)REVERSE_CHANGED);
   RecRegisterConfigUpdateCb("proxy.config.http.referer_default_redirect", url_rewrite_CB, (void *)HTTP_DEFAULT_REDIRECT_CHANGED);
+
+  if (initial_table->is_valid() && CacheProcessor::IsCacheEnabled() == CacheInitState::INITIALIZED) {
+    init_remap_volume_host_records();
+  }
 
   return 0;
 }
