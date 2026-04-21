@@ -8957,6 +8957,12 @@ HttpTransact::update_size_and_time_stats(State *s, ink_hrtime total_time, ink_hr
     Metrics::Counter::increment(http_rsb.background_fill_bytes_completed, bg_size);
     break;
   }
+  // STARTED is normally transitioned to COMPLETED or ABORTED by
+  // tunnel_handler_server, and HttpSM::kill_this() normalizes any leftover
+  // STARTED state to ABORTED before reaching here. Treat STARTED the same as
+  // ABORTED defensively in case a future code path reaches this point with
+  // the bg fill still in flight, so we record the bytes rather than abort.
+  case BackgroundFill_t::STARTED:
   case BackgroundFill_t::ABORTED: {
     int64_t bg_size = origin_server_response_body_size - user_agent_response_body_size;
 
@@ -8968,7 +8974,6 @@ HttpTransact::update_size_and_time_stats(State *s, ink_hrtime total_time, ink_hr
   }
   case BackgroundFill_t::NONE:
     break;
-  case BackgroundFill_t::STARTED:
   default:
     ink_assert(0);
   }

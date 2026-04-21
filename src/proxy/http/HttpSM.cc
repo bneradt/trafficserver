@@ -7706,6 +7706,23 @@ HttpSM::kill_this()
   //   we must check it again
   if (kill_this_async_done == true) {
     pending_action = nullptr;
+
+    // The background fill state is normally driven to a terminal value
+    // (COMPLETED or ABORTED) by tunnel_handler_server when the server-side
+    // tunnel finishes. If the SM is torn down before that handler runs (for
+    // example, when an Http2Stream event re-enters the SM and drives
+    // kill_this while the bg fill is still in flight), the state can remain
+    // STARTED. In that case the background_fill_current_count gauge would
+    // also leak, because tunnel_handler_server is the only place that
+    // decrements it after tunnel_handler_ua incremented it. Normalize the
+    // state here, before the enable_http_stats gate, so the accounting
+    // balances regardless of whether http stats are enabled and so
+    // update_size_and_time_stats does not see an unexpected value.
+    if (background_fill == BackgroundFill_t::STARTED) {
+      background_fill = BackgroundFill_t::ABORTED;
+      Metrics::Gauge::decrement(http_rsb.background_fill_current_count);
+    }
+
     if (t_state.http_config_param->enable_http_stats) {
       update_stats();
     }
