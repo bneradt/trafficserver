@@ -273,9 +273,9 @@ findPatternFromParamName(const char *lookup_query_param, const char *pattern, bo
 static void
 updatePatternForFieldValue(char *field, const char *pattern_str, int /* field_pos ATS_UNUSED */, char *buf_dest)
 {
-  int   buf_dest_len = strlen(buf_dest);
-  char  buf_dest_to_field[buf_dest_len + 1];
-  char *temp_text = buf_dest_to_field;
+  int                     buf_dest_len = strlen(buf_dest);
+  std::unique_ptr<char[]> buf_dest_to_field(new char[buf_dest_len + 1]);
+  char                   *temp_text = buf_dest_to_field.get();
 
   memcpy(temp_text, buf_dest, (pattern_str - buf_dest));
   temp_text += (pattern_str - buf_dest);
@@ -305,7 +305,7 @@ updatePatternForFieldValue(char *field, const char *pattern_str, int /* field_po
   }
 
   buf_dest_to_field[buf_dest_len] = '\0';
-  strcpy(field, buf_dest_to_field);
+  strcpy(field, buf_dest_to_field.get());
 }
 
 /*---------------------------------------------------------------------------
