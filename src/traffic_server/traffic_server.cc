@@ -73,7 +73,7 @@ extern "C" int plock(int);
 #include "tscore/signals.h"
 #include "../iocore/eventsystem/P_EventSystem.h"
 #include "../iocore/net/P_Net.h"
-#if TS_HAS_QUICHE
+#if TS_USE_QUIC == 1
 #include "../iocore/net/P_QUICNetProcessor.h"
 #endif
 #include "../iocore/net/P_UDPNet.h"
