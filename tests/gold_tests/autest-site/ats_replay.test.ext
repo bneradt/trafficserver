@@ -37,18 +37,26 @@ def configure_ats(obj: 'TestRun', server: 'Process', ats_config: dict, dns: Opti
     ts = obj.MakeATSProcess(name, **process_config)
     if disable_log_checks:
         ts.Disk.diags_log.Content = Testers.ExcludesExpression(r'(?!)', 'Default diags log checks are disabled.')
+    if 'startup_timeout' in ats_config:
+        ts.StartupTimeout = ats_config['startup_timeout']
 
     records_config = ats_config.get('records_config', {})
     ts.Disk.records_config.update(records_config)
 
-    if process_config.get('enable_tls', False):
-        ts.addDefaultSSLFiles()
-        ts.Disk.records_config.update(
-            {
-                'proxy.config.ssl.server.cert.path': ts.Variables.SSLDir,
-                'proxy.config.ssl.server.private_key.path': ts.Variables.SSLDir,
-            })
-        ts.Disk.ssl_multicert_config.AddLine('dest_ip=* ssl_cert_name=server.pem ssl_key_name=server.key')
+    enable_tls = process_config.get('enable_tls', ats_config.get('enable_tls', False))
+    if enable_tls:
+        ssl_multicert_config = ats_config.get('ssl_multicert_config', [])
+        if not ssl_multicert_config:
+            ts.addDefaultSSLFiles()
+            ts.Disk.records_config.update(
+                {
+                    'proxy.config.ssl.server.cert.path': ts.Variables.SSLDir,
+                    'proxy.config.ssl.server.private_key.path': ts.Variables.SSLDir,
+                })
+            ssl_multicert_config = ['dest_ip=* ssl_cert_name=server.pem ssl_key_name=server.key']
+
+        for line in ssl_multicert_config:
+            ts.Disk.ssl_multicert_config.AddLine(line)
 
     # Configure plugin_config if specified.
     plugin_config = ats_config.get('plugin_config', [])
@@ -174,14 +182,19 @@ def ATSReplayTest(obj, replay_file: str):
     name = server_config['name']
     process_config = server_config.get('process_config', {})
     server = tr.AddVerifierServerProcess(name, replay_file, **process_config)
+    if 'return_code' in server_config:
+        server.ReturnCode = server_config['return_code']
 
     # ATS configuration.
     if not 'ats' in autest_config:
         raise ValueError(f"Replay file {replay_file} does not contain 'autest.ats' section")
     ats_config = autest_config['ats']
-    process_config = ats_config.get('process_config', {})
-    enable_tls = process_config.get('enable_tls', ats_config.get('enable_tls', False))
+    ats_process_config = ats_config.get('process_config', {})
+    enable_tls = ats_process_config.get('enable_tls', ats_config.get('enable_tls', False))
+    enable_quic = ats_process_config.get('enable_quic', ats_config.get('enable_quic', False))
     ts = configure_ats(tr, server=server, ats_config=ats_config, dns=dns)
+    if 'return_code' in ats_config:
+        ts.ReturnCode = ats_config['return_code']
 
     # Proxy Verifier Client configuration.
     if not 'client' in autest_config:
@@ -190,8 +203,11 @@ def ATSReplayTest(obj, replay_file: str):
     name = client_config.get('name', 'client')
     process_config = client_config.get('process_config', {})
     https_ports = [ts.Variables.ssl_port] if enable_tls else None
+    http3_ports = [ts.Variables.ssl_port] if enable_quic else None
     client = tr.AddVerifierClientProcess(
-        name, replay_file, http_ports=[ts.Variables.port], https_ports=https_ports, **process_config)
+        name, replay_file, http_ports=[ts.Variables.port], https_ports=https_ports, http3_ports=http3_ports, **process_config)
+    if 'return_code' in client_config:
+        client.ReturnCode = client_config['return_code']
 
     if dns:
         ts.StartBefore(dns)
