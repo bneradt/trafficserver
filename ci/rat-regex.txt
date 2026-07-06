@@ -25,6 +25,8 @@
 (^|.*/)uv\.lock$
 .*\.yaml$
 .*\.gold$
+.*go\.mod$
+.*go\.sum$
 ^\.gitignore$
 ^\.gitmodules$
 ^\.perltidyrc$
