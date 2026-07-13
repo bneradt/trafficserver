@@ -23,6 +23,7 @@
 
 #include "P_SSLCertLookup.h"
 #include "P_SSLConfig.h"
+#include "P_SSLUtils.h"
 #include "iocore/net/QUICMultiCertConfigLoader.h"
 #include "iocore/net/quic/QUICConfig.h"
 #include "mgmt/config/ConfigContextDiags.h"
@@ -107,10 +108,9 @@ QUICMultiCertConfigLoader::_set_cipher_suites_for_legacy_versions(SSL_CTX * /* c
 }
 
 bool
-QUICMultiCertConfigLoader::_set_info_callback(SSL_CTX * /* ctx ATS_UNUSED */)
+QUICMultiCertConfigLoader::_set_info_callback(SSL_CTX *ctx)
 {
-  // Disabled for now
-  // TODO Check if we need this for QUIC
+  SSL_CTX_set_info_callback(ctx, SSLHandshakeInfoCallback);
   return true;
 }
 
