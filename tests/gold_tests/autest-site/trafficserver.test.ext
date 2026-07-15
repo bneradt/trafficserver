@@ -44,7 +44,8 @@ def MakeATSProcess(
         enable_quic=False,
         block_for_debug=False,
         log_data=default_log_data,
-        use_traffic_out=True, enable_proxy_protocol=False):
+        use_traffic_out=True,
+        enable_proxy_protocol=False):
     #####################################
     # common locations
 

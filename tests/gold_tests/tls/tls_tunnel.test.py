@@ -68,7 +68,9 @@ ts.Disk.records_config.update(
         'proxy.config.ssl.server.cert.path': '{0}'.format(ts.Variables.SSLDir),
         'proxy.config.ssl.server.private_key.path': '{0}'.format(ts.Variables.SSLDir),
         'proxy.config.http.connect_ports':
-            '{0} {1} {2} {3}'.format(ts.Variables.ssl_port, server_foo.Variables.SSL_Port, server_bar.Variables.SSL_Port, split_client_hello_server.Variables.tcp_port),
+            '{0} {1} {2} {3}'.format(
+                ts.Variables.ssl_port, server_foo.Variables.SSL_Port, server_bar.Variables.SSL_Port,
+                split_client_hello_server.Variables.tcp_port),
         'proxy.config.ssl.client.CA.cert.path': '{0}'.format(ts.Variables.SSLDir),
         'proxy.config.ssl.client.CA.cert.filename': 'signer.pem',
         'proxy.config.exec_thread.autoconfig.scale': 1.0,

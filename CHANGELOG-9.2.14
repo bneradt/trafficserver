@@ -1,0 +1,5 @@
+Changes with Apache Traffic Server 9.2.14
+  #12910 - Fix connection-level window mismatch causing 408/504 timeouts
+  #13266 - Add Claude Code project guide for the 9.2.x branch
+  #13267 - [9.2.x] Backport format scripts fixes
+  #13377 - 9.2.x: http2: Track scheduled events

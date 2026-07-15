@@ -42,8 +42,8 @@ class Test_remap_acl:
     _client_counter: int = 0
 
     def __init__(
-            self, name: str, replay_file: str, ip_allow_content: str, deactivate_ip_allow: bool,
-            acl_configuration: str, named_acls: List[Tuple[str, str]], expected_responses: List[int], proxy_protocol: bool):
+            self, name: str, replay_file: str, ip_allow_content: str, deactivate_ip_allow: bool, acl_configuration: str,
+            named_acls: List[Tuple[str, str]], expected_responses: List[int], proxy_protocol: bool):
         """Initialize the test.
 
         :param name: The name of the test.
@@ -138,6 +138,7 @@ class Test_remap_acl:
             p.Streams.stdout += Testers.ContainsExpression(
                 '.*'.join(codes), "Verifying the expected order of responses", reflags=re.DOTALL | re.MULTILINE)
 
+
 def replay_proxy_response(filename, replay_file, get_proxy_response, post_proxy_response):
     """
     replay_proxy_response writes the given replay file (which expects a single GET & POST client-request)
@@ -161,6 +162,7 @@ def replay_proxy_response(filename, replay_file, get_proxy_response, post_proxy_
     with open(replay_file, "w") as f:
         f.write(dump(data))
 
+
 IP_ALLOW_CONTENT = f'''
 ip_allow:
   - apply: in
@@ -179,7 +181,6 @@ test_ip_allow_optional_methods_pp = Test_remap_acl(
     named_acls=[],
     expected_responses=[200, 200, 403, 403, 403],
     proxy_protocol=True)
-
 """
 Test all acl combinations
 # """
@@ -192,7 +193,11 @@ for idx, test in enumerate(all_acl_combination_tests):
         test["POST response"],
     )
     Test_remap_acl(
-        "{0} {1} {2}".format(test["inline"], test["named_acl"], test["ip_allow"],),
+        "{0} {1} {2}".format(
+            test["inline"],
+            test["named_acl"],
+            test["ip_allow"],
+        ),
         replay_file=replay_file_name,
         ip_allow_content=test["ip_allow"],
         deactivate_ip_allow=False,
@@ -201,7 +206,6 @@ for idx, test in enumerate(all_acl_combination_tests):
         expected_responses=[test["GET response"], test["POST response"]],
         proxy_protocol=False,
     )
-
 """
 Test all ACL combinations - deactivate ip_allow
 """
@@ -227,7 +231,6 @@ for idx, test in enumerate(all_deactivate_ip_allow_tests):
         expected_responses=[test["GET response"], test["POST response"]],
         proxy_protocol=False,
     )
-
 """
 Test combination of named filters
 """
@@ -240,7 +243,11 @@ for idx, test in enumerate(named_filter_combination_tests):
         test["POST response"],
     )
     Test_remap_acl(
-        "{0} {1} {2}".format(test["named_acl_1"], test["named_acl_2"], test["ip_allow"],),
+        "{0} {1} {2}".format(
+            test["named_acl_1"],
+            test["named_acl_2"],
+            test["ip_allow"],
+        ),
         replay_file=replay_file_name,
         ip_allow_content=test["ip_allow"],
         deactivate_ip_allow=False,
