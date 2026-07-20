@@ -254,6 +254,12 @@ HostDBProcessor::cache()
   return &hostDB;
 }
 
+void
+HostDBProcessor::clear()
+{
+  hostDB.refcountcache->clear();
+}
+
 int
 HostDBCache::start(int flags)
 {
