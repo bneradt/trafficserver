@@ -210,6 +210,14 @@ CacheVC::do_io_write(Continuation *c, int64_t nbytes, IOBufferReader *abuf, bool
   vio.ndone     = 0;
   vio.nbytes    = nbytes;
   vio.vc_server = this;
+  if (nbytes == 0) {
+    // A zero-byte write represents an empty document, while closing without a
+    // write represents a header-only update.
+    f.allow_empty_doc = 1;
+    if (alternate.valid()) {
+      alternate.object_size_set(0);
+    }
+  }
 #ifdef DEBUG
   ink_assert(!c || c->mutex->thread_holding);
 #endif
@@ -1063,7 +1071,8 @@ CacheVC::set_http_info(CacheHTTPInfo *ainfo)
   }
 
   MIMEField *field = ainfo->m_alt->m_response_hdr.field_find(static_cast<std::string_view>(MIME_FIELD_CONTENT_LENGTH));
-  if ((field && !field->value_get_int64()) || ainfo->m_alt->m_response_hdr.status_get() == HTTPStatus::NO_CONTENT) {
+  if ((field && !field->value_get_int64()) || ainfo->m_alt->m_response_hdr.status_get() == HTTPStatus::NO_CONTENT ||
+      (f.allow_empty_doc && vio.nbytes == 0)) {
     f.allow_empty_doc = 1;
     // Set the object size here to zero in case this is a cache replace where the new object
     // length is zero but the old object was not.
